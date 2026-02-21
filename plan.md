@@ -84,11 +84,11 @@ tokentrack/
 - [x] Adapted from reference `extension.ts:4515-4734`
 
 ### Step 7: `src/tracker.ts` (~200 lines)
-- [ ] On activation: scan all sessions → compute **baseline** token snapshot
-- [ ] Every 2 minutes: re-scan → compute **delta** (current - baseline)
-- [ ] Delta = "tokens used since tracking started / last reset"
-- [ ] mtime-based cache (skip unchanged files)
-- [ ] Emits events when stats change
+- [x] On activation: scan all sessions → compute **baseline** token snapshot
+- [x] Every 2 minutes: re-scan → compute **delta** (current - baseline)
+- [x] Delta = "tokens used since tracking started / last reset"
+- [x] mtime-based cache (skip unchanged files)
+- [x] Emits events when stats change
 
 **TrackingStats interface:**
 ```typescript
