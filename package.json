@@ -1,0 +1,72 @@
+{
+  "name": "tokentrack",
+  "displayName": "TokenTrack",
+  "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
+  "version": "0.1.0",
+  "publisher": "mooracle",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "tokentrack.showStats",
+        "title": "TokenTrack: Show Token Stats"
+      },
+      {
+        "command": "tokentrack.resetTracking",
+        "title": "TokenTrack: Reset Tracking"
+      },
+      {
+        "command": "tokentrack.installHook",
+        "title": "TokenTrack: Install Commit Hook"
+      },
+      {
+        "command": "tokentrack.uninstallHook",
+        "title": "TokenTrack: Uninstall Commit Hook"
+      }
+    ],
+    "configuration": {
+      "title": "TokenTrack",
+      "properties": {
+        "tokentrack.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable TokenTrack token usage tracking"
+        },
+        "tokentrack.commitHook.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
+        },
+        "tokentrack.commitHook.format": {
+          "type": "string",
+          "default": "AI Budget: {models} | total: {total} tokens",
+          "description": "Format string for the commit message footer. Use {models}, {total}, {interactions} as placeholders."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "lint": "eslint src --ext ts",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "@types/jest": "^29.5.0",
+    "typescript": "^5.3.0"
+  }
+}

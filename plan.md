@@ -51,44 +51,44 @@ tokentrack/
 ## Implementation Steps
 
 ### Step 1: Project Scaffolding
-- `package.json` with commands: `showStats`, `resetTracking`, `installHook`, `uninstallHook`
-- Settings: `tokentrack.enabled`, `tokentrack.commitHook.enabled`, `tokentrack.commitHook.format`
-- `tsconfig.json`, `esbuild.js`, `.vscodeignore`, `.gitignore`, `.vscode/launch.json`
-- Zero runtime dependencies (only Node.js built-ins + VS Code API)
+- [x] `package.json` with commands: `showStats`, `resetTracking`, `installHook`, `uninstallHook`
+- [x] Settings: `tokentrack.enabled`, `tokentrack.commitHook.enabled`, `tokentrack.commitHook.format`
+- [x] `tsconfig.json`, `esbuild.js`, `.vscodeignore`, `.gitignore`, `.vscode/launch.json`
+- [x] Zero runtime dependencies (only Node.js built-ins + VS Code API)
 
 ### Step 2: Data Files
-- Copy `tokenEstimators.json` from reference (`/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/tokenEstimators.json`)
-- 50 models with character-to-token ratios (GPT: 0.25, Claude: 0.24)
+- [ ] Copy `tokenEstimators.json` from reference (`/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/tokenEstimators.json`)
+- [ ] 50 models with character-to-token ratios (GPT: 0.25, Claude: 0.24)
 
 ### Step 3: `src/config.ts` (~40 lines)
-- Typed getters for all extension settings
-- Listen for configuration changes
+- [ ] Typed getters for all extension settings
+- [ ] Listen for configuration changes
 
 ### Step 4: `src/tokenEstimator.ts` (~30 lines)
-- `estimateTokensFromText(text, model?)` - look up ratio, return `Math.ceil(text.length * ratio)`
-- Adapted from reference `extension.ts:5075-5088`
+- [ ] `estimateTokensFromText(text, model?)` - look up ratio, return `Math.ceil(text.length * ratio)`
+- [ ] Adapted from reference `extension.ts:5075-5088`
 
 ### Step 5: `src/sessionParser.ts` (~375 lines)
-- **Copy directly** from reference `/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/sessionParser.ts`
-- Handles both JSON and delta-based JSONL (VS Code Insiders)
-- Returns `{ tokens, interactions, modelUsage, thinkingTokens }`
-- Includes prototype pollution prevention
+- [ ] **Copy directly** from reference `/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/sessionParser.ts`
+- [ ] Handles both JSON and delta-based JSONL (VS Code Insiders)
+- [ ] Returns `{ tokens, interactions, modelUsage, thinkingTokens }`
+- [ ] Includes prototype pollution prevention
 
 ### Step 6: `src/sessionDiscovery.ts` (~150 lines)
-- Discover Copilot session files from standard locations:
+- [ ] Discover Copilot session files from standard locations:
   - macOS: `~/Library/Application Support/Code/User/globalStorage/`
   - Linux: `~/.config/Code/User/globalStorage/`
   - Windows: `%APPDATA%/Code/User/globalStorage/`
-- Scan `workspaceStorage/*/chatSessions/`, `globalStorage/github.copilot-chat/`, `emptyWindowChatSessions/`
-- Filter out non-session files (embeddings, index, cache, etc.)
-- Adapted from reference `extension.ts:4515-4734`
+- [ ] Scan `workspaceStorage/*/chatSessions/`, `globalStorage/github.copilot-chat/`, `emptyWindowChatSessions/`
+- [ ] Filter out non-session files (embeddings, index, cache, etc.)
+- [ ] Adapted from reference `extension.ts:4515-4734`
 
 ### Step 7: `src/tracker.ts` (~200 lines)
-- On activation: scan all sessions → compute **baseline** token snapshot
-- Every 2 minutes: re-scan → compute **delta** (current - baseline)
-- Delta = "tokens used since tracking started / last reset"
-- mtime-based cache (skip unchanged files)
-- Emits events when stats change
+- [ ] On activation: scan all sessions → compute **baseline** token snapshot
+- [ ] Every 2 minutes: re-scan → compute **delta** (current - baseline)
+- [ ] Delta = "tokens used since tracking started / last reset"
+- [ ] mtime-based cache (skip unchanged files)
+- [ ] Emits events when stats change
 
 **TrackingStats interface:**
 ```typescript
@@ -102,9 +102,9 @@ tokentrack/
 ```
 
 ### Step 8: `src/trackingFile.ts` (~60 lines)
-- Write `TrackingStats` to `.git/tokentrack` (key=value plain text format)
-- Read/reset the tracking file
-- Resolve workspace root via `vscode.workspace.workspaceFolders`
+- [ ] Write `TrackingStats` to `.git/tokentrack` (key=value plain text format)
+- [ ] Read/reset the tracking file
+- [ ] Resolve workspace root via `vscode.workspace.workspaceFolders`
 
 **File format** (`.git/tokentrack`):
 ```
@@ -120,15 +120,15 @@ MODEL claude-sonnet-4 500 300
 - `MODEL name inputTokens outputTokens` - per-model breakdown
 
 ### Step 9: `src/statusBar.ts` (~60 lines)
-- Right-aligned status bar item: `$(symbol-numeric) TokenTrack: 2,800`
-- Click → quick pick with per-model breakdown
-- Updates on tracker events
+- [ ] Right-aligned status bar item: `$(symbol-numeric) TokenTrack: 2,800`
+- [ ] Click → quick pick with per-model breakdown
+- [ ] Updates on tracker events
 
 ### Step 10: `src/commitHook.ts` (~80 lines)
-- `installHook()` - writes `prepare-commit-msg` to `.git/hooks/`
-- `uninstallHook()` - removes it
-- `isHookInstalled()` - checks for marker comment
-- Won't overwrite existing non-TokenTrack hooks (warns user)
+- [ ] `installHook()` - writes `prepare-commit-msg` to `.git/hooks/`
+- [ ] `uninstallHook()` - removes it
+- [ ] `isHookInstalled()` - checks for marker comment
+- [ ] Won't overwrite existing non-TokenTrack hooks (warns user)
 
 **Hook script** is pure POSIX shell (no python3/node dependency):
 - Reads `.git/tokentrack` using `grep`/`cut`/`read`
@@ -168,9 +168,9 @@ printf '\n\nAI Budget: %s | total: %s tokens' "$MODELS" "$TOTAL" >> "$COMMIT_MSG
 ```
 
 ### Step 11: `src/extension.ts` (~120 lines)
-- `activate()`: init tracker, status bar, register commands, start update timer
-- Auto-install hook if `tokentrack.commitHook.enabled` is true
-- `deactivate()`: final tracking file write, cleanup
+- [ ] `activate()`: init tracker, status bar, register commands, start update timer
+- [ ] Auto-install hook if `tokentrack.commitHook.enabled` is true
+- [ ] `deactivate()`: final tracking file write, cleanup
 
 ## Key Decisions
 
