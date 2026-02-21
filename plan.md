@@ -69,10 +69,10 @@ tokentrack/
 - [x] Adapted from reference `extension.ts:5075-5088`
 
 ### Step 5: `src/sessionParser.ts` (~375 lines)
-- [ ] **Copy directly** from reference `/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/sessionParser.ts`
-- [ ] Handles both JSON and delta-based JSONL (VS Code Insiders)
-- [ ] Returns `{ tokens, interactions, modelUsage, thinkingTokens }`
-- [ ] Includes prototype pollution prevention
+- [x] **Copy directly** from reference `/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/sessionParser.ts`
+- [x] Handles both JSON and delta-based JSONL (VS Code Insiders)
+- [x] Returns `{ tokens, interactions, modelUsage, thinkingTokens }`
+- [x] Includes prototype pollution prevention
 
 ### Step 6: `src/sessionDiscovery.ts` (~150 lines)
 - [ ] Discover Copilot session files from standard locations:
