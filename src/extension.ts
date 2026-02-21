@@ -9,8 +9,26 @@ let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
   null;
 
+const ALL_COMMANDS = [
+  'tokentrack.showStats',
+  'tokentrack.resetTracking',
+  'tokentrack.installHook',
+  'tokentrack.uninstallHook',
+];
+
 export function activate(context: vscode.ExtensionContext): void {
-  if (!isEnabled()) return;
+  if (!isEnabled()) {
+    const handler = () =>
+      vscode.window.showInformationMessage(
+        'TokenTrack is disabled. Enable it via the tokentrack.enabled setting.',
+      );
+    for (const cmd of ALL_COMMANDS) {
+      context.subscriptions.push(
+        vscode.commands.registerCommand(cmd, handler),
+      );
+    }
+    return;
+  }
 
   tracker = new Tracker();
   tracker.start();

@@ -159,13 +159,14 @@ describe('extension', () => {
       expect(ctx.subscriptions.length).toBe(7);
     });
 
-    it('does nothing when disabled', () => {
+    it('registers stub commands when disabled', () => {
       mockIsEnabled.mockReturnValue(false);
       const ctx = makeContext();
       activate(ctx);
       expect(MockTracker).not.toHaveBeenCalled();
       expect(mockCreateStatusBar).not.toHaveBeenCalled();
-      expect(ctx.subscriptions.length).toBe(0);
+      // 4 stub commands registered so users get a helpful message
+      expect(ctx.subscriptions.length).toBe(4);
     });
 
     it('writes tracking file when stats change', () => {

@@ -357,8 +357,7 @@ export function parseSessionFileContent(
 				const t = estimateTokensFromText(responseItem.value, model);
 				modelUsage[model].outputTokens += t;
 				totalOutputTokens += t;
-			}
-			if (responseItem?.message?.parts) {
+			} else if (responseItem?.message?.parts) {
 				for (const p of responseItem.message.parts) {
 					if (typeof p?.text === 'string' && p.text) {
 						const t = estimateTokensFromText(p.text, model);
