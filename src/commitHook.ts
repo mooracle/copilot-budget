@@ -8,7 +8,7 @@ const HOOK_SCRIPT = `#!/bin/sh
 ${MARKER}
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
-[ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] || [ "$COMMIT_SOURCE" = "commit" ] && exit 0
+case "$COMMIT_SOURCE" in merge|squash|commit) exit 0 ;; esac
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 TRACKING_FILE="$REPO_ROOT/.git/copilot-budget"

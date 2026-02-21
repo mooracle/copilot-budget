@@ -306,6 +306,58 @@ describe('Tracker', () => {
       tracker.dispose();
     });
 
+    it('evicts cache entries for deleted files', () => {
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 100,
+            interactions: 5,
+            modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
+            thinkingTokens: 0,
+          },
+        },
+        {
+          path: '/sessions/b.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 50,
+            interactions: 2,
+            modelUsage: { 'gpt-4o': { inputTokens: 30, outputTokens: 20 } },
+            thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      tracker.initialize();
+      expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+
+      // File b.json deleted, only a.json remains
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 100,
+            interactions: 5,
+            modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
+            thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      // a.json uses cache (same mtime), b.json evicted — no re-parse needed
+      expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+
+      tracker.dispose();
+    });
+
     it('re-parses file when mtime changes', () => {
       setupFiles([
         {

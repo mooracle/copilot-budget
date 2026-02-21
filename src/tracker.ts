@@ -62,9 +62,17 @@ export class Tracker {
     modelUsage: ModelUsage;
   } {
     const files = discoverSessionFiles();
+    const currentFiles = new Set(files);
     let totalTokens = 0;
     let totalInteractions = 0;
     const mergedModels: ModelUsage = {};
+
+    // Evict cache entries for files that no longer exist
+    for (const cached of this.fileCache.keys()) {
+      if (!currentFiles.has(cached)) {
+        this.fileCache.delete(cached);
+      }
+    }
 
     for (const file of files) {
       let stat: fs.Stats;

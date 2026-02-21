@@ -23,11 +23,14 @@ export function estimateTokensFromText(
   model: string = 'gpt-4',
 ): number {
   let tokensPerChar = DEFAULT_RATIO;
+  let bestMatchLen = 0;
 
   for (const [modelKey, ratio] of Object.entries(estimators)) {
     if (model.includes(modelKey) || model.includes(modelKey.replace(/-/g, ''))) {
-      tokensPerChar = ratio;
-      break;
+      if (modelKey.length > bestMatchLen) {
+        bestMatchLen = modelKey.length;
+        tokensPerChar = ratio;
+      }
     }
   }
 

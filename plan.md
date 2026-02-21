@@ -1,11 +1,11 @@
-# TokenTrack - VS Code Extension Plan
+# Copilot Budget - VS Code Extension Plan
 
 ## Context
 
 Build a VS Code extension that tracks GitHub Copilot token usage and optionally appends "AI Budget: MODEL, N tokens" to git commit messages. Based on the reference implementation at [rajbos/github-copilot-token-usage](https://github.com/rajbos/github-copilot-token-usage).
 
 **Two decoupled parts:**
-1. **VS Code Extension** - discovers Copilot session files, estimates tokens, writes stats to `.git/tokentrack`
+1. **VS Code Extension** - discovers Copilot session files, estimates tokens, writes stats to `.git/copilot-budget`
 2. **Git `prepare-commit-msg` hook** - reads the tracking file, appends budget line, resets the file
 
 ## Architecture
@@ -15,7 +15,7 @@ Copilot Session Files (on disk)
         ↓
   VS Code Extension (parses, estimates tokens)
         ↓
-  .git/tokentrack  ← tracking file (not committed)
+  .git/copilot-budget  ← tracking file (not committed)
         ↓
   prepare-commit-msg hook (reads file, appends to commit msg, resets)
 ```
@@ -23,7 +23,7 @@ Copilot Session Files (on disk)
 ## File Structure
 
 ```
-tokentrack/
+copilot-budget/
 ├── package.json                  # Extension manifest
 ├── tsconfig.json
 ├── esbuild.js
@@ -38,7 +38,7 @@ tokentrack/
 │   ├── tokenEstimator.ts         # Character-to-token ratio estimation
 │   ├── sessionDiscovery.ts       # Find session files on disk
 │   ├── tracker.ts                # Core: baseline/delta tracking logic
-│   ├── trackingFile.ts           # Read/write .git/tokentrack
+│   ├── trackingFile.ts           # Read/write .git/copilot-budget
 │   ├── statusBar.ts              # Status bar display
 │   ├── commitHook.ts             # Install/uninstall the git hook
 │   └── config.ts                 # Extension settings
@@ -52,7 +52,7 @@ tokentrack/
 
 ### Step 1: Project Scaffolding
 - [x] `package.json` with commands: `showStats`, `resetTracking`, `installHook`, `uninstallHook`
-- [x] Settings: `tokentrack.enabled`, `tokentrack.commitHook.enabled`, `tokentrack.commitHook.format`
+- [x] Settings: `copilot-budget.enabled`, `copilot-budget.commitHook.enabled`
 - [x] `tsconfig.json`, `esbuild.js`, `.vscodeignore`, `.gitignore`, `.vscode/launch.json`
 - [x] Zero runtime dependencies (only Node.js built-ins + VS Code API)
 
@@ -102,11 +102,11 @@ tokentrack/
 ```
 
 ### Step 8: `src/trackingFile.ts` (~60 lines)
-- [x] Write `TrackingStats` to `.git/tokentrack` (key=value plain text format)
+- [x] Write `TrackingStats` to `.git/copilot-budget` (key=value plain text format)
 - [x] Read/reset the tracking file
 - [x] Resolve workspace root via `vscode.workspace.workspaceFolders`
 
-**File format** (`.git/tokentrack`):
+**File format** (`.git/copilot-budget`):
 ```
 TOTAL_TOKENS=2800
 INTERACTIONS=15
@@ -120,7 +120,7 @@ MODEL claude-sonnet-4 500 300
 - `MODEL name inputTokens outputTokens` - per-model breakdown
 
 ### Step 9: `src/statusBar.ts` (~60 lines)
-- [x] Right-aligned status bar item: `$(symbol-numeric) TokenTrack: 2,800`
+- [x] Right-aligned status bar item: `$(symbol-numeric) Copilot Budget: 2,800`
 - [x] Click → quick pick with per-model breakdown
 - [x] Updates on tracker events
 
@@ -128,10 +128,10 @@ MODEL claude-sonnet-4 500 300
 - [x] `installHook()` - writes `prepare-commit-msg` to `.git/hooks/`
 - [x] `uninstallHook()` - removes it
 - [x] `isHookInstalled()` - checks for marker comment
-- [x] Won't overwrite existing non-TokenTrack hooks (warns user)
+- [x] Won't overwrite existing non-Copilot Budget hooks (warns user)
 
 **Hook script** is pure POSIX shell (no python3/node dependency):
-- Reads `.git/tokentrack` using `grep`/`cut`/`read`
+- Reads `.git/copilot-budget` using `grep`/`cut`/`read`
 - Lists all models with their token counts
 - Appends structured footer, e.g.:
   ```
@@ -144,13 +144,13 @@ MODEL claude-sonnet-4 500 300
 **Hook script example:**
 ```sh
 #!/bin/sh
-# TokenTrack prepare-commit-msg hook
+# Copilot Budget prepare-commit-msg hook
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
 [ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] && exit 0
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-TRACKING_FILE="$REPO_ROOT/.git/tokentrack"
+TRACKING_FILE="$REPO_ROOT/.git/copilot-budget"
 [ -f "$TRACKING_FILE" ] || exit 0
 
 TOTAL=$(grep '^TOTAL_TOKENS=' "$TRACKING_FILE" | cut -d= -f2)
@@ -169,14 +169,14 @@ printf '\n\nAI Budget: %s | total: %s tokens' "$MODELS" "$TOTAL" >> "$COMMIT_MSG
 
 ### Step 11: `src/extension.ts` (~120 lines)
 - [x] `activate()`: init tracker, status bar, register commands, start update timer
-- [x] Auto-install hook if `tokentrack.commitHook.enabled` is true
+- [x] Auto-install hook if `copilot-budget.commitHook.enabled` is true
 - [x] `deactivate()`: final tracking file write, cleanup
 
 ## Key Decisions
 
 | Decision | Choice | Why |
 |----------|--------|-----|
-| Tracking file location | `.git/tokentrack` | Auto-excluded from VCS, hook finds it via `git rev-parse` |
+| Tracking file location | `.git/copilot-budget` | Auto-excluded from VCS, hook finds it via `git rev-parse` |
 | Hook parsing | Pure POSIX shell | No runtime deps, cross-platform (Git Bash on Windows), key=value format |
 | Tracking file format | Key=value plain text | Parseable with grep/cut/read, no JSON parser needed |
 | Token estimation | Character-to-token ratio | Same as reference; no tokenizer dependency |
@@ -188,10 +188,10 @@ printf '\n\nAI Budget: %s | total: %s tokens' "$MODELS" "$TOTAL" >> "$COMMIT_MSG
 
 1. **Build**: `npm install && npm run compile` - should produce `dist/extension.js`
 2. **Debug**: F5 in VS Code → Extension Development Host opens
-3. **Status bar**: Should show "TokenTrack: Loading..." then token count after scan
+3. **Status bar**: Should show "Copilot Budget: 0" then token count after scan
 4. **Use Copilot Chat**: Token count should increase on next 2-min refresh
-5. **Show Stats**: Command palette → "TokenTrack: Show Token Stats" → shows per-model breakdown
-6. **Install Hook**: Command palette → "TokenTrack: Install Commit Hook" → check `.git/hooks/prepare-commit-msg` exists
+5. **Show Stats**: Command palette → "Copilot Budget: Show Token Stats" → shows per-model breakdown
+6. **Install Hook**: Command palette → "Copilot Budget: Install Commit Hook" → check `.git/hooks/prepare-commit-msg` exists
 7. **Commit test**: Make a commit → verify "AI Budget: model, N tokens" appended
 8. **Reset**: After commit, tracking file should reset to 0
 9. **Package**: `npx vsce package` → produces `.vsix` file

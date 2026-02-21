@@ -235,9 +235,8 @@ describe('commitHook', () => {
       installHook();
 
       // Skips merge, squash, and amend commits
-      expect(writtenContent).toContain('"$COMMIT_SOURCE" = "merge"');
-      expect(writtenContent).toContain('"$COMMIT_SOURCE" = "squash"');
-      expect(writtenContent).toContain('"$COMMIT_SOURCE" = "commit"');
+      expect(writtenContent).toContain('case "$COMMIT_SOURCE"');
+      expect(writtenContent).toContain('merge|squash|commit');
       // Uses git rev-parse to find repo root
       expect(writtenContent).toContain('git rev-parse --show-toplevel');
       // Reads the tracking file

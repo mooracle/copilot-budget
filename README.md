@@ -5,7 +5,7 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 ## Features
 
 - **Real-time token tracking** — monitors Copilot session files and displays a running token count in the status bar.
-- **Per-model breakdown** — see input and output tokens grouped by model (GPT-4, GPT-3.5, etc.).
+- **Per-model breakdown** — see input and output tokens grouped by model (GPT-4o, Claude, Gemini, etc.).
 - **Commit hook integration** — automatically appends an `AI Budget:` line to commit messages showing tokens consumed since the last commit.
 - **Session-aware** — tracks only tokens used since VS Code was opened (baseline subtraction), so counts reset each session.
 - **Lightweight** — polls every two minutes with file-level caching; no network calls.
@@ -39,11 +39,19 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 2. **Parsing** — Each session file is parsed to extract model names, input/output token counts, and interaction counts. When token counts are not available directly, the extension estimates them from message text length using per-model character-to-token ratios.
 3. **Baseline** — A snapshot is taken at startup so only tokens used during the current session are reported.
 4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.
-5. **Commit hook** — When installed, a `prepare-commit-msg` shell script reads the tracking file (`.git/copilot-budget`) and appends per-model token usage to the commit message body.
+5. **Commit hook** — When installed, a `prepare-commit-msg` shell script reads the tracking file (`.git/copilot-budget`) and appends per-model token usage to the commit message body. After appending, the hook resets the tracking file so the next commit only includes tokens used since the previous commit.
+
+> **Note:** If a `prepare-commit-msg` hook already exists that was not installed by Copilot Budget, the install command will not overwrite it. Remove the existing hook first or integrate manually.
 
 ## Supported Editors
 
-- Visual Studio Code 1.85+
+- Visual Studio Code 1.85+ (Stable)
+- Visual Studio Code Insiders
+- Visual Studio Code Exploration builds
+- VSCodium
+- Cursor
+
+Also works in remote environments (Codespaces, WSL, SSH Remote).
 
 ## Requirements
 

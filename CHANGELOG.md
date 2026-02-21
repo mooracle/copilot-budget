@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Real-time token usage tracking for GitHub Copilot
-- Status bar display showing tokens used and estimated cost
+- Status bar display showing tokens used
 - Quick pick panel with detailed session statistics
 - Git commit hook to append AI budget info to commit messages
 - Commands: Show Token Stats, Reset Tracking, Install/Uninstall Commit Hook
