@@ -102,9 +102,9 @@ tokentrack/
 ```
 
 ### Step 8: `src/trackingFile.ts` (~60 lines)
-- [ ] Write `TrackingStats` to `.git/tokentrack` (key=value plain text format)
-- [ ] Read/reset the tracking file
-- [ ] Resolve workspace root via `vscode.workspace.workspaceFolders`
+- [x] Write `TrackingStats` to `.git/tokentrack` (key=value plain text format)
+- [x] Read/reset the tracking file
+- [x] Resolve workspace root via `vscode.workspace.workspaceFolders`
 
 **File format** (`.git/tokentrack`):
 ```
