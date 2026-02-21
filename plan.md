@@ -57,8 +57,8 @@ tokentrack/
 - [x] Zero runtime dependencies (only Node.js built-ins + VS Code API)
 
 ### Step 2: Data Files
-- [ ] Copy `tokenEstimators.json` from reference (`/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/tokenEstimators.json`)
-- [ ] 50 models with character-to-token ratios (GPT: 0.25, Claude: 0.24)
+- [x] Copy `tokenEstimators.json` from reference (`/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/tokenEstimators.json`)
+- [x] 50 models with character-to-token ratios (GPT: 0.25, Claude: 0.24)
 
 ### Step 3: `src/config.ts` (~40 lines)
 - [ ] Typed getters for all extension settings
