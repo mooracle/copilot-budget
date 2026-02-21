@@ -61,8 +61,8 @@ tokentrack/
 - [x] 50 models with character-to-token ratios (GPT: 0.25, Claude: 0.24)
 
 ### Step 3: `src/config.ts` (~40 lines)
-- [ ] Typed getters for all extension settings
-- [ ] Listen for configuration changes
+- [x] Typed getters for all extension settings
+- [x] Listen for configuration changes
 
 ### Step 4: `src/tokenEstimator.ts` (~30 lines)
 - [ ] `estimateTokensFromText(text, model?)` - look up ratio, return `Math.ceil(text.length * ratio)`

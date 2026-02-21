@@ -1,13 +1,28 @@
 // Minimal VS Code API mock for unit tests
+// Store for overriding config values in tests
+export const __configStore: Record<string, any> = {};
+export const __configChangeListeners: Array<(e: any) => void> = [];
+
 export const workspace = {
   getConfiguration: (section?: string) => ({
-    get: (key: string, defaultValue?: any) => defaultValue,
+    get: <T>(key: string, defaultValue?: T): T => {
+      const fullKey = section ? `${section}.${key}` : key;
+      return fullKey in __configStore ? __configStore[fullKey] : (defaultValue as T);
+    },
     has: () => false,
     inspect: () => undefined,
     update: async () => {},
   }),
   workspaceFolders: undefined as any,
-  onDidChangeConfiguration: () => ({ dispose: () => {} }),
+  onDidChangeConfiguration: (listener: (e: any) => void) => {
+    __configChangeListeners.push(listener);
+    return {
+      dispose: () => {
+        const idx = __configChangeListeners.indexOf(listener);
+        if (idx >= 0) __configChangeListeners.splice(idx, 1);
+      },
+    };
+  },
 };
 
 export const window = {
