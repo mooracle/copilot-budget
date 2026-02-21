@@ -4,12 +4,35 @@
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
   "version": "0.1.0",
   "publisher": "mooracle",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mooracle/copilot-budget"
+  },
+  "bugs": {
+    "url": "https://github.com/mooracle/copilot-budget/issues"
+  },
+  "homepage": "https://github.com/mooracle/copilot-budget#readme",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "Other"
   ],
+  "keywords": [
+    "copilot",
+    "budget",
+    "token",
+    "usage",
+    "tracking",
+    "ai",
+    "github-copilot"
+  ],
+  "icon": "assets/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -53,7 +76,8 @@
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "lint": "eslint src --ext ts",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "package": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
