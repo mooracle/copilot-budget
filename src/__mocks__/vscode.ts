@@ -34,10 +34,10 @@ export const window = {
     hide: () => {},
     dispose: () => {},
   }),
-  showInformationMessage: async () => undefined,
-  showWarningMessage: async () => undefined,
-  showErrorMessage: async () => undefined,
-  showQuickPick: async () => undefined,
+  showInformationMessage: jest.fn(async () => undefined),
+  showWarningMessage: jest.fn(async () => undefined),
+  showErrorMessage: jest.fn(async () => undefined),
+  showQuickPick: jest.fn(async () => undefined),
 };
 
 export const commands = {

@@ -125,10 +125,10 @@ MODEL claude-sonnet-4 500 300
 - [x] Updates on tracker events
 
 ### Step 10: `src/commitHook.ts` (~80 lines)
-- [ ] `installHook()` - writes `prepare-commit-msg` to `.git/hooks/`
-- [ ] `uninstallHook()` - removes it
-- [ ] `isHookInstalled()` - checks for marker comment
-- [ ] Won't overwrite existing non-TokenTrack hooks (warns user)
+- [x] `installHook()` - writes `prepare-commit-msg` to `.git/hooks/`
+- [x] `uninstallHook()` - removes it
+- [x] `isHookInstalled()` - checks for marker comment
+- [x] Won't overwrite existing non-TokenTrack hooks (warns user)
 
 **Hook script** is pure POSIX shell (no python3/node dependency):
 - Reads `.git/tokentrack` using `grep`/`cut`/`read`
