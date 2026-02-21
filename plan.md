@@ -75,13 +75,13 @@ tokentrack/
 - [x] Includes prototype pollution prevention
 
 ### Step 6: `src/sessionDiscovery.ts` (~150 lines)
-- [ ] Discover Copilot session files from standard locations:
+- [x] Discover Copilot session files from standard locations:
   - macOS: `~/Library/Application Support/Code/User/globalStorage/`
   - Linux: `~/.config/Code/User/globalStorage/`
   - Windows: `%APPDATA%/Code/User/globalStorage/`
-- [ ] Scan `workspaceStorage/*/chatSessions/`, `globalStorage/github.copilot-chat/`, `emptyWindowChatSessions/`
-- [ ] Filter out non-session files (embeddings, index, cache, etc.)
-- [ ] Adapted from reference `extension.ts:4515-4734`
+- [x] Scan `workspaceStorage/*/chatSessions/`, `globalStorage/github.copilot-chat/`, `emptyWindowChatSessions/`
+- [x] Filter out non-session files (embeddings, index, cache, etc.)
+- [x] Adapted from reference `extension.ts:4515-4734`
 
 ### Step 7: `src/tracker.ts` (~200 lines)
 - [ ] On activation: scan all sessions → compute **baseline** token snapshot
