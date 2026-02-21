@@ -28,7 +28,6 @@
     "ai",
     "github-copilot"
   ],
-  "icon": "assets/icon.png",
   "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
@@ -77,7 +76,7 @@
     "watch": "node esbuild.js --watch",
     "lint": "eslint src --ext ts",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "package": "vsce package"
+    "package": "npx @vscode/vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
