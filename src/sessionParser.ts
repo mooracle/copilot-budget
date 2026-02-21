@@ -289,7 +289,11 @@ export function parseSessionFileContent(
 						addOutput(model, responseText);
 					}
 					if (thinkingText) {
-						totalThinkingTokens += estimateTokensFromText(thinkingText, model);
+						const thinkT = estimateTokensFromText(thinkingText, model);
+						totalThinkingTokens += thinkT;
+						const tm = ensureModel(model);
+						if (!modelUsage[tm]) {modelUsage[tm] = { inputTokens: 0, outputTokens: 0 };}
+						modelUsage[tm].outputTokens += thinkT;
 					}
 				}
 			}
@@ -320,7 +324,7 @@ export function parseSessionFileContent(
 	}
 
 	const requests = Array.isArray(sessionJson.requests) ? sessionJson.requests : (Array.isArray(sessionJson.history) ? sessionJson.history : []);
-	interactions = requests.length;
+	interactions = requests.filter((r: any) => r?.message?.text?.trim() || r?.message?.parts?.some((p: any) => p?.text?.trim())).length;
 	for (const request of requests) {
 		const modelRaw = getModelFromRequest ? getModelFromRequest(request) : (request?.model || defaultModel);
 		const model = normalizeModelId(modelRaw, defaultModel);
@@ -344,7 +348,9 @@ export function parseSessionFileContent(
 		for (const responseItem of responses) {
 			// Separate thinking tokens
 			if (responseItem?.kind === 'thinking' && typeof responseItem?.value === 'string' && responseItem.value) {
-				totalThinkingTokens += estimateTokensFromText(responseItem.value, model);
+				const thinkT = estimateTokensFromText(responseItem.value, model);
+				totalThinkingTokens += thinkT;
+				modelUsage[model].outputTokens += thinkT;
 				continue;
 			}
 			if (typeof responseItem?.value === 'string' && responseItem.value) {
@@ -371,5 +377,3 @@ export function parseSessionFileContent(
 		thinkingTokens: totalThinkingTokens
 	};
 }
-
-export default { parseSessionFileContent };

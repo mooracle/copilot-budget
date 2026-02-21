@@ -124,7 +124,7 @@ describe('sessionParser', () => {
       };
       const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
       expect(result.thinkingTokens).toBe(7);
-      expect(result.modelUsage['claude-sonnet-4'].outputTokens).toBe(4); // thinking not in model output
+      expect(result.modelUsage['claude-sonnet-4'].outputTokens).toBe(11); // output (4) + thinking (7) attributed to model
       expect(result.tokens).toBe(1 + 4 + 7); // input + output + thinking
     });
 
@@ -235,7 +235,7 @@ describe('sessionParser', () => {
       ];
       const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
       expect(result.thinkingTokens).toBe(3);
-      expect(result.modelUsage['claude-sonnet-4'].outputTokens).toBe(2);
+      expect(result.modelUsage['claude-sonnet-4'].outputTokens).toBe(5); // output (2) + thinking (3) attributed to model
     });
 
     it('falls back to JSON parse for non-delta JSONL', () => {

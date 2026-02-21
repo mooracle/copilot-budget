@@ -46,7 +46,7 @@ export function isHookInstalled(): boolean {
   }
 }
 
-export async function installHook(): Promise<boolean> {
+export function installHook(): boolean {
   const hookPath = getHookPath();
   if (!hookPath) {
     vscode.window.showErrorMessage('TokenTrack: No workspace folder found.');
@@ -80,7 +80,7 @@ export async function installHook(): Promise<boolean> {
   }
 }
 
-export async function uninstallHook(): Promise<boolean> {
+export function uninstallHook(): boolean {
   const hookPath = getHookPath();
   if (!hookPath) {
     vscode.window.showErrorMessage('TokenTrack: No workspace folder found.');

@@ -55,7 +55,7 @@ describe('commitHook', () => {
   });
 
   describe('installHook', () => {
-    it('writes hook script with marker and correct permissions', async () => {
+    it('writes hook script with marker and correct permissions', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockImplementation(() => {
         throw new Error('ENOENT');
@@ -63,7 +63,7 @@ describe('commitHook', () => {
       (mockFs.existsSync as jest.Mock).mockReturnValue(true);
       mockFs.writeFileSync.mockImplementation(() => {});
 
-      const result = await installHook();
+      const result = installHook();
 
       expect(result).toBe(true);
       expect(mockFs.writeFileSync).toHaveBeenCalledTimes(1);
@@ -80,7 +80,7 @@ describe('commitHook', () => {
       );
     });
 
-    it('creates hooks directory if it does not exist', async () => {
+    it('creates hooks directory if it does not exist', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockImplementation(() => {
         throw new Error('ENOENT');
@@ -89,7 +89,7 @@ describe('commitHook', () => {
       mockFs.mkdirSync.mockImplementation(() => '' as any);
       mockFs.writeFileSync.mockImplementation(() => {});
 
-      const result = await installHook();
+      const result = installHook();
 
       expect(result).toBe(true);
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
@@ -98,11 +98,11 @@ describe('commitHook', () => {
       );
     });
 
-    it('refuses to overwrite a non-TokenTrack hook', async () => {
+    it('refuses to overwrite a non-TokenTrack hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue('#!/bin/sh\n# husky hook\nexit 0\n');
 
-      const result = await installHook();
+      const result = installHook();
 
       expect(result).toBe(false);
       expect(mockFs.writeFileSync).not.toHaveBeenCalled();
@@ -111,20 +111,20 @@ describe('commitHook', () => {
       );
     });
 
-    it('overwrites an existing TokenTrack hook', async () => {
+    it('overwrites an existing TokenTrack hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nold script`);
       (mockFs.existsSync as jest.Mock).mockReturnValue(true);
       mockFs.writeFileSync.mockImplementation(() => {});
 
-      const result = await installHook();
+      const result = installHook();
 
       expect(result).toBe(true);
       expect(mockFs.writeFileSync).toHaveBeenCalledTimes(1);
     });
 
-    it('returns false when no workspace folder', async () => {
-      const result = await installHook();
+    it('returns false when no workspace folder', () => {
+      const result = installHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -132,7 +132,7 @@ describe('commitHook', () => {
       );
     });
 
-    it('returns false when write fails', async () => {
+    it('returns false when write fails', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockImplementation(() => {
         throw new Error('ENOENT');
@@ -142,7 +142,7 @@ describe('commitHook', () => {
         throw new Error('EACCES');
       });
 
-      const result = await installHook();
+      const result = installHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -152,12 +152,12 @@ describe('commitHook', () => {
   });
 
   describe('uninstallHook', () => {
-    it('removes a TokenTrack hook', async () => {
+    it('removes a TokenTrack hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nscript`);
       mockFs.unlinkSync.mockImplementation(() => {});
 
-      const result = await uninstallHook();
+      const result = uninstallHook();
 
       expect(result).toBe(true);
       expect(mockFs.unlinkSync).toHaveBeenCalledWith(
@@ -168,11 +168,11 @@ describe('commitHook', () => {
       );
     });
 
-    it('refuses to remove a non-TokenTrack hook', async () => {
+    it('refuses to remove a non-TokenTrack hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue('#!/bin/sh\n# husky hook\n');
 
-      const result = await uninstallHook();
+      const result = uninstallHook();
 
       expect(result).toBe(false);
       expect(mockFs.unlinkSync).not.toHaveBeenCalled();
@@ -181,13 +181,13 @@ describe('commitHook', () => {
       );
     });
 
-    it('handles no hook file gracefully', async () => {
+    it('handles no hook file gracefully', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockImplementation(() => {
         throw new Error('ENOENT');
       });
 
-      const result = await uninstallHook();
+      const result = uninstallHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
@@ -195,8 +195,8 @@ describe('commitHook', () => {
       );
     });
 
-    it('returns false when no workspace folder', async () => {
-      const result = await uninstallHook();
+    it('returns false when no workspace folder', () => {
+      const result = uninstallHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -204,14 +204,14 @@ describe('commitHook', () => {
       );
     });
 
-    it('returns false when unlink fails', async () => {
+    it('returns false when unlink fails', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nscript`);
       mockFs.unlinkSync.mockImplementation(() => {
         throw new Error('EACCES');
       });
 
-      const result = await uninstallHook();
+      const result = uninstallHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -221,7 +221,7 @@ describe('commitHook', () => {
   });
 
   describe('hook script content', () => {
-    it('includes essential shell logic', async () => {
+    it('includes essential shell logic', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockImplementation(() => {
         throw new Error('ENOENT');
@@ -232,7 +232,7 @@ describe('commitHook', () => {
         writtenContent = data;
       });
 
-      await installHook();
+      installHook();
 
       // Skips merge and squash commits
       expect(writtenContent).toContain('"$COMMIT_SOURCE" = "merge"');

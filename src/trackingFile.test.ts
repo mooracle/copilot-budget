@@ -1,4 +1,4 @@
-import { writeTrackingFile, readTrackingFile, resetTrackingFile } from './trackingFile';
+import { writeTrackingFile } from './trackingFile';
 import { TrackingStats } from './tracker';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
@@ -111,108 +111,6 @@ describe('trackingFile', () => {
       expect(writtenContent).toContain('TOTAL_TOKENS=0');
       expect(writtenContent).toContain('INTERACTIONS=0');
       expect(writtenContent).not.toContain('MODEL ');
-    });
-  });
-
-  describe('readTrackingFile', () => {
-    it('reads and parses the tracking file', () => {
-      setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue(
-        'TOTAL_TOKENS=3100\nINTERACTIONS=15\nSINCE=2024-01-15T10:30:00Z\nMODEL gpt-4o 1500 800\nMODEL claude-sonnet-4 500 300\n',
-      );
-
-      const stats = readTrackingFile();
-      expect(stats).not.toBeNull();
-      expect(stats!.totalTokens).toBe(3100);
-      expect(stats!.interactions).toBe(15);
-      expect(stats!.since).toBe('2024-01-15T10:30:00Z');
-      expect(stats!.models['gpt-4o']).toEqual({ inputTokens: 1500, outputTokens: 800 });
-      expect(stats!.models['claude-sonnet-4']).toEqual({ inputTokens: 500, outputTokens: 300 });
-    });
-
-    it('returns null when no workspace folder', () => {
-      clearWorkspace();
-      expect(readTrackingFile()).toBeNull();
-    });
-
-    it('returns null when file does not exist', () => {
-      setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
-
-      expect(readTrackingFile()).toBeNull();
-    });
-
-    it('returns null when file is empty', () => {
-      setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue('');
-
-      expect(readTrackingFile()).toBeNull();
-    });
-
-    it('handles malformed lines gracefully', () => {
-      setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue(
-        'TOTAL_TOKENS=abc\nINTERACTIONS=15\nSINCE=2024-01-15T10:30:00Z\nMODEL incomplete\nRANDOM_LINE=123\n',
-      );
-
-      const stats = readTrackingFile();
-      expect(stats).not.toBeNull();
-      expect(stats!.totalTokens).toBe(0); // NaN falls back to 0
-      expect(stats!.interactions).toBe(15);
-      expect(Object.keys(stats!.models)).toHaveLength(0); // incomplete MODEL line skipped
-    });
-  });
-
-  describe('resetTrackingFile', () => {
-    it('truncates the tracking file', () => {
-      setupWorkspace('/project');
-      mockFs.writeFileSync.mockImplementation(() => {});
-
-      const result = resetTrackingFile();
-      expect(result).toBe(true);
-      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        expect.stringMatching(/\.git[/\\]tokentrack$/),
-        '',
-        'utf-8',
-      );
-    });
-
-    it('returns false when no workspace folder', () => {
-      clearWorkspace();
-      expect(resetTrackingFile()).toBe(false);
-    });
-
-    it('returns false when write fails', () => {
-      setupWorkspace('/project');
-      mockFs.writeFileSync.mockImplementation(() => {
-        throw new Error('EACCES');
-      });
-
-      expect(resetTrackingFile()).toBe(false);
-    });
-  });
-
-  describe('roundtrip', () => {
-    it('write then read produces equivalent stats', () => {
-      setupWorkspace('/project');
-      let storedContent = '';
-      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
-        storedContent = data;
-      });
-
-      writeTrackingFile(sampleStats);
-
-      mockFs.readFileSync.mockReturnValue(storedContent);
-      const readBack = readTrackingFile();
-
-      expect(readBack).not.toBeNull();
-      expect(readBack!.totalTokens).toBe(sampleStats.totalTokens);
-      expect(readBack!.interactions).toBe(sampleStats.interactions);
-      expect(readBack!.since).toBe(sampleStats.since);
-      expect(readBack!.models['gpt-4o']).toEqual(sampleStats.models['gpt-4o']);
-      expect(readBack!.models['claude-sonnet-4']).toEqual(sampleStats.models['claude-sonnet-4']);
     });
   });
 });

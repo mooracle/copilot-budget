@@ -40,9 +40,12 @@ export const window = {
   showQuickPick: jest.fn(async () => undefined),
 };
 
+export const __commandCallbacks: Record<string, (...args: any[]) => any> = {};
+
 export const commands = {
-  registerCommand: (command: string, callback: (...args: any[]) => any) => ({
-    dispose: () => {},
+  registerCommand: jest.fn((command: string, callback: (...args: any[]) => any) => {
+    __commandCallbacks[command] = callback;
+    return { dispose: () => {} };
   }),
 };
 

@@ -5,6 +5,7 @@ jest.mock('./commitHook');
 jest.mock('./config');
 
 import * as vscode from 'vscode';
+import { __commandCallbacks } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
@@ -53,6 +54,7 @@ let configChangedCallback: ((e: any) => void) | null;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  for (const key of Object.keys(__commandCallbacks)) delete __commandCallbacks[key];
 
   statsChangedListeners = [];
   configChangedCallback = null;
@@ -89,8 +91,8 @@ beforeEach(() => {
   mockCreateStatusBar.mockReturnValue(mockStatusBarItem as any);
   mockShowStatsQuickPick.mockResolvedValue(undefined);
   mockWriteTrackingFile.mockReturnValue(true);
-  mockInstallHook.mockResolvedValue(true);
-  mockUninstallHook.mockResolvedValue(true);
+  mockInstallHook.mockReturnValue(true);
+  mockUninstallHook.mockReturnValue(true);
   mockIsHookInstalled.mockReturnValue(false);
   mockIsEnabled.mockReturnValue(true);
   mockIsCommitHookEnabled.mockReturnValue(false);
@@ -222,23 +224,32 @@ describe('extension', () => {
       const ctx = makeContext();
       activate(ctx);
 
-      // Find the showStats command registration
-      const registerCommand = vscode.commands
-        .registerCommand as jest.MockedFunction<
-        typeof vscode.commands.registerCommand
-      >;
-
-      // The vscode mock just returns a disposable, so we need to capture the callback
-      // We'll verify the command was registered by checking registerCommand calls would be tracked
-      // Since the mock doesn't track calls, let's verify through the module integration
-      expect(mockCreateStatusBar).toHaveBeenCalled();
+      __commandCallbacks['tokentrack.showStats']();
+      expect(mockShowStatsQuickPick).toHaveBeenCalledWith(trackerInstance);
     });
 
     it('resetTracking command calls tracker.reset', () => {
       const ctx = makeContext();
       activate(ctx);
-      // The command is registered; we verify tracker.reset is wired by checking it's callable
-      expect(trackerInstance.reset).not.toHaveBeenCalled();
+
+      __commandCallbacks['tokentrack.resetTracking']();
+      expect(trackerInstance.reset).toHaveBeenCalledTimes(1);
+    });
+
+    it('installHook command calls installHook', () => {
+      const ctx = makeContext();
+      activate(ctx);
+
+      __commandCallbacks['tokentrack.installHook']();
+      expect(mockInstallHook).toHaveBeenCalledTimes(1);
+    });
+
+    it('uninstallHook command calls uninstallHook', () => {
+      const ctx = makeContext();
+      activate(ctx);
+
+      __commandCallbacks['tokentrack.uninstallHook']();
+      expect(mockUninstallHook).toHaveBeenCalledTimes(1);
     });
   });
 

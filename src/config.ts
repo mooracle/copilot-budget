@@ -14,13 +14,6 @@ export function isCommitHookEnabled(): boolean {
   return cfg().get<boolean>('commitHook.enabled', false);
 }
 
-export function getCommitHookFormat(): string {
-  return cfg().get<string>(
-    'commitHook.format',
-    'AI Budget: {models} | total: {total} tokens',
-  );
-}
-
 export function onConfigChanged(
   callback: (e: vscode.ConfigurationChangeEvent) => void,
 ): vscode.Disposable {

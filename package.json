@@ -45,11 +45,6 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
-        },
-        "tokentrack.commitHook.format": {
-          "type": "string",
-          "default": "AI Budget: {models} | total: {total} tokens",
-          "description": "Format string for the commit message footer. Use {models}, {total}, {interactions} as placeholders."
         }
       }
     }

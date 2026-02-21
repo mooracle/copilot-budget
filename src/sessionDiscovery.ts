@@ -118,7 +118,7 @@ export function discoverSessionFiles(): string[] {
             if (fs.existsSync(chatDir)) {
               const sessionFiles = fs
                 .readdirSync(chatDir)
-                .filter((f) => f.endsWith('.json') || f.endsWith('.jsonl'))
+                .filter((f) => (f.endsWith('.json') || f.endsWith('.jsonl')) && !isNonSessionFile(f))
                 .map((f) => path.join(chatDir, f));
               files.push(...sessionFiles);
             }
@@ -137,7 +137,7 @@ export function discoverSessionFiles(): string[] {
       if (fs.existsSync(emptyWindow)) {
         const sessionFiles = fs
           .readdirSync(emptyWindow)
-          .filter((f) => f.endsWith('.json') || f.endsWith('.jsonl'))
+          .filter((f) => (f.endsWith('.json') || f.endsWith('.jsonl')) && !isNonSessionFile(f))
           .map((f) => path.join(emptyWindow, f));
         files.push(...sessionFiles);
       }

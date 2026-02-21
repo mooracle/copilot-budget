@@ -1,7 +1,7 @@
 import { __configStore, __configChangeListeners } from './__mocks__/vscode';
 
 // Must import after mock is set up (jest resolves vscode → __mocks__/vscode)
-import { isEnabled, isCommitHookEnabled, getCommitHookFormat, onConfigChanged } from './config';
+import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 
 beforeEach(() => {
   // Clear overrides between tests
@@ -29,17 +29,6 @@ describe('config', () => {
     it('returns true when overridden', () => {
       __configStore['tokentrack.commitHook.enabled'] = true;
       expect(isCommitHookEnabled()).toBe(true);
-    });
-  });
-
-  describe('getCommitHookFormat', () => {
-    it('returns default format string', () => {
-      expect(getCommitHookFormat()).toBe('AI Budget: {models} | total: {total} tokens');
-    });
-
-    it('returns custom format when overridden', () => {
-      __configStore['tokentrack.commitHook.format'] = 'Tokens: {total}';
-      expect(getCommitHookFormat()).toBe('Tokens: {total}');
     });
   });
 
