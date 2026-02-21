@@ -65,8 +65,8 @@ tokentrack/
 - [x] Listen for configuration changes
 
 ### Step 4: `src/tokenEstimator.ts` (~30 lines)
-- [ ] `estimateTokensFromText(text, model?)` - look up ratio, return `Math.ceil(text.length * ratio)`
-- [ ] Adapted from reference `extension.ts:5075-5088`
+- [x] `estimateTokensFromText(text, model?)` - look up ratio, return `Math.ceil(text.length * ratio)`
+- [x] Adapted from reference `extension.ts:5075-5088`
 
 ### Step 5: `src/sessionParser.ts` (~375 lines)
 - [ ] **Copy directly** from reference `/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/sessionParser.ts`
