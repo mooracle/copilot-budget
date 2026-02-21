@@ -168,9 +168,9 @@ printf '\n\nAI Budget: %s | total: %s tokens' "$MODELS" "$TOTAL" >> "$COMMIT_MSG
 ```
 
 ### Step 11: `src/extension.ts` (~120 lines)
-- [ ] `activate()`: init tracker, status bar, register commands, start update timer
-- [ ] Auto-install hook if `tokentrack.commitHook.enabled` is true
-- [ ] `deactivate()`: final tracking file write, cleanup
+- [x] `activate()`: init tracker, status bar, register commands, start update timer
+- [x] Auto-install hook if `tokentrack.commitHook.enabled` is true
+- [x] `deactivate()`: final tracking file write, cleanup
 
 ## Key Decisions
 
