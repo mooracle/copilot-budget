@@ -51,6 +51,11 @@ export enum StatusBarAlignment {
   Right = 2,
 }
 
+export enum QuickPickItemKind {
+  Default = 0,
+  Separator = -1,
+}
+
 export class Uri {
   static file(path: string) {
     return { fsPath: path, scheme: 'file', path };

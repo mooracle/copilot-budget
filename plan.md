@@ -120,9 +120,9 @@ MODEL claude-sonnet-4 500 300
 - `MODEL name inputTokens outputTokens` - per-model breakdown
 
 ### Step 9: `src/statusBar.ts` (~60 lines)
-- [ ] Right-aligned status bar item: `$(symbol-numeric) TokenTrack: 2,800`
-- [ ] Click → quick pick with per-model breakdown
-- [ ] Updates on tracker events
+- [x] Right-aligned status bar item: `$(symbol-numeric) TokenTrack: 2,800`
+- [x] Click → quick pick with per-model breakdown
+- [x] Updates on tracker events
 
 ### Step 10: `src/commitHook.ts` (~80 lines)
 - [ ] `installHook()` - writes `prepare-commit-msg` to `.git/hooks/`
