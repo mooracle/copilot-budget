@@ -7,7 +7,7 @@ jest.mock('fs');
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockVscode = vscode as any;
 
-const MARKER = '# TokenTrack prepare-commit-msg hook';
+const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
 function setupWorkspace(rootPath: string) {
   mockVscode.workspace.workspaceFolders = [
@@ -76,7 +76,7 @@ describe('commitHook', () => {
       expect(content).toContain('AI Budget:');
       expect(options.mode).toBe(0o755);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'TokenTrack: Commit hook installed.',
+        'Copilot Budget: Commit hook installed.',
       );
     });
 
@@ -98,7 +98,7 @@ describe('commitHook', () => {
       );
     });
 
-    it('refuses to overwrite a non-TokenTrack hook', () => {
+    it('refuses to overwrite a non-Copilot Budget hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue('#!/bin/sh\n# husky hook\nexit 0\n');
 
@@ -111,7 +111,7 @@ describe('commitHook', () => {
       );
     });
 
-    it('overwrites an existing TokenTrack hook', () => {
+    it('overwrites an existing Copilot Budget hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nold script`);
       (mockFs.existsSync as jest.Mock).mockReturnValue(true);
@@ -152,7 +152,7 @@ describe('commitHook', () => {
   });
 
   describe('uninstallHook', () => {
-    it('removes a TokenTrack hook', () => {
+    it('removes a Copilot Budget hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nscript`);
       mockFs.unlinkSync.mockImplementation(() => {});
@@ -164,11 +164,11 @@ describe('commitHook', () => {
         expect.stringMatching(/\.git[/\\]hooks[/\\]prepare-commit-msg$/),
       );
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'TokenTrack: Commit hook removed.',
+        'Copilot Budget: Commit hook removed.',
       );
     });
 
-    it('refuses to remove a non-TokenTrack hook', () => {
+    it('refuses to remove a non-Copilot Budget hook', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue('#!/bin/sh\n# husky hook\n');
 
@@ -177,7 +177,7 @@ describe('commitHook', () => {
       expect(result).toBe(false);
       expect(mockFs.unlinkSync).not.toHaveBeenCalled();
       expect(mockVscode.window.showWarningMessage).toHaveBeenCalledWith(
-        expect.stringContaining('not installed by TokenTrack'),
+        expect.stringContaining('not installed by Copilot Budget'),
       );
     });
 
@@ -191,7 +191,7 @@ describe('commitHook', () => {
 
       expect(result).toBe(false);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'TokenTrack: No commit hook to remove.',
+        'Copilot Budget: No commit hook to remove.',
       );
     });
 
@@ -234,13 +234,14 @@ describe('commitHook', () => {
 
       installHook();
 
-      // Skips merge and squash commits
+      // Skips merge, squash, and amend commits
       expect(writtenContent).toContain('"$COMMIT_SOURCE" = "merge"');
       expect(writtenContent).toContain('"$COMMIT_SOURCE" = "squash"');
+      expect(writtenContent).toContain('"$COMMIT_SOURCE" = "commit"');
       // Uses git rev-parse to find repo root
       expect(writtenContent).toContain('git rev-parse --show-toplevel');
       // Reads the tracking file
-      expect(writtenContent).toContain('.git/tokentrack');
+      expect(writtenContent).toContain('.git/copilot-budget');
       // Builds model list
       expect(writtenContent).toContain("grep '^MODEL '");
       // Appends to commit message

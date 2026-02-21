@@ -2,16 +2,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-const MARKER = '# TokenTrack prepare-commit-msg hook';
+const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
 const HOOK_SCRIPT = `#!/bin/sh
 ${MARKER}
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
-[ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] && exit 0
+[ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] || [ "$COMMIT_SOURCE" = "commit" ] && exit 0
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-TRACKING_FILE="$REPO_ROOT/.git/tokentrack"
+TRACKING_FILE="$REPO_ROOT/.git/copilot-budget"
 [ -f "$TRACKING_FILE" ] || exit 0
 
 TOTAL=$(grep '^TOTAL_TOKENS=' "$TRACKING_FILE" | cut -d= -f2)
@@ -49,16 +49,16 @@ export function isHookInstalled(): boolean {
 export function installHook(): boolean {
   const hookPath = getHookPath();
   if (!hookPath) {
-    vscode.window.showErrorMessage('TokenTrack: No workspace folder found.');
+    vscode.window.showErrorMessage('Copilot Budget: No workspace folder found.');
     return false;
   }
 
-  // Check if a non-TokenTrack hook already exists
+  // Check if a non-Copilot Budget hook already exists
   try {
     const existing = fs.readFileSync(hookPath, 'utf-8');
     if (existing.trim() && !existing.includes(MARKER)) {
       vscode.window.showWarningMessage(
-        'TokenTrack: A prepare-commit-msg hook already exists. Remove it first or install TokenTrack manually.',
+        'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
       );
       return false;
     }
@@ -72,10 +72,10 @@ export function installHook(): boolean {
       fs.mkdirSync(hooksDir, { recursive: true });
     }
     fs.writeFileSync(hookPath, HOOK_SCRIPT, { mode: 0o755 });
-    vscode.window.showInformationMessage('TokenTrack: Commit hook installed.');
+    vscode.window.showInformationMessage('Copilot Budget: Commit hook installed.');
     return true;
   } catch {
-    vscode.window.showErrorMessage('TokenTrack: Failed to install commit hook.');
+    vscode.window.showErrorMessage('Copilot Budget: Failed to install commit hook.');
     return false;
   }
 }
@@ -83,7 +83,7 @@ export function installHook(): boolean {
 export function uninstallHook(): boolean {
   const hookPath = getHookPath();
   if (!hookPath) {
-    vscode.window.showErrorMessage('TokenTrack: No workspace folder found.');
+    vscode.window.showErrorMessage('Copilot Budget: No workspace folder found.');
     return false;
   }
 
@@ -91,21 +91,21 @@ export function uninstallHook(): boolean {
     const content = fs.readFileSync(hookPath, 'utf-8');
     if (!content.includes(MARKER)) {
       vscode.window.showWarningMessage(
-        'TokenTrack: The prepare-commit-msg hook was not installed by TokenTrack.',
+        'Copilot Budget: The prepare-commit-msg hook was not installed by Copilot Budget.',
       );
       return false;
     }
   } catch {
-    vscode.window.showInformationMessage('TokenTrack: No commit hook to remove.');
+    vscode.window.showInformationMessage('Copilot Budget: No commit hook to remove.');
     return false;
   }
 
   try {
     fs.unlinkSync(hookPath);
-    vscode.window.showInformationMessage('TokenTrack: Commit hook removed.');
+    vscode.window.showInformationMessage('Copilot Budget: Commit hook removed.');
     return true;
   } catch {
-    vscode.window.showErrorMessage('TokenTrack: Failed to remove commit hook.');
+    vscode.window.showErrorMessage('Copilot Budget: Failed to remove commit hook.');
     return false;
   }
 }

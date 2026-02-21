@@ -78,7 +78,7 @@ describe('statusBar', () => {
       const { tracker } = createMockTracker(makeStats({ totalTokens: 2800 }));
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('TokenTrack:');
+      expect(createdItem.text).toContain('Copilot Budget:');
       expect(createdItem.text).toContain('2,800');
     });
 
@@ -91,11 +91,11 @@ describe('statusBar', () => {
       expect(createdItem.text).toContain('0');
     });
 
-    it('sets command to tokentrack.showStats', () => {
+    it('sets command to copilot-budget.showStats', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.command).toBe('tokentrack.showStats');
+      expect(createdItem.command).toBe('copilot-budget.showStats');
     });
 
     it('calls show on the item', () => {
@@ -221,7 +221,7 @@ describe('statusBar', () => {
       await showStatsQuickPick(tracker);
 
       const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toContain('TokenTrack');
+      expect(options.title).toContain('Copilot Budget');
       expect(options.placeHolder).toBeTruthy();
     });
   });

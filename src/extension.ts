@@ -10,17 +10,17 @@ let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
   null;
 
 const ALL_COMMANDS = [
-  'tokentrack.showStats',
-  'tokentrack.resetTracking',
-  'tokentrack.installHook',
-  'tokentrack.uninstallHook',
+  'copilot-budget.showStats',
+  'copilot-budget.resetTracking',
+  'copilot-budget.installHook',
+  'copilot-budget.uninstallHook',
 ];
 
 export function activate(context: vscode.ExtensionContext): void {
   if (!isEnabled()) {
     const handler = () =>
       vscode.window.showInformationMessage(
-        'TokenTrack is disabled. Enable it via the tokentrack.enabled setting.',
+        'Copilot Budget is disabled. Enable it via the copilot-budget.enabled setting.',
       );
     for (const cmd of ALL_COMMANDS) {
       context.subscriptions.push(
@@ -44,28 +44,28 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('tokentrack.showStats', () => {
+    vscode.commands.registerCommand('copilot-budget.showStats', () => {
       if (tracker) showStatsQuickPick(tracker);
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('tokentrack.resetTracking', () => {
+    vscode.commands.registerCommand('copilot-budget.resetTracking', () => {
       if (tracker) {
         tracker.reset();
-        vscode.window.showInformationMessage('TokenTrack: Tracking reset.');
+        vscode.window.showInformationMessage('Copilot Budget: Tracking reset.');
       }
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('tokentrack.installHook', () => {
+    vscode.commands.registerCommand('copilot-budget.installHook', () => {
       installHook();
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('tokentrack.uninstallHook', () => {
+    vscode.commands.registerCommand('copilot-budget.uninstallHook', () => {
       uninstallHook();
     }),
   );

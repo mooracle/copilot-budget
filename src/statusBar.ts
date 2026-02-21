@@ -12,13 +12,13 @@ export function createStatusBar(
     vscode.StatusBarAlignment.Right,
     100,
   );
-  item.text = '$(symbol-numeric) TokenTrack: 0';
+  item.text = '$(symbol-numeric) Copilot Budget: 0';
   item.tooltip = 'Click to view per-model token breakdown';
-  item.command = 'tokentrack.showStats';
+  item.command = 'copilot-budget.showStats';
   item.show();
 
   function updateText(stats: TrackingStats): void {
-    item.text = `$(symbol-numeric) TokenTrack: ${formatNumber(stats.totalTokens)}`;
+    item.text = `$(symbol-numeric) Copilot Budget: ${formatNumber(stats.totalTokens)}`;
   }
 
   // Set initial text from current stats
@@ -63,7 +63,7 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
   }
 
   await vscode.window.showQuickPick(items, {
-    title: 'TokenTrack - Token Usage',
+    title: 'Copilot Budget - Token Usage',
     placeHolder: 'Per-model token breakdown',
   });
 }

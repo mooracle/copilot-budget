@@ -48,7 +48,7 @@ describe('trackingFile', () => {
       expect(result).toBe(true);
       expect(mockFs.writeFileSync).toHaveBeenCalledTimes(1);
       const callArgs = mockFs.writeFileSync.mock.calls[0];
-      expect(callArgs[0]).toMatch(/\.git[/\\]tokentrack$/);
+      expect(callArgs[0]).toMatch(/\.git[/\\]copilot-budget$/);
 
       expect(writtenContent).toContain('TOTAL_TOKENS=3100');
       expect(writtenContent).toContain('INTERACTIONS=15');

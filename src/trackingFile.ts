@@ -13,7 +13,7 @@ function getTrackingFilePath(): string | null {
   } catch {
     return null;
   }
-  return path.join(gitDir, 'tokentrack');
+  return path.join(gitDir, 'copilot-budget');
 }
 
 export function writeTrackingFile(stats: TrackingStats): boolean {

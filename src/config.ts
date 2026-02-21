@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-const SECTION = 'tokentrack';
+const SECTION = 'copilot-budget';
 
 function cfg(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration(SECTION);

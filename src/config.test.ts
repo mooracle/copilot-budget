@@ -16,7 +16,7 @@ describe('config', () => {
     });
 
     it('returns false when overridden', () => {
-      __configStore['tokentrack.enabled'] = false;
+      __configStore['copilot-budget.enabled'] = false;
       expect(isEnabled()).toBe(false);
     });
   });
@@ -27,20 +27,20 @@ describe('config', () => {
     });
 
     it('returns true when overridden', () => {
-      __configStore['tokentrack.commitHook.enabled'] = true;
+      __configStore['copilot-budget.commitHook.enabled'] = true;
       expect(isCommitHookEnabled()).toBe(true);
     });
   });
 
   describe('onConfigChanged', () => {
-    it('registers a listener and calls it for tokentrack changes', () => {
+    it('registers a listener and calls it for copilot-budget changes', () => {
       const callback = jest.fn();
       onConfigChanged(callback);
 
       expect(__configChangeListeners.length).toBe(1);
 
-      // Simulate a tokentrack config change
-      const event = { affectsConfiguration: (section: string) => section === 'tokentrack' };
+      // Simulate a copilot-budget config change
+      const event = { affectsConfiguration: (section: string) => section === 'copilot-budget' };
       __configChangeListeners[0](event);
 
       expect(callback).toHaveBeenCalledWith(event);

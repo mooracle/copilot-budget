@@ -225,7 +225,7 @@ describe('extension', () => {
       const ctx = makeContext();
       activate(ctx);
 
-      __commandCallbacks['tokentrack.showStats']();
+      __commandCallbacks['copilot-budget.showStats']();
       expect(mockShowStatsQuickPick).toHaveBeenCalledWith(trackerInstance);
     });
 
@@ -233,7 +233,7 @@ describe('extension', () => {
       const ctx = makeContext();
       activate(ctx);
 
-      __commandCallbacks['tokentrack.resetTracking']();
+      __commandCallbacks['copilot-budget.resetTracking']();
       expect(trackerInstance.reset).toHaveBeenCalledTimes(1);
     });
 
@@ -241,7 +241,7 @@ describe('extension', () => {
       const ctx = makeContext();
       activate(ctx);
 
-      __commandCallbacks['tokentrack.installHook']();
+      __commandCallbacks['copilot-budget.installHook']();
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
     });
 
@@ -249,7 +249,7 @@ describe('extension', () => {
       const ctx = makeContext();
       activate(ctx);
 
-      __commandCallbacks['tokentrack.uninstallHook']();
+      __commandCallbacks['copilot-budget.uninstallHook']();
       expect(mockUninstallHook).toHaveBeenCalledTimes(1);
     });
   });

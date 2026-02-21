@@ -1,6 +1,6 @@
 {
-  "name": "tokentrack",
-  "displayName": "TokenTrack",
+  "name": "copilot-budget",
+  "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
   "version": "0.1.0",
   "publisher": "mooracle",
@@ -17,31 +17,31 @@
   "contributes": {
     "commands": [
       {
-        "command": "tokentrack.showStats",
-        "title": "TokenTrack: Show Token Stats"
+        "command": "copilot-budget.showStats",
+        "title": "Copilot Budget: Show Token Stats"
       },
       {
-        "command": "tokentrack.resetTracking",
-        "title": "TokenTrack: Reset Tracking"
+        "command": "copilot-budget.resetTracking",
+        "title": "Copilot Budget: Reset Tracking"
       },
       {
-        "command": "tokentrack.installHook",
-        "title": "TokenTrack: Install Commit Hook"
+        "command": "copilot-budget.installHook",
+        "title": "Copilot Budget: Install Commit Hook"
       },
       {
-        "command": "tokentrack.uninstallHook",
-        "title": "TokenTrack: Uninstall Commit Hook"
+        "command": "copilot-budget.uninstallHook",
+        "title": "Copilot Budget: Uninstall Commit Hook"
       }
     ],
     "configuration": {
-      "title": "TokenTrack",
+      "title": "Copilot Budget",
       "properties": {
-        "tokentrack.enabled": {
+        "copilot-budget.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable or disable TokenTrack token usage tracking"
+          "description": "Enable or disable Copilot Budget token usage tracking"
         },
-        "tokentrack.commitHook.enabled": {
+        "copilot-budget.commitHook.enabled": {
           "type": "boolean",
           "default": false,
           "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
