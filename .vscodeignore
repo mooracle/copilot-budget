@@ -10,6 +10,10 @@ esbuild.js
 **/*.ts
 !dist/**
 .ralphex/**
+plan.md
+coverage/**
 *.vsix
 jest.config.js
 **/*.test.*
+.claude/**
+assets/icon.svg
