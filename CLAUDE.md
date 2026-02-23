@@ -35,6 +35,7 @@ The extension follows a **baseline/delta** model: on activation it snapshots all
 - **statusBar.ts** — Status bar item + quick pick panel showing per-model breakdown.
 - **trackingFile.ts** — Writes stats to `.git/copilot-budget` in key=value format for the commit hook to read.
 - **commitHook.ts** — Installs/uninstalls a POSIX `prepare-commit-msg` hook that reads `.git/copilot-budget` and appends token info to commit messages.
+- **sqliteReader.ts** — Reads Copilot sessions from `state.vscdb` SQLite databases using `sql.js` (WASM-based). Exports `initSqlite()`, `readSessionsFromVscdb()`, `isSqliteReady()`, and `disposeSqlite()`. Loads WASM binary from `dist/sql-wasm.wasm` at activation; gracefully degrades if init fails.
 - **config.ts** — Wraps `copilot-budget.enabled` and `copilot-budget.commitHook.enabled` settings.
 - **logger.ts** — Shared OutputChannel logger singleton. Exports `log()` (timestamped append), `getOutputChannel()`, and `disposeLogger()`. Used by sessionDiscovery, tracker, and the diagnostics command.
 
@@ -44,8 +45,8 @@ Tests live alongside source files as `*.test.ts`. The `vscode` module is mocked 
 
 ## Key Design Details
 
-- **No runtime dependencies** — only Node.js built-ins and the VS Code API.
-- **esbuild bundles** to a single `dist/extension.js` (CommonJS, Node 18 target, vscode external).
+- **One runtime dependency: `sql.js`** — WASM-based SQLite reader for `state.vscdb` files. No native modules; the WASM binary (`sql-wasm.wasm`) is copied to `dist/` by esbuild config. All other code uses only Node.js built-ins and the VS Code API.
+- **esbuild bundles** to a single `dist/extension.js` (CommonJS, Node 18 target, vscode external). The build also copies `sql-wasm.wasm` to `dist/`.
 - The commit hook is pure POSIX shell with no external dependencies.
 - Prototype pollution prevention is implemented in the JSONL delta parser.
 - The extension never makes network calls — all data is read from local session files.
