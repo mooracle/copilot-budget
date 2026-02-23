@@ -1,4 +1,4 @@
-import { estimateTokensFromText } from './tokenEstimator';
+import { estimateTokensFromText, getPremiumMultiplier, PREMIUM_REQUEST_COST } from './tokenEstimator';
 
 describe('tokenEstimator', () => {
   describe('estimateTokensFromText', () => {
@@ -47,6 +47,47 @@ describe('tokenEstimator', () => {
       const text = 'a'.repeat(10000);
       // 10000 * 0.25 = 2500
       expect(estimateTokensFromText(text, 'gpt-4')).toBe(2500);
+    });
+  });
+
+  describe('PREMIUM_REQUEST_COST', () => {
+    it('is $0.04 per premium request', () => {
+      expect(PREMIUM_REQUEST_COST).toBe(0.04);
+    });
+  });
+
+  describe('getPremiumMultiplier', () => {
+    it('returns 1 for standard models (e.g. claude-sonnet-4)', () => {
+      expect(getPremiumMultiplier('claude-sonnet-4')).toBe(1);
+    });
+
+    it('returns 0 for free-tier models (e.g. gpt-4o)', () => {
+      expect(getPremiumMultiplier('gpt-4o')).toBe(0);
+    });
+
+    it('returns 3 for premium models (e.g. claude-opus-4.6)', () => {
+      expect(getPremiumMultiplier('claude-opus-4.6')).toBe(3);
+    });
+
+    it('returns 0.33 for low-cost models (e.g. claude-haiku)', () => {
+      expect(getPremiumMultiplier('claude-haiku')).toBe(0.33);
+    });
+
+    it('uses longest matching key (gpt-4o-mini=0 over gpt-4=1)', () => {
+      expect(getPremiumMultiplier('gpt-4o-mini')).toBe(0);
+    });
+
+    it('returns default multiplier 1 for unknown models', () => {
+      expect(getPremiumMultiplier('some-unknown-model-xyz')).toBe(1);
+    });
+
+    it('matches gemini models', () => {
+      expect(getPremiumMultiplier('gemini-2.5-flash')).toBe(0.33);
+      expect(getPremiumMultiplier('gemini-2.5-pro')).toBe(1);
+    });
+
+    it('returns 30 for fast-mode opus models', () => {
+      expect(getPremiumMultiplier('claude-opus-4.6-fast')).toBe(30);
     });
   });
 });
