@@ -3,6 +3,8 @@ jest.mock('./statusBar');
 jest.mock('./trackingFile');
 jest.mock('./commitHook');
 jest.mock('./config');
+jest.mock('./logger');
+jest.mock('./sessionDiscovery');
 
 import * as vscode from 'vscode';
 import { __commandCallbacks } from './__mocks__/vscode';
@@ -12,6 +14,8 @@ import { createStatusBar, showStatsQuickPick } from './statusBar';
 import { writeTrackingFile } from './trackingFile';
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
+import { getDiscoveryDiagnostics } from './sessionDiscovery';
+import { getOutputChannel, disposeLogger } from './logger';
 
 const MockTracker = Tracker as jest.MockedClass<typeof Tracker>;
 const mockCreateStatusBar = createStatusBar as jest.MockedFunction<
@@ -36,6 +40,15 @@ const mockIsCommitHookEnabled = isCommitHookEnabled as jest.MockedFunction<
 >;
 const mockOnConfigChanged = onConfigChanged as jest.MockedFunction<
   typeof onConfigChanged
+>;
+const mockGetDiscoveryDiagnostics = getDiscoveryDiagnostics as jest.MockedFunction<
+  typeof getDiscoveryDiagnostics
+>;
+const mockGetOutputChannel = getOutputChannel as jest.MockedFunction<
+  typeof getOutputChannel
+>;
+const mockDisposeLogger = disposeLogger as jest.MockedFunction<
+  typeof disposeLogger
 >;
 
 function makeContext(): vscode.ExtensionContext {
@@ -100,6 +113,24 @@ beforeEach(() => {
     configChangedCallback = cb;
     return { dispose: jest.fn() };
   });
+  mockGetDiscoveryDiagnostics.mockReturnValue({
+    platform: 'darwin',
+    homedir: '/home/test',
+    candidatePaths: [
+      { path: '/home/test/.config/Code/User', exists: true },
+      { path: '/home/test/.config/Code - Insiders/User', exists: false },
+    ],
+    filesFound: ['/home/test/.config/Code/User/globalStorage/github.copilot-chat/sessions/test.json'],
+  });
+  mockGetOutputChannel.mockReturnValue({
+    appendLine: jest.fn(),
+    append: jest.fn(),
+    clear: jest.fn(),
+    show: jest.fn(),
+    hide: jest.fn(),
+    dispose: jest.fn(),
+    name: 'Copilot Budget',
+  } as any);
 
   // Reset module-level state by calling deactivate
   deactivate();
@@ -152,11 +183,11 @@ describe('extension', () => {
       expect(mockCreateStatusBar).toHaveBeenCalledWith(trackerInstance);
     });
 
-    it('registers 4 commands', () => {
+    it('registers 5 commands', () => {
       const ctx = makeContext();
       activate(ctx);
-      // subscriptions: statusBar disposable + statsWriter + 4 commands + configSub = 7
-      expect(ctx.subscriptions.length).toBe(7);
+      // subscriptions: statusBar disposable + statsWriter + 5 commands + configSub = 8
+      expect(ctx.subscriptions.length).toBe(8);
     });
 
     it('registers stub commands when disabled', () => {
@@ -165,8 +196,8 @@ describe('extension', () => {
       activate(ctx);
       expect(MockTracker).not.toHaveBeenCalled();
       expect(mockCreateStatusBar).not.toHaveBeenCalled();
-      // 4 stub commands registered so users get a helpful message
-      expect(ctx.subscriptions.length).toBe(4);
+      // 5 stub commands registered so users get a helpful message
+      expect(ctx.subscriptions.length).toBe(5);
     });
 
     it('writes tracking file when stats change', () => {
@@ -252,6 +283,18 @@ describe('extension', () => {
       __commandCallbacks['copilot-budget.uninstallHook']();
       expect(mockUninstallHook).toHaveBeenCalledTimes(1);
     });
+
+    it('showDiagnostics command outputs diagnostics and shows channel', () => {
+      const ctx = makeContext();
+      activate(ctx);
+
+      const mockChannel = mockGetOutputChannel();
+      __commandCallbacks['copilot-budget.showDiagnostics']();
+
+      expect(mockGetDiscoveryDiagnostics).toHaveBeenCalled();
+      expect(mockChannel.appendLine).toHaveBeenCalled();
+      expect(mockChannel.show).toHaveBeenCalled();
+    });
   });
 
   describe('deactivate', () => {
@@ -294,6 +337,13 @@ describe('extension', () => {
       trackerInstance.dispose.mockClear();
       deactivate();
       expect(trackerInstance.dispose).not.toHaveBeenCalled();
+    });
+
+    it('calls disposeLogger', () => {
+      const ctx = makeContext();
+      activate(ctx);
+      deactivate();
+      expect(mockDisposeLogger).toHaveBeenCalled();
     });
   });
 });

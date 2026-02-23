@@ -28,6 +28,7 @@
     "ai",
     "github-copilot"
   ],
+  "icon": "assets/icon.png",
   "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
@@ -53,6 +54,10 @@
       {
         "command": "copilot-budget.uninstallHook",
         "title": "Copilot Budget: Uninstall Commit Hook"
+      },
+      {
+        "command": "copilot-budget.showDiagnostics",
+        "title": "Copilot Budget: Show Diagnostics"
       }
     ],
     "configuration": {

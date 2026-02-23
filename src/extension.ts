@@ -4,6 +4,8 @@ import { createStatusBar, showStatsQuickPick } from './statusBar';
 import { writeTrackingFile } from './trackingFile';
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
+import { getDiscoveryDiagnostics } from './sessionDiscovery';
+import { log, getOutputChannel, disposeLogger } from './logger';
 
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
@@ -14,6 +16,7 @@ const ALL_COMMANDS = [
   'copilot-budget.resetTracking',
   'copilot-budget.installHook',
   'copilot-budget.uninstallHook',
+  'copilot-budget.showDiagnostics',
 ];
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -70,6 +73,39 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
+      const ch = getOutputChannel();
+      const diag = getDiscoveryDiagnostics();
+
+      ch.appendLine('=== Copilot Budget Diagnostics ===');
+      ch.appendLine(`Platform: ${diag.platform}`);
+      ch.appendLine(`Home directory: ${diag.homedir}`);
+      ch.appendLine('');
+      ch.appendLine('Candidate paths:');
+      for (const cp of diag.candidatePaths) {
+        ch.appendLine(`  ${cp.exists ? 'EXISTS' : 'MISSING'}: ${cp.path}`);
+      }
+      ch.appendLine('');
+      ch.appendLine(`Session files found: ${diag.filesFound.length}`);
+      for (const f of diag.filesFound) {
+        ch.appendLine(`  ${f}`);
+      }
+
+      if (tracker) {
+        const stats = tracker.getStats();
+        ch.appendLine('');
+        ch.appendLine('Current stats:');
+        ch.appendLine(`  Total tokens: ${stats.totalTokens}`);
+        ch.appendLine(`  Interactions: ${stats.interactions}`);
+        ch.appendLine(`  Since: ${stats.since}`);
+        ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
+      }
+
+      ch.show();
+    }),
+  );
+
   // Auto-install hook if enabled in settings
   if (isCommitHookEnabled() && !isHookInstalled()) {
     installHook();
@@ -95,4 +131,5 @@ export function deactivate(): void {
     statusBar.dispose();
     statusBar = null;
   }
+  disposeLogger();
 }
