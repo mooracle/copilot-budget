@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -84,12 +84,15 @@
     "package": "npx @vscode/vsce package"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.0",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.20.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.0",
-    "@types/jest": "^29.5.0",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "sql.js": "^1.14.0"
   }
 }
