@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import { discoverSessionFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
 import { estimateTokensFromText } from './tokenEstimator';
+import { log } from './logger';
 
 export interface TrackingStats {
   since: string;
@@ -62,6 +63,7 @@ export class Tracker {
     modelUsage: ModelUsage;
   } {
     const files = discoverSessionFiles();
+    log(`scanAll: discovered ${files.length} session file(s)`);
     const currentFiles = new Set(files);
     let totalTokens = 0;
     let totalInteractions = 0;
@@ -116,6 +118,8 @@ export class Tracker {
       totalInteractions += result.interactions;
       mergeModelUsage(mergedModels, result.modelUsage);
     }
+
+    log(`scanAll: total ${totalTokens} tokens, ${totalInteractions} interactions`);
 
     return {
       tokens: totalTokens,
@@ -174,6 +178,7 @@ export class Tracker {
   initialize(): void {
     const snapshot = this.scanAll();
     this.baseline = snapshot;
+    log(`initialize: baseline set at ${snapshot.tokens} tokens, ${snapshot.interactions} interactions`);
     this.lastStats = this.computeStats(snapshot);
   }
 

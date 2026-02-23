@@ -8,6 +8,7 @@ jest.mock('fs');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
 jest.mock('./tokenEstimator');
+jest.mock('./logger');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockDiscovery = sessionDiscovery as jest.Mocked<typeof sessionDiscovery>;
