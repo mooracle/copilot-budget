@@ -192,7 +192,7 @@ export class Tracker {
       stats.interactions !== this.lastStats.interactions
     ) {
       this.lastStats = stats;
-      for (const listener of this.listeners) {
+      for (const listener of [...this.listeners]) {
         listener(stats);
       }
     }
@@ -216,7 +216,7 @@ export class Tracker {
     this.since = new Date().toISOString();
     const stats = this.computeStats(snapshot);
     this.lastStats = stats;
-    for (const listener of this.listeners) {
+    for (const listener of [...this.listeners]) {
       listener(stats);
     }
   }

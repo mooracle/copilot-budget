@@ -5,6 +5,20 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Diagnostic logging to the "Copilot Budget" Output channel
+- `Copilot Budget: Show Diagnostics` command showing scanned paths, discovered files, and current stats
+- Session discovery for `globalStorage/github.copilot/` (newer built-in Copilot)
+- Session discovery for `workspaceStorage/*/github.copilot-chat/` and `workspaceStorage/*/github.copilot/`
+- File deduplication in session discovery
+
+### Fixed
+
+- Extension showing 0 tokens in devcontainers due to incomplete session file search paths
+
 ## [0.1.0] - 2026-02-21
 
 ### Added

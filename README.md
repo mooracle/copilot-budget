@@ -25,6 +25,7 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 | `Copilot Budget: Reset Tracking` | Reset the token counter to zero (re-baselines from current session files) |
 | `Copilot Budget: Install Commit Hook` | Install the `prepare-commit-msg` hook that appends AI budget info to commits |
 | `Copilot Budget: Uninstall Commit Hook` | Remove the Copilot Budget commit hook |
+| `Copilot Budget: Show Diagnostics` | Show diagnostic info (scanned paths, discovered files, current stats) in the Output panel |
 
 ## Settings
 
@@ -35,7 +36,7 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 
 ## How It Works
 
-1. **Discovery** — On activation, Copilot Budget scans known Copilot session file locations for conversation logs.
+1. **Discovery** — On activation, Copilot Budget scans known Copilot session file locations for conversation logs, including `globalStorage/github.copilot-chat/`, `globalStorage/github.copilot/`, `workspaceStorage/*/github.copilot-chat/`, `workspaceStorage/*/github.copilot/`, and `workspaceStorage/*/chatSessions/`. All discovery activity is logged to the "Copilot Budget" Output channel.
 2. **Parsing** — Each session file is parsed to extract model names, input/output token counts, and interaction counts. When token counts are not available directly, the extension estimates them from message text length using per-model character-to-token ratios.
 3. **Baseline** — A snapshot is taken at startup so only tokens used during the current session are reported.
 4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.

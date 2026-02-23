@@ -5,7 +5,7 @@ export interface ModelUsage {
 type JsonObject = Record<string, unknown>;
 
 function isObject(value: unknown): value is JsonObject {
-	return typeof value === 'object' && value !== null;
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isSafePathSegment(seg: string): boolean {
@@ -72,7 +72,7 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 	const ensureChildContainer = (parent: any, key: string, nextSeg: string): any => {
 		const wantsArray = isArrayIndexSegment(nextSeg);
 		let existing = parent[key];
-		if (!isObject(existing)) {
+		if (!isObject(existing) && !Array.isArray(existing)) {
 			existing = wantsArray ? [] : Object.create(null);
 			parent[key] = existing;
 		}

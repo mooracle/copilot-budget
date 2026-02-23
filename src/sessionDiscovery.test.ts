@@ -149,9 +149,10 @@ describe('discoverSessionFiles', () => {
     mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
       const key = p.toString();
       if (key === wsStorage) return ['abc123'] as any;
-      if (key === chatDir) return ['session1.json', 'session2.jsonl'] as any;
+      if (key === chatDir) return [dirent('session1.json', false), dirent('session2.jsonl', false)] as any;
       throw new Error(`ENOENT: ${key}`);
     });
+    mockFs.statSync.mockReturnValue({ size: 100 } as any);
 
     const files = discoverSessionFiles();
     expect(files).toContain(path.join(chatDir, 'session1.json'));
@@ -163,11 +164,8 @@ describe('discoverSessionFiles', () => {
     const userPath = '/home/testuser/Library/Application Support/Code/User';
     const emptyWindow = path.join(userPath, 'globalStorage', 'emptyWindowChatSessions');
 
-    setupMockFs(new Set([userPath, emptyWindow]), {});
-
-    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
-      if (p.toString() === emptyWindow) return ['chat.json', 'readme.txt'] as any;
-      throw new Error(`ENOENT: ${p}`);
+    setupMockFs(new Set([userPath, emptyWindow]), {
+      [emptyWindow]: [dirent('chat.json', false), dirent('readme.txt', false)],
     });
 
     const files = discoverSessionFiles();
