@@ -10,7 +10,7 @@ const mockFs = fs as jest.Mocked<typeof fs>;
 const mockOs = os as jest.Mocked<typeof os>;
 
 // Must import after mocks are set up
-import { getVSCodeUserPaths, discoverSessionFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
+import { getVSCodeUserPaths, discoverSessionFiles, discoverVscdbFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -323,8 +323,118 @@ describe('discoverSessionFiles', () => {
   });
 });
 
+describe('discoverVscdbFiles', () => {
+  function dirent(name: string, isDir: boolean): fs.Dirent {
+    return {
+      name,
+      isDirectory: () => isDir,
+      isFile: () => !isDir,
+      isBlockDevice: () => false,
+      isCharacterDevice: () => false,
+      isFIFO: () => false,
+      isSocket: () => false,
+      isSymbolicLink: () => false,
+      path: '',
+      parentPath: '',
+    };
+  }
+
+  it('finds state.vscdb in workspaceStorage directories', () => {
+    const userPath = '/home/testuser/Library/Application Support/Code/User';
+    const wsStorage = path.join(userPath, 'workspaceStorage');
+    const vscdbPath = path.join(wsStorage, 'abc123', 'state.vscdb');
+
+    mockOs.platform.mockReturnValue('darwin');
+    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
+      new Set([wsStorage, vscdbPath]).has(p.toString()),
+    );
+    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
+      if (p.toString() === wsStorage) return ['abc123'] as any;
+      throw new Error(`ENOENT: ${p}`);
+    });
+    mockFs.statSync.mockReturnValue({ size: 4096 } as any);
+
+    const files = discoverVscdbFiles();
+    expect(files).toContain(vscdbPath);
+    expect(files).toHaveLength(1);
+  });
+
+  it('skips empty vscdb files', () => {
+    const userPath = '/home/testuser/Library/Application Support/Code/User';
+    const wsStorage = path.join(userPath, 'workspaceStorage');
+    const vscdbPath = path.join(wsStorage, 'abc123', 'state.vscdb');
+
+    mockOs.platform.mockReturnValue('darwin');
+    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
+      new Set([wsStorage, vscdbPath]).has(p.toString()),
+    );
+    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
+      if (p.toString() === wsStorage) return ['abc123'] as any;
+      throw new Error(`ENOENT: ${p}`);
+    });
+    mockFs.statSync.mockReturnValue({ size: 0 } as any);
+
+    const files = discoverVscdbFiles();
+    expect(files).toEqual([]);
+  });
+
+  it('handles missing workspaceStorage gracefully', () => {
+    mockOs.platform.mockReturnValue('darwin');
+    mockFs.existsSync.mockReturnValue(false);
+
+    const files = discoverVscdbFiles();
+    expect(files).toEqual([]);
+  });
+
+  it('returns empty when no paths exist', () => {
+    mockOs.platform.mockReturnValue('linux');
+    mockFs.existsSync.mockReturnValue(false);
+
+    const files = discoverVscdbFiles();
+    expect(files).toEqual([]);
+  });
+
+  it('finds vscdb files across multiple workspaces', () => {
+    const userPath = '/home/testuser/Library/Application Support/Code/User';
+    const wsStorage = path.join(userPath, 'workspaceStorage');
+    const vscdb1 = path.join(wsStorage, 'ws1', 'state.vscdb');
+    const vscdb2 = path.join(wsStorage, 'ws2', 'state.vscdb');
+
+    mockOs.platform.mockReturnValue('darwin');
+    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
+      new Set([wsStorage, vscdb1, vscdb2]).has(p.toString()),
+    );
+    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
+      if (p.toString() === wsStorage) return ['ws1', 'ws2'] as any;
+      throw new Error(`ENOENT: ${p}`);
+    });
+    mockFs.statSync.mockReturnValue({ size: 8192 } as any);
+
+    const files = discoverVscdbFiles();
+    expect(files).toContain(vscdb1);
+    expect(files).toContain(vscdb2);
+    expect(files).toHaveLength(2);
+  });
+
+  it('handles filesystem errors gracefully', () => {
+    const userPath = '/home/testuser/Library/Application Support/Code/User';
+    const wsStorage = path.join(userPath, 'workspaceStorage');
+
+    mockOs.platform.mockReturnValue('darwin');
+    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
+      p.toString() === wsStorage,
+    );
+    mockFs.readdirSync.mockImplementation(() => {
+      throw new Error('EACCES: permission denied');
+    });
+
+    const files = discoverVscdbFiles();
+    expect(files).toEqual([]);
+  });
+});
+
 describe('getDiscoveryDiagnostics', () => {
-  it('returns platform, homedir, candidatePaths, and filesFound', () => {
+  it('returns platform, homedir, candidatePaths, filesFound, and vscdbFilesFound', () => {
     mockOs.platform.mockReturnValue('darwin');
     mockOs.homedir.mockReturnValue('/home/testuser');
     mockFs.existsSync.mockReturnValue(false);
@@ -338,6 +448,7 @@ describe('getDiscoveryDiagnostics', () => {
     expect(diag.candidatePaths[0]).toHaveProperty('path');
     expect(diag.candidatePaths[0]).toHaveProperty('exists');
     expect(diag.filesFound).toEqual([]);
+    expect(diag.vscdbFilesFound).toEqual([]);
   });
 
   it('marks existing paths correctly', () => {

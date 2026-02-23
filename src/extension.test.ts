@@ -121,6 +121,7 @@ beforeEach(() => {
       { path: '/home/test/.config/Code - Insiders/User', exists: false },
     ],
     filesFound: ['/home/test/.config/Code/User/globalStorage/github.copilot-chat/sessions/test.json'],
+    vscdbFilesFound: [],
   });
   mockGetOutputChannel.mockReturnValue({
     appendLine: jest.fn(),

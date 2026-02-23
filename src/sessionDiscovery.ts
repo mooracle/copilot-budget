@@ -96,6 +96,41 @@ export interface DiscoveryDiagnostics {
   homedir: string;
   candidatePaths: { path: string; exists: boolean }[];
   filesFound: string[];
+  vscdbFilesFound: string[];
+}
+
+/**
+ * Discover state.vscdb files in workspaceStorage directories.
+ * Returns an array of unique absolute paths to state.vscdb files.
+ */
+export function discoverVscdbFiles(): string[] {
+  const files: string[] = [];
+  const userPaths = getVSCodeUserPaths();
+
+  log(`Vscdb discovery starting on platform=${os.platform()}`);
+
+  for (const userPath of userPaths) {
+    const wsStorage = path.join(userPath, 'workspaceStorage');
+    try {
+      if (!fs.existsSync(wsStorage)) continue;
+      for (const wsDir of fs.readdirSync(wsStorage)) {
+        const vscdbPath = path.join(wsStorage, wsDir, 'state.vscdb');
+        try {
+          if (fs.existsSync(vscdbPath) && fs.statSync(vscdbPath).size > 0) {
+            files.push(vscdbPath);
+          }
+        } catch {
+          // skip inaccessible files
+        }
+      }
+    } catch {
+      // skip inaccessible workspace dirs
+    }
+  }
+
+  const unique = [...new Set(files)];
+  log(`Vscdb discovery complete: ${unique.length} files found`);
+  return unique;
 }
 
 /**
@@ -212,5 +247,6 @@ export function getDiscoveryDiagnostics(): DiscoveryDiagnostics {
     homedir: os.homedir(),
     candidatePaths,
     filesFound: discoverSessionFiles(),
+    vscdbFilesFound: discoverVscdbFiles(),
   };
 }
