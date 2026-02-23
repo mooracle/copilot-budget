@@ -248,5 +248,22 @@ describe('commitHook', () => {
       // Resets tracking file
       expect(writtenContent).toContain(': > "$TRACKING_FILE"');
     });
+
+    it('validates numeric fields before arithmetic expansion', () => {
+      setupWorkspace('/project');
+      mockFs.readFileSync.mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
+      let writtenContent = '';
+      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
+        writtenContent = data;
+      });
+
+      installHook();
+
+      // Hook must validate inp and out are numeric before using in $((..))
+      expect(writtenContent).toContain('*[!0-9]*) continue');
+    });
   });
 });

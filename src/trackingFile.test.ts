@@ -92,6 +92,33 @@ describe('trackingFile', () => {
       expect(writeTrackingFile(sampleStats)).toBe(false);
     });
 
+    it('sanitizes model names with unsafe characters', () => {
+      setupWorkspace('/project');
+      let writtenContent = '';
+      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
+        writtenContent = data;
+      });
+
+      const unsafeStats: TrackingStats = {
+        since: '2024-01-15T10:30:00Z',
+        lastUpdated: '2024-01-15T12:00:00Z',
+        models: {
+          'model with spaces': { inputTokens: 100, outputTokens: 50 },
+          'model$(cmd)': { inputTokens: 200, outputTokens: 100 },
+          'model`id`': { inputTokens: 300, outputTokens: 150 },
+        },
+        totalTokens: 900,
+        interactions: 3,
+      };
+
+      writeTrackingFile(unsafeStats);
+      expect(writtenContent).toContain('MODEL model_with_spaces 100 50');
+      expect(writtenContent).toContain('MODEL model__cmd_ 200 100');
+      expect(writtenContent).toContain('MODEL model_id_ 300 150');
+      expect(writtenContent).not.toMatch(/\$\(cmd\)/);
+      expect(writtenContent).not.toMatch(/`id`/);
+    });
+
     it('handles stats with no models', () => {
       setupWorkspace('/project');
       let writtenContent = '';

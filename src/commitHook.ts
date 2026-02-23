@@ -19,6 +19,8 @@ TOTAL=$(grep '^TOTAL_TOKENS=' "$TRACKING_FILE" | cut -d= -f2)
 
 MODELS=""
 while read _ name inp out; do
+  case "$inp" in *[!0-9]*) continue ;; esac
+  case "$out" in *[!0-9]*) continue ;; esac
   MODELS="\${MODELS}\${MODELS:+, }\${name} $((inp + out))"
 done <<EOF
 $(grep '^MODEL ' "$TRACKING_FILE")

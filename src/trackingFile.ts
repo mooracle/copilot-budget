@@ -27,7 +27,8 @@ export function writeTrackingFile(stats: TrackingStats): boolean {
   ];
 
   for (const [model, usage] of Object.entries(stats.models)) {
-    lines.push(`MODEL ${model} ${usage.inputTokens} ${usage.outputTokens}`);
+    const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, '_');
+    lines.push(`MODEL ${safeModel} ${usage.inputTokens} ${usage.outputTokens}`);
   }
 
   try {
