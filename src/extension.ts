@@ -6,6 +6,7 @@ import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
 import { log, getOutputChannel, disposeLogger } from './logger';
+import { initSqlite, disposeSqlite } from './sqliteReader';
 
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
@@ -19,7 +20,7 @@ const ALL_COMMANDS = [
   'copilot-budget.showDiagnostics',
 ];
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   if (!isEnabled()) {
     const handler = () =>
       vscode.window.showInformationMessage(
@@ -31,6 +32,11 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }
     return;
+  }
+
+  const sqliteOk = await initSqlite();
+  if (!sqliteOk) {
+    log('SQLite support unavailable — vscdb files will be skipped');
   }
 
   tracker = new Tracker();
@@ -91,6 +97,11 @@ export function activate(context: vscode.ExtensionContext): void {
       for (const f of diag.filesFound) {
         ch.appendLine(`  ${f}`);
       }
+      ch.appendLine('');
+      ch.appendLine(`Vscdb files found: ${diag.vscdbFilesFound.length}`);
+      for (const f of diag.vscdbFilesFound) {
+        ch.appendLine(`  ${f}`);
+      }
 
       if (tracker) {
         const stats = tracker.getStats();
@@ -131,5 +142,6 @@ export function deactivate(): void {
     statusBar.dispose();
     statusBar = null;
   }
+  disposeSqlite();
   disposeLogger();
 }
