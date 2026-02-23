@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- SQLite (`state.vscdb`) session reading via `sql.js` (WASM-based, no native modules)
+- `state.vscdb` discovery in `workspaceStorage/*/` directories
+- Graceful degradation when SQLite initialization fails (JSON/JSONL files still work)
 - Diagnostic logging to the "Copilot Budget" Output channel
 - `Copilot Budget: Show Diagnostics` command showing scanned paths, discovered files, and current stats
 - Session discovery for `globalStorage/github.copilot/` (newer built-in Copilot)
 - Session discovery for `workspaceStorage/*/github.copilot-chat/` and `workspaceStorage/*/github.copilot/`
 - File deduplication in session discovery
+
+### Changed
+
+- Added `sql.js` as the first runtime dependency (WASM-based SQLite)
 
 ### Fixed
 

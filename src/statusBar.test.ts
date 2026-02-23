@@ -134,14 +134,16 @@ describe('statusBar', () => {
 
     it('disposes item and subscription on dispose', () => {
       const { tracker } = createMockTracker(makeStats());
-      const sub = (tracker.onStatsChanged as jest.Mock).mockReturnValue({
-        dispose: jest.fn(),
+      const subDispose = jest.fn();
+      (tracker.onStatsChanged as jest.Mock).mockReturnValue({
+        dispose: subDispose,
       });
       const { dispose } = createStatusBar(tracker);
 
       dispose();
 
       expect(createdItem.dispose).toHaveBeenCalled();
+      expect(subDispose).toHaveBeenCalled();
     });
 
     it('formats large numbers with commas', () => {

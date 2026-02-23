@@ -8,6 +8,7 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 - **Per-model breakdown** — see input and output tokens grouped by model (GPT-4o, Claude, Gemini, etc.).
 - **Commit hook integration** — automatically appends an `AI Budget:` line to commit messages showing tokens consumed since the last commit.
 - **Session-aware** — tracks only tokens used since VS Code was opened (baseline subtraction), so counts reset each session.
+- **SQLite session support** — reads Copilot sessions from `state.vscdb` databases, catching sessions that only exist in SQLite after recent Copilot storage migrations.
 - **Lightweight** — polls every two minutes with file-level caching; no network calls.
 
 ## Getting Started
@@ -36,7 +37,7 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 
 ## How It Works
 
-1. **Discovery** — On activation, Copilot Budget scans known Copilot session file locations for conversation logs, including `globalStorage/github.copilot-chat/`, `globalStorage/github.copilot/`, `workspaceStorage/*/github.copilot-chat/`, `workspaceStorage/*/github.copilot/`, and `workspaceStorage/*/chatSessions/`. All discovery activity is logged to the "Copilot Budget" Output channel.
+1. **Discovery** — On activation, Copilot Budget scans known Copilot session file locations for conversation logs, including `globalStorage/github.copilot-chat/`, `globalStorage/github.copilot/`, `workspaceStorage/*/github.copilot-chat/`, `workspaceStorage/*/github.copilot/`, and `workspaceStorage/*/chatSessions/`. It also reads `state.vscdb` SQLite databases in `workspaceStorage/*/` to catch sessions stored only in SQLite. All discovery activity is logged to the "Copilot Budget" Output channel.
 2. **Parsing** — Each session file is parsed to extract model names, input/output token counts, and interaction counts. When token counts are not available directly, the extension estimates them from message text length using per-model character-to-token ratios.
 3. **Baseline** — A snapshot is taken at startup so only tokens used during the current session are reported.
 4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.
@@ -57,6 +58,7 @@ Also works in remote environments (Codespaces, WSL, SSH Remote).
 ## Requirements
 
 - GitHub Copilot extension (provides the session files that Copilot Budget reads)
+- The extension bundles [sql.js](https://github.com/sql-js/sql.js) for reading SQLite-based session storage. No additional installation is required.
 
 ## License
 

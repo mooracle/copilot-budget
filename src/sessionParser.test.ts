@@ -291,8 +291,9 @@ describe('sessionParser', () => {
         JSON.stringify({ kind: 0, v: {} }),
         JSON.stringify({ kind: 1, k: ['constructor', 'prototype'], v: { evil: true } }),
       ];
-      parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
+      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
       expect(({} as any).evil).toBeUndefined();
+      expect(result.tokens).toBe(0);
     });
 
     it('rejects prototype in delta key paths', () => {
@@ -300,8 +301,9 @@ describe('sessionParser', () => {
         JSON.stringify({ kind: 0, v: {} }),
         JSON.stringify({ kind: 1, k: ['prototype', 'injected'], v: 'bad' }),
       ];
-      parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
+      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
       expect(({} as any).injected).toBeUndefined();
+      expect(result.tokens).toBe(0);
     });
 
     it('rejects keys starting with double underscore', () => {

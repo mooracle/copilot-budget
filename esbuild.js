@@ -23,6 +23,8 @@ function copyWasm() {
   if (existsSync(wasmSrc)) {
     copyFileSync(wasmSrc, path.join(__dirname, 'dist', 'sql-wasm.wasm'));
     console.log('Copied sql-wasm.wasm to dist/');
+  } else {
+    console.warn('Warning: sql-wasm.wasm not found at', wasmSrc, '— run npm install first');
   }
 }
 
