@@ -2,15 +2,17 @@ import * as fs from 'fs';
 import { discoverSessionFiles, discoverVscdbFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
 import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
-import { estimateTokensFromText } from './tokenEstimator';
+import { estimateTokensFromText, getPremiumMultiplier, PREMIUM_REQUEST_COST } from './tokenEstimator';
 import { log } from './logger';
 
 export interface TrackingStats {
   since: string;
   lastUpdated: string;
-  models: { [model: string]: { inputTokens: number; outputTokens: number } };
+  models: { [model: string]: { inputTokens: number; outputTokens: number; premiumRequests: number } };
   totalTokens: number;
   interactions: number;
+  premiumRequests: number;
+  estimatedCost: number;
 }
 
 interface FileCache {
@@ -18,6 +20,7 @@ interface FileCache {
   tokens: number;
   interactions: number;
   modelUsage: ModelUsage;
+  modelInteractions: { [model: string]: number };
 }
 
 type StatsListener = (stats: TrackingStats) => void;
@@ -32,11 +35,21 @@ function mergeModelUsage(target: ModelUsage, source: ModelUsage): void {
   }
 }
 
+function mergeModelInteractions(
+  target: { [model: string]: number },
+  source: { [model: string]: number },
+): void {
+  for (const [model, count] of Object.entries(source)) {
+    target[model] = (target[model] || 0) + count;
+  }
+}
+
 export class Tracker {
   private baseline: {
     tokens: number;
     interactions: number;
     modelUsage: ModelUsage;
+    modelInteractions: { [model: string]: number };
   } | null = null;
   private fileCache = new Map<string, FileCache>();
   private since: string;
@@ -62,6 +75,7 @@ export class Tracker {
     tokens: number;
     interactions: number;
     modelUsage: ModelUsage;
+    modelInteractions: { [model: string]: number };
   } {
     const files = discoverSessionFiles();
     const vscdbFiles = isSqliteReady() ? discoverVscdbFiles() : [];
@@ -71,6 +85,7 @@ export class Tracker {
     let totalTokens = 0;
     let totalInteractions = 0;
     const mergedModels: ModelUsage = {};
+    const mergedModelInteractions: { [model: string]: number } = {};
 
     // Evict cache entries for files that no longer exist
     for (const cached of this.fileCache.keys()) {
@@ -95,6 +110,7 @@ export class Tracker {
         totalTokens += cached.tokens;
         totalInteractions += cached.interactions;
         mergeModelUsage(mergedModels, cached.modelUsage);
+        mergeModelInteractions(mergedModelInteractions, cached.modelInteractions);
         continue;
       }
 
@@ -116,11 +132,13 @@ export class Tracker {
         tokens: result.tokens,
         interactions: result.interactions,
         modelUsage: result.modelUsage,
+        modelInteractions: result.modelInteractions,
       });
 
       totalTokens += result.tokens;
       totalInteractions += result.interactions;
       mergeModelUsage(mergedModels, result.modelUsage);
+      mergeModelInteractions(mergedModelInteractions, result.modelInteractions);
     }
 
     // Process vscdb files
@@ -139,6 +157,7 @@ export class Tracker {
         totalTokens += cached.tokens;
         totalInteractions += cached.interactions;
         mergeModelUsage(mergedModels, cached.modelUsage);
+        mergeModelInteractions(mergedModelInteractions, cached.modelInteractions);
         continue;
       }
 
@@ -146,6 +165,7 @@ export class Tracker {
       let fileTokens = 0;
       let fileInteractions = 0;
       const fileModelUsage: ModelUsage = {};
+      const fileModelInteractions: { [model: string]: number } = {};
 
       for (const jsonStr of jsonStrings) {
         let sessions: unknown[];
@@ -169,6 +189,7 @@ export class Tracker {
           fileTokens += result.tokens;
           fileInteractions += result.interactions;
           mergeModelUsage(fileModelUsage, result.modelUsage);
+          mergeModelInteractions(fileModelInteractions, result.modelInteractions);
         }
       }
 
@@ -177,11 +198,13 @@ export class Tracker {
         tokens: fileTokens,
         interactions: fileInteractions,
         modelUsage: fileModelUsage,
+        modelInteractions: fileModelInteractions,
       });
 
       totalTokens += fileTokens;
       totalInteractions += fileInteractions;
       mergeModelUsage(mergedModels, fileModelUsage);
+      mergeModelInteractions(mergedModelInteractions, fileModelInteractions);
     }
 
     log(`scanAll: total ${totalTokens} tokens, ${totalInteractions} interactions`);
@@ -190,6 +213,7 @@ export class Tracker {
       tokens: totalTokens,
       interactions: totalInteractions,
       modelUsage: mergedModels,
+      modelInteractions: mergedModelInteractions,
     };
   }
 
@@ -197,16 +221,29 @@ export class Tracker {
     tokens: number;
     interactions: number;
     modelUsage: ModelUsage;
+    modelInteractions: { [model: string]: number };
   }): TrackingStats {
     const baseline = this.baseline || {
       tokens: 0,
       interactions: 0,
       modelUsage: {},
+      modelInteractions: {},
     };
 
     const deltaModels: {
-      [model: string]: { inputTokens: number; outputTokens: number };
+      [model: string]: { inputTokens: number; outputTokens: number; premiumRequests: number };
     } = {};
+
+    // Compute per-model delta interactions for premium request calculation
+    const deltaModelInteractions: { [model: string]: number } = {};
+    for (const [model, count] of Object.entries(current.modelInteractions)) {
+      const baseCount = baseline.modelInteractions[model] || 0;
+      const delta = Math.max(0, count - baseCount);
+      if (delta > 0) {
+        deltaModelInteractions[model] = delta;
+      }
+    }
+
     for (const [model, usage] of Object.entries(current.modelUsage)) {
       const base = baseline.modelUsage[model] || {
         inputTokens: 0,
@@ -214,10 +251,23 @@ export class Tracker {
       };
       const deltaInput = Math.max(0, usage.inputTokens - base.inputTokens);
       const deltaOutput = Math.max(0, usage.outputTokens - base.outputTokens);
-      if (deltaInput > 0 || deltaOutput > 0) {
+      const modelPremium = (deltaModelInteractions[model] || 0) * getPremiumMultiplier(model);
+      if (deltaInput > 0 || deltaOutput > 0 || modelPremium > 0) {
         deltaModels[model] = {
           inputTokens: deltaInput,
           outputTokens: deltaOutput,
+          premiumRequests: modelPremium,
+        };
+      }
+    }
+
+    // Also handle models with interactions but no token usage
+    for (const [model, delta] of Object.entries(deltaModelInteractions)) {
+      if (!deltaModels[model] && delta > 0) {
+        deltaModels[model] = {
+          inputTokens: 0,
+          outputTokens: 0,
+          premiumRequests: delta * getPremiumMultiplier(model),
         };
       }
     }
@@ -230,6 +280,11 @@ export class Tracker {
       0,
       current.interactions - baseline.interactions,
     );
+    const premiumRequests = Object.values(deltaModels).reduce(
+      (sum, m) => sum + m.premiumRequests,
+      0,
+    );
+    const estimatedCost = premiumRequests * PREMIUM_REQUEST_COST;
 
     return {
       since: this.since,
@@ -237,6 +292,8 @@ export class Tracker {
       models: deltaModels,
       totalTokens,
       interactions,
+      premiumRequests,
+      estimatedCost,
     };
   }
 
@@ -294,6 +351,8 @@ export class Tracker {
         models: {},
         totalTokens: 0,
         interactions: 0,
+        premiumRequests: 0,
+        estimatedCost: 0,
       };
     }
     return this.lastStats;

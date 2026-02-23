@@ -62,6 +62,8 @@ beforeEach(() => {
   mockEstimator.estimateTokensFromText.mockImplementation(
     (text: string) => Math.ceil(text.length * 0.25),
   );
+  mockEstimator.getPremiumMultiplier.mockReturnValue(1);
+  (tokenEstimator as any).PREMIUM_REQUEST_COST = 0.04;
   // Default: sqlite not ready, no vscdb files
   mockSqliteReader.isSqliteReady.mockReturnValue(false);
   mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);
@@ -173,7 +175,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            modelInteractions: {}, thinkingTokens: 0,
+            modelInteractions: { 'gpt-4o': 5 }, thinkingTokens: 0,
           },
         },
       ]);
@@ -191,7 +193,7 @@ describe('Tracker', () => {
             tokens: 250,
             interactions: 8,
             modelUsage: { 'gpt-4o': { inputTokens: 150, outputTokens: 100 } },
-            modelInteractions: {}, thinkingTokens: 0,
+            modelInteractions: { 'gpt-4o': 8 }, thinkingTokens: 0,
           },
         },
       ]);
@@ -204,7 +206,10 @@ describe('Tracker', () => {
       expect(stats.models['gpt-4o']).toEqual({
         inputTokens: 90, // 150 - 60
         outputTokens: 60, // 100 - 40
+        premiumRequests: 3, // 3 delta interactions * 1 multiplier
       });
+      expect(stats.premiumRequests).toBe(3);
+      expect(stats.estimatedCost).toBeCloseTo(0.12);
       tracker.dispose();
     });
 
@@ -218,7 +223,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 2,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            modelInteractions: {}, thinkingTokens: 0,
+            modelInteractions: { 'gpt-4o': 2 }, thinkingTokens: 0,
           },
         },
       ]);
@@ -239,7 +244,7 @@ describe('Tracker', () => {
               'gpt-4o': { inputTokens: 100, outputTokens: 60 },
               'claude-sonnet-4': { inputTokens: 80, outputTokens: 60 },
             },
-            modelInteractions: {}, thinkingTokens: 0,
+            modelInteractions: { 'gpt-4o': 3, 'claude-sonnet-4': 2 }, thinkingTokens: 0,
           },
         },
       ]);
@@ -250,11 +255,14 @@ describe('Tracker', () => {
       expect(stats.models['gpt-4o']).toEqual({
         inputTokens: 40,
         outputTokens: 20,
+        premiumRequests: 1,
       });
       expect(stats.models['claude-sonnet-4']).toEqual({
         inputTokens: 80,
         outputTokens: 60,
+        premiumRequests: 2,
       });
+      expect(stats.premiumRequests).toBe(3);
       tracker.dispose();
     });
 
@@ -418,7 +426,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            modelInteractions: {}, thinkingTokens: 0,
+            modelInteractions: { 'gpt-4o': 5 }, thinkingTokens: 0,
           },
         },
       ]);
@@ -438,7 +446,7 @@ describe('Tracker', () => {
             tokens: 200,
             interactions: 8,
             modelUsage: { 'gpt-4o': { inputTokens: 120, outputTokens: 80 } },
-            modelInteractions: {}, thinkingTokens: 0,
+            modelInteractions: { 'gpt-4o': 8 }, thinkingTokens: 0,
           },
         },
       ]);
@@ -448,6 +456,7 @@ describe('Tracker', () => {
       const emittedStats: TrackingStats = listener.mock.calls[0][0];
       expect(emittedStats.totalTokens).toBe(100);
       expect(emittedStats.interactions).toBe(3);
+      expect(emittedStats.premiumRequests).toBe(3);
 
       tracker.dispose();
     });
@@ -650,6 +659,201 @@ describe('Tracker', () => {
     });
   });
 
+  describe('premium requests', () => {
+    it('computes premium requests using model multipliers', () => {
+      // gpt-4o multiplier = 1, claude-sonnet-4 multiplier = 1 (default)
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 100,
+            interactions: 2,
+            modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
+            modelInteractions: { 'gpt-4o': 2 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      tracker.initialize();
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 300,
+            interactions: 5,
+            modelUsage: {
+              'gpt-4o': { inputTokens: 100, outputTokens: 60 },
+              'claude-sonnet-4': { inputTokens: 80, outputTokens: 60 },
+            },
+            modelInteractions: { 'gpt-4o': 3, 'claude-sonnet-4': 2 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      const stats = tracker.getStats();
+
+      // 1 delta gpt-4o interaction * 1 + 2 delta claude-sonnet-4 interactions * 1 = 3
+      expect(stats.premiumRequests).toBe(3);
+      expect(stats.estimatedCost).toBeCloseTo(0.12); // 3 * 0.04
+      tracker.dispose();
+    });
+
+    it('applies non-default multipliers per model', () => {
+      mockEstimator.getPremiumMultiplier.mockImplementation((model: string) => {
+        if (model === 'o1-pro') return 25;
+        return 1;
+      });
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 0,
+            interactions: 0,
+            modelUsage: {},
+            modelInteractions: {}, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      tracker.initialize();
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 500,
+            interactions: 3,
+            modelUsage: {
+              'gpt-4o': { inputTokens: 100, outputTokens: 100 },
+              'o1-pro': { inputTokens: 150, outputTokens: 150 },
+            },
+            modelInteractions: { 'gpt-4o': 2, 'o1-pro': 1 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      const stats = tracker.getStats();
+
+      // gpt-4o: 2 interactions * 1 = 2
+      // o1-pro: 1 interaction * 25 = 25
+      expect(stats.models['gpt-4o'].premiumRequests).toBe(2);
+      expect(stats.models['o1-pro'].premiumRequests).toBe(25);
+      expect(stats.premiumRequests).toBe(27);
+      expect(stats.estimatedCost).toBeCloseTo(1.08); // 27 * 0.04
+      tracker.dispose();
+    });
+
+    it('returns zero premium requests when no interactions', () => {
+      setupEmptyDiscovery();
+      const tracker = new Tracker();
+      tracker.initialize();
+      const stats = tracker.getStats();
+      expect(stats.premiumRequests).toBe(0);
+      expect(stats.estimatedCost).toBe(0);
+      tracker.dispose();
+    });
+
+    it('premium requests reset to zero after reset()', () => {
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 0,
+            interactions: 0,
+            modelUsage: {},
+            modelInteractions: {}, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      tracker.initialize();
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 200,
+            interactions: 4,
+            modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 100 } },
+            modelInteractions: { 'gpt-4o': 4 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      expect(tracker.getStats().premiumRequests).toBe(4);
+
+      tracker.reset();
+      expect(tracker.getStats().premiumRequests).toBe(0);
+      expect(tracker.getStats().estimatedCost).toBe(0);
+      tracker.dispose();
+    });
+
+    it('handles modelInteractions from vscdb files', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
+      mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+        if (p.toString() === '/ws/state.vscdb') {
+          return { mtimeMs: 5000 } as fs.Stats;
+        }
+        throw new Error('ENOENT');
+      });
+
+      const sessionData = { requests: [{ message: { text: 'test' }, response: [{ value: 'reply' }] }] };
+      mockSqliteReader.readSessionsFromVscdb.mockReturnValue([JSON.stringify([sessionData])]);
+      mockParser.parseSessionFileContent.mockReturnValue({
+        tokens: 100,
+        interactions: 1,
+        modelUsage: { 'gpt-4o': { inputTokens: 50, outputTokens: 50 } },
+        modelInteractions: { 'gpt-4o': 1 }, thinkingTokens: 0,
+      });
+
+      const tracker = new Tracker();
+      tracker.initialize();
+      expect(tracker.getStats().premiumRequests).toBe(0); // baseline
+
+      // vscdb file updated
+      mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+        if (p.toString() === '/ws/state.vscdb') {
+          return { mtimeMs: 6000 } as fs.Stats;
+        }
+        throw new Error('ENOENT');
+      });
+      mockParser.parseSessionFileContent.mockReturnValue({
+        tokens: 250,
+        interactions: 3,
+        modelUsage: { 'gpt-4o': { inputTokens: 130, outputTokens: 120 } },
+        modelInteractions: { 'gpt-4o': 3 }, thinkingTokens: 0,
+      });
+
+      tracker.update();
+      const stats = tracker.getStats();
+      expect(stats.premiumRequests).toBe(2); // 3 - 1 = 2 delta interactions
+      expect(stats.estimatedCost).toBeCloseTo(0.08); // 2 * 0.04
+      tracker.dispose();
+    });
+  });
+
   describe('vscdb integration', () => {
     it('does not discover vscdb files when sqlite is not ready', () => {
       setupEmptyDiscovery();
@@ -747,6 +951,7 @@ describe('Tracker', () => {
       expect(stats.models['gpt-4o']).toEqual({
         inputTokens: 80,  // 130 - 50
         outputTokens: 70, // 120 - 50
+        premiumRequests: 0,
       });
       tracker.dispose();
     });

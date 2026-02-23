@@ -15,11 +15,13 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
     since: '2024-01-15T10:30:00Z',
     lastUpdated: '2024-01-15T12:00:00Z',
     models: {
-      'gpt-4o': { inputTokens: 1500, outputTokens: 800 },
-      'claude-sonnet-4': { inputTokens: 500, outputTokens: 300 },
+      'gpt-4o': { inputTokens: 1500, outputTokens: 800, premiumRequests: 10 },
+      'claude-sonnet-4': { inputTokens: 500, outputTokens: 300, premiumRequests: 5 },
     },
     totalTokens: 3100,
     interactions: 15,
+    premiumRequests: 15,
+    estimatedCost: 0.60,
     ...overrides,
   };
 }

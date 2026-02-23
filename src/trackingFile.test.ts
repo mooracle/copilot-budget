@@ -23,11 +23,13 @@ const sampleStats: TrackingStats = {
   since: '2024-01-15T10:30:00Z',
   lastUpdated: '2024-01-15T12:00:00Z',
   models: {
-    'gpt-4o': { inputTokens: 1500, outputTokens: 800 },
-    'claude-sonnet-4': { inputTokens: 500, outputTokens: 300 },
+    'gpt-4o': { inputTokens: 1500, outputTokens: 800, premiumRequests: 10 },
+    'claude-sonnet-4': { inputTokens: 500, outputTokens: 300, premiumRequests: 5 },
   },
   totalTokens: 3100,
   interactions: 15,
+  premiumRequests: 15,
+  estimatedCost: 0.60,
 };
 
 beforeEach(() => {
@@ -103,12 +105,14 @@ describe('trackingFile', () => {
         since: '2024-01-15T10:30:00Z',
         lastUpdated: '2024-01-15T12:00:00Z',
         models: {
-          'model with spaces': { inputTokens: 100, outputTokens: 50 },
-          'model$(cmd)': { inputTokens: 200, outputTokens: 100 },
-          'model`id`': { inputTokens: 300, outputTokens: 150 },
+          'model with spaces': { inputTokens: 100, outputTokens: 50, premiumRequests: 1 },
+          'model$(cmd)': { inputTokens: 200, outputTokens: 100, premiumRequests: 1 },
+          'model`id`': { inputTokens: 300, outputTokens: 150, premiumRequests: 1 },
         },
         totalTokens: 900,
         interactions: 3,
+        premiumRequests: 3,
+        estimatedCost: 0.12,
       };
 
       writeTrackingFile(unsafeStats);
@@ -132,6 +136,8 @@ describe('trackingFile', () => {
         models: {},
         totalTokens: 0,
         interactions: 0,
+        premiumRequests: 0,
+        estimatedCost: 0,
       };
 
       writeTrackingFile(emptyStats);
