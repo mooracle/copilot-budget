@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { log } from './logger';
 
 /** Known non-session filename patterns to exclude */
 const NON_SESSION_PATTERNS = [
@@ -90,22 +91,37 @@ function scanDirectory(dir: string, out: string[]): void {
   }
 }
 
+export interface DiscoveryDiagnostics {
+  platform: string;
+  homedir: string;
+  candidatePaths: { path: string; exists: boolean }[];
+  filesFound: string[];
+}
+
 /**
  * Discover all Copilot session files from standard locations on disk.
- * Returns an array of absolute file paths.
+ * Returns an array of unique absolute file paths.
  */
 export function discoverSessionFiles(): string[] {
   const files: string[] = [];
   const userPaths = getVSCodeUserPaths();
 
+  log(`Session discovery starting on platform=${os.platform()}, home=${os.homedir()}`);
+  log(`Candidate user paths: ${userPaths.length}`);
+
   // Filter to paths that actually exist
   const existing = userPaths.filter((p) => {
     try {
-      return fs.existsSync(p);
+      const exists = fs.existsSync(p);
+      log(`  ${exists ? 'EXISTS' : 'MISSING'}: ${p}`);
+      return exists;
     } catch {
+      log(`  ERROR checking: ${p}`);
       return false;
     }
   });
+
+  log(`Found ${existing.length} existing user paths`);
 
   for (const userPath of existing) {
     // 1. workspaceStorage/*/chatSessions/
@@ -120,6 +136,7 @@ export function discoverSessionFiles(): string[] {
                 .readdirSync(chatDir)
                 .filter((f) => (f.endsWith('.json') || f.endsWith('.jsonl')) && !isNonSessionFile(f))
                 .map((f) => path.join(chatDir, f));
+              log(`  workspaceStorage chatSessions (${wsDir}): ${sessionFiles.length} files`);
               files.push(...sessionFiles);
             }
           } catch {
@@ -131,7 +148,47 @@ export function discoverSessionFiles(): string[] {
       // skip
     }
 
-    // 2. globalStorage/emptyWindowChatSessions/
+    // 2. workspaceStorage/*/github.copilot-chat/ (recursive scan)
+    try {
+      if (fs.existsSync(wsStorage)) {
+        for (const wsDir of fs.readdirSync(wsStorage)) {
+          const wsCopilotChat = path.join(wsStorage, wsDir, 'github.copilot-chat');
+          try {
+            if (fs.existsSync(wsCopilotChat)) {
+              const before = files.length;
+              scanDirectory(wsCopilotChat, files);
+              log(`  workspaceStorage github.copilot-chat (${wsDir}): ${files.length - before} files`);
+            }
+          } catch {
+            // skip
+          }
+        }
+      }
+    } catch {
+      // skip
+    }
+
+    // 3. workspaceStorage/*/github.copilot/ (recursive scan)
+    try {
+      if (fs.existsSync(wsStorage)) {
+        for (const wsDir of fs.readdirSync(wsStorage)) {
+          const wsCopilot = path.join(wsStorage, wsDir, 'github.copilot');
+          try {
+            if (fs.existsSync(wsCopilot)) {
+              const before = files.length;
+              scanDirectory(wsCopilot, files);
+              log(`  workspaceStorage github.copilot (${wsDir}): ${files.length - before} files`);
+            }
+          } catch {
+            // skip
+          }
+        }
+      }
+    } catch {
+      // skip
+    }
+
+    // 4. globalStorage/emptyWindowChatSessions/
     const emptyWindow = path.join(userPath, 'globalStorage', 'emptyWindowChatSessions');
     try {
       if (fs.existsSync(emptyWindow)) {
@@ -139,22 +196,64 @@ export function discoverSessionFiles(): string[] {
           .readdirSync(emptyWindow)
           .filter((f) => (f.endsWith('.json') || f.endsWith('.jsonl')) && !isNonSessionFile(f))
           .map((f) => path.join(emptyWindow, f));
+        log(`  globalStorage/emptyWindowChatSessions: ${sessionFiles.length} files`);
         files.push(...sessionFiles);
       }
     } catch {
       // skip
     }
 
-    // 3. globalStorage/github.copilot-chat/ (recursive scan)
+    // 5. globalStorage/github.copilot-chat/ (recursive scan)
     const copilotChat = path.join(userPath, 'globalStorage', 'github.copilot-chat');
     try {
       if (fs.existsSync(copilotChat)) {
+        const before = files.length;
         scanDirectory(copilotChat, files);
+        log(`  globalStorage/github.copilot-chat: ${files.length - before} files`);
+      }
+    } catch {
+      // skip
+    }
+
+    // 6. globalStorage/github.copilot/ (recursive scan)
+    const copilot = path.join(userPath, 'globalStorage', 'github.copilot');
+    try {
+      if (fs.existsSync(copilot)) {
+        const before = files.length;
+        scanDirectory(copilot, files);
+        log(`  globalStorage/github.copilot: ${files.length - before} files`);
       }
     } catch {
       // skip
     }
   }
 
-  return files;
+  // Deduplicate using a Set
+  const unique = [...new Set(files)];
+  log(`Discovery complete: ${unique.length} unique files (${files.length} before dedup)`);
+
+  return unique;
+}
+
+/**
+ * Returns diagnostic information about session discovery.
+ */
+export function getDiscoveryDiagnostics(): DiscoveryDiagnostics {
+  const userPaths = getVSCodeUserPaths();
+  const candidatePaths = userPaths.map((p) => {
+    let exists = false;
+    try {
+      exists = fs.existsSync(p);
+    } catch {
+      // treat errors as missing
+    }
+    return { path: p, exists };
+  });
+
+  return {
+    platform: os.platform(),
+    homedir: os.homedir(),
+    candidatePaths,
+    filesFound: discoverSessionFiles(),
+  };
 }
