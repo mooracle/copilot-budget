@@ -144,7 +144,9 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 
 		if (Array.isArray(target)) {
 			if (Array.isArray(v)) {
-				target.push(...v);
+				for (const item of v) {
+					target.push(item);
+				}
 			} else {
 				target.push(v);
 			}
