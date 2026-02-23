@@ -1,4 +1,6 @@
 const esbuild = require('esbuild');
+const { copyFileSync, mkdirSync, existsSync } = require('fs');
+const path = require('path');
 
 const watch = process.argv.includes('--watch');
 
@@ -15,13 +17,24 @@ const buildOptions = {
   minify: false,
 };
 
+function copyWasm() {
+  mkdirSync('dist', { recursive: true });
+  const wasmSrc = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+  if (existsSync(wasmSrc)) {
+    copyFileSync(wasmSrc, path.join(__dirname, 'dist', 'sql-wasm.wasm'));
+    console.log('Copied sql-wasm.wasm to dist/');
+  }
+}
+
 async function main() {
   if (watch) {
+    copyWasm();
     const ctx = await esbuild.context(buildOptions);
     await ctx.watch();
     console.log('Watching for changes...');
   } else {
     await esbuild.build(buildOptions);
+    copyWasm();
     console.log('Build complete');
   }
 }
