@@ -11,6 +11,7 @@ describe('sessionParser', () => {
         tokens: 0,
         interactions: 0,
         modelUsage: {},
+        modelInteractions: {},
         thinkingTokens: 0,
       });
     });
@@ -21,6 +22,7 @@ describe('sessionParser', () => {
         tokens: 0,
         interactions: 0,
         modelUsage: {},
+        modelInteractions: {},
         thinkingTokens: 0,
       });
     });
@@ -256,20 +258,22 @@ describe('sessionParser', () => {
 
     it('returns zero for unparseable JSONL', () => {
       const result = parseSessionFileContent('session.jsonl', 'garbage data\nnot json', mockEstimate);
-      expect(result).toEqual({ tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0 });
+      expect(result).toEqual({ tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 });
     });
   });
 
   describe('parseSessionFileContent - return shape', () => {
-    it('returns the expected shape { tokens, interactions, modelUsage, thinkingTokens }', () => {
+    it('returns the expected shape with modelInteractions', () => {
       const result = parseSessionFileContent('session.json', '{}', mockEstimate);
       expect(result).toHaveProperty('tokens');
       expect(result).toHaveProperty('interactions');
       expect(result).toHaveProperty('modelUsage');
+      expect(result).toHaveProperty('modelInteractions');
       expect(result).toHaveProperty('thinkingTokens');
       expect(typeof result.tokens).toBe('number');
       expect(typeof result.interactions).toBe('number');
       expect(typeof result.modelUsage).toBe('object');
+      expect(typeof result.modelInteractions).toBe('object');
       expect(typeof result.thinkingTokens).toBe('number');
     });
   });
@@ -331,6 +335,67 @@ describe('sessionParser', () => {
       const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
       // Should use "actual content!!" (16 chars -> 4) not "wrapper" (7 chars -> 2)
       expect(result.modelUsage['gpt-4o'].outputTokens).toBe(4);
+    });
+  });
+
+  describe('modelInteractions counting', () => {
+    it('counts interactions per model in JSON format', () => {
+      const session = {
+        requests: [
+          { model: 'gpt-4o', message: { text: 'q1' }, response: [{ value: 'a1' }] },
+          { model: 'gpt-4o', message: { text: 'q2' }, response: [{ value: 'a2' }] },
+          { model: 'claude-sonnet-4', message: { text: 'q3' }, response: [{ value: 'a3' }] },
+        ],
+      };
+      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
+      expect(result.modelInteractions).toEqual({ 'gpt-4o': 2, 'claude-sonnet-4': 1 });
+      expect(result.interactions).toBe(3);
+    });
+
+    it('counts interactions per model in JSONL delta format', () => {
+      const lines = [
+        JSON.stringify({ kind: 0, v: { requests: [] } }),
+        JSON.stringify({ kind: 2, k: ['requests'], v: {
+          modelId: 'gpt-4o', message: { text: 'q1' }, response: [{ value: 'a1' }],
+        }}),
+        JSON.stringify({ kind: 2, k: ['requests'], v: {
+          modelId: 'claude-sonnet-4', message: { text: 'q2' }, response: [{ value: 'a2' }],
+        }}),
+        JSON.stringify({ kind: 2, k: ['requests'], v: {
+          modelId: 'claude-sonnet-4', message: { text: 'q3' }, response: [{ value: 'a3' }],
+        }}),
+      ];
+      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
+      expect(result.modelInteractions).toEqual({ 'gpt-4o': 1, 'claude-sonnet-4': 2 });
+      expect(result.interactions).toBe(3);
+    });
+
+    it('does not count requests with empty message text', () => {
+      const session = {
+        requests: [
+          { model: 'gpt-4o', message: { text: 'real question' }, response: [{ value: 'a' }] },
+          { model: 'gpt-4o', message: { text: '   ' }, response: [{ value: 'a' }] },
+          { model: 'gpt-4o', message: { text: '' }, response: [{ value: 'a' }] },
+        ],
+      };
+      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
+      expect(result.modelInteractions).toEqual({ 'gpt-4o': 1 });
+      expect(result.interactions).toBe(1);
+    });
+
+    it('returns empty modelInteractions for empty session', () => {
+      const result = parseSessionFileContent('session.json', '{}', mockEstimate);
+      expect(result.modelInteractions).toEqual({});
+    });
+
+    it('counts interactions using message.parts in JSON format', () => {
+      const session = {
+        requests: [
+          { model: 'gpt-4o', message: { parts: [{ text: 'hello' }] }, response: [{ value: 'a' }] },
+        ],
+      };
+      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
+      expect(result.modelInteractions).toEqual({ 'gpt-4o': 1 });
     });
   });
 

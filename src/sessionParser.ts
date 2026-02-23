@@ -199,6 +199,7 @@ export function parseSessionFileContent(
 	getModelFromRequest?: (req: any) => string
 ) {
 	const modelUsage: ModelUsage = {};
+	const modelInteractions: { [model: string]: number } = {};
 	let interactions = 0;
 	let totalInputTokens = 0;
 	let totalOutputTokens = 0;
@@ -260,9 +261,6 @@ export function parseSessionFileContent(
 				? ((sessionState as any).requests as unknown[])
 				: [];
 			if (requests.length > 0) {
-				// Count only requests that look like user interactions.
-				interactions = requests.filter((r) => isObject(r) && isObject((r as any).message) && typeof (r as any).message.text === 'string' && (r as any).message.text.trim()).length;
-
 				for (const request of requests) {
 					if (!isObject(request)) {
 						continue;
@@ -279,9 +277,13 @@ export function parseSessionFileContent(
 					const callbackModel = normalizeModelId(callbackModelRaw, '');
 					const model = callbackModel && callbackModel !== defaultModel ? callbackModel : requestModel;
 
-					// Extract user message text
+					// Extract user message text and count interaction per model
 					const message = (request as any).message;
 					if (isObject(message) && typeof (message as any).text === 'string') {
+						if ((message as any).text.trim()) {
+							interactions++;
+							modelInteractions[model] = (modelInteractions[model] || 0) + 1;
+						}
 						addInput(model, (message as any).text);
 					}
 
@@ -304,6 +306,7 @@ export function parseSessionFileContent(
 				tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens,
 				interactions,
 				modelUsage,
+				modelInteractions,
 				thinkingTokens: totalThinkingTokens
 			};
 		}
@@ -312,7 +315,7 @@ export function parseSessionFileContent(
 		try {
 			sessionJson = JSON.parse(fileContent.trim());
 		} catch {
-			return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0 };
+			return { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 };
 		}
 	}
 
@@ -321,16 +324,22 @@ export function parseSessionFileContent(
 		try {
 			sessionJson = JSON.parse(fileContent);
 		} catch {
-			return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0 };
+			return { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 };
 		}
 	}
 
 	const requests = Array.isArray(sessionJson.requests) ? sessionJson.requests : (Array.isArray(sessionJson.history) ? sessionJson.history : []);
-	interactions = requests.filter((r: any) => r?.message?.text?.trim() || r?.message?.parts?.some((p: any) => p?.text?.trim())).length;
 	for (const request of requests) {
 		const modelRaw = getModelFromRequest ? getModelFromRequest(request) : (request?.model || defaultModel);
 		const model = normalizeModelId(modelRaw, defaultModel);
 		if (!modelUsage[model]) {modelUsage[model] = { inputTokens: 0, outputTokens: 0 };}
+
+		// Count interaction per model
+		const isInteraction = request?.message?.text?.trim() || request?.message?.parts?.some((p: any) => p?.text?.trim());
+		if (isInteraction) {
+			interactions++;
+			modelInteractions[model] = (modelInteractions[model] || 0) + 1;
+		}
 
 		if (request?.message?.parts) {
 			for (const part of request.message.parts) {
@@ -375,6 +384,7 @@ export function parseSessionFileContent(
 		tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens,
 		interactions,
 		modelUsage,
+		modelInteractions,
 		thinkingTokens: totalThinkingTokens
 	};
 }

@@ -50,7 +50,7 @@ function setupFiles(
     (filePath: string) => {
       const file = files.find((f) => f.path === filePath);
       if (!file)
-        return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0 };
+        return { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 };
       return file.parseResult;
     },
   );
@@ -97,7 +97,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -135,7 +135,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
         {
@@ -148,7 +148,7 @@ describe('Tracker', () => {
             modelUsage: {
               'claude-sonnet-4': { inputTokens: 120, outputTokens: 80 },
             },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -173,7 +173,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -191,7 +191,7 @@ describe('Tracker', () => {
             tokens: 250,
             interactions: 8,
             modelUsage: { 'gpt-4o': { inputTokens: 150, outputTokens: 100 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -218,7 +218,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 2,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -239,7 +239,7 @@ describe('Tracker', () => {
               'gpt-4o': { inputTokens: 100, outputTokens: 60 },
               'claude-sonnet-4': { inputTokens: 80, outputTokens: 60 },
             },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -268,7 +268,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -296,7 +296,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -324,7 +324,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
         {
@@ -335,7 +335,7 @@ describe('Tracker', () => {
             tokens: 50,
             interactions: 2,
             modelUsage: { 'gpt-4o': { inputTokens: 30, outputTokens: 20 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -354,7 +354,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -376,7 +376,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -395,7 +395,7 @@ describe('Tracker', () => {
             tokens: 200,
             interactions: 8,
             modelUsage: { 'gpt-4o': { inputTokens: 120, outputTokens: 80 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -418,7 +418,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -438,7 +438,7 @@ describe('Tracker', () => {
             tokens: 200,
             interactions: 8,
             modelUsage: { 'gpt-4o': { inputTokens: 120, outputTokens: 80 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -497,7 +497,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -534,7 +534,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -552,7 +552,7 @@ describe('Tracker', () => {
             tokens: 300,
             interactions: 10,
             modelUsage: { 'gpt-4o': { inputTokens: 180, outputTokens: 120 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -593,7 +593,7 @@ describe('Tracker', () => {
         tokens: 50,
         interactions: 2,
         modelUsage: { 'gpt-4o': { inputTokens: 30, outputTokens: 20 } },
-        thinkingTokens: 0,
+        modelInteractions: {}, thinkingTokens: 0,
       });
 
       const tracker = new Tracker();
@@ -632,7 +632,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 5,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -689,7 +689,7 @@ describe('Tracker', () => {
         tokens: 150,
         interactions: 1,
         modelUsage: { 'gpt-4o': { inputTokens: 80, outputTokens: 70 } },
-        thinkingTokens: 0,
+        modelInteractions: {}, thinkingTokens: 0,
       });
 
       const tracker = new Tracker();
@@ -719,7 +719,7 @@ describe('Tracker', () => {
         tokens: 100,
         interactions: 1,
         modelUsage: { 'gpt-4o': { inputTokens: 50, outputTokens: 50 } },
-        thinkingTokens: 0,
+        modelInteractions: {}, thinkingTokens: 0,
       });
 
       const tracker = new Tracker();
@@ -737,7 +737,7 @@ describe('Tracker', () => {
         tokens: 250,
         interactions: 3,
         modelUsage: { 'gpt-4o': { inputTokens: 130, outputTokens: 120 } },
-        thinkingTokens: 0,
+        modelInteractions: {}, thinkingTokens: 0,
       });
 
       tracker.update();
@@ -763,7 +763,7 @@ describe('Tracker', () => {
         tokens: 100,
         interactions: 1,
         modelUsage: { 'gpt-4o': { inputTokens: 50, outputTokens: 50 } },
-        thinkingTokens: 0,
+        modelInteractions: {}, thinkingTokens: 0,
       });
 
       const tracker = new Tracker();
@@ -833,7 +833,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 2,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           },
         },
       ]);
@@ -861,7 +861,7 @@ describe('Tracker', () => {
             tokens: 100,
             interactions: 2,
             modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } } as sessionParser.ModelUsage,
-            thinkingTokens: 0,
+            modelInteractions: {}, thinkingTokens: 0,
           };
         }
         // vscdb session
@@ -869,7 +869,7 @@ describe('Tracker', () => {
           tokens: 200,
           interactions: 3,
           modelUsage: { 'claude-sonnet-4': { inputTokens: 120, outputTokens: 80 } } as sessionParser.ModelUsage,
-          thinkingTokens: 0,
+          modelInteractions: {}, thinkingTokens: 0,
         };
       });
 
