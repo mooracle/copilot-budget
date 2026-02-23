@@ -3,17 +3,20 @@ import * as fs from 'fs';
 import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
 import * as tokenEstimator from './tokenEstimator';
+import * as sqliteReader from './sqliteReader';
 
 jest.mock('fs');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
 jest.mock('./tokenEstimator');
+jest.mock('./sqliteReader');
 jest.mock('./logger');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockDiscovery = sessionDiscovery as jest.Mocked<typeof sessionDiscovery>;
 const mockParser = sessionParser as jest.Mocked<typeof sessionParser>;
 const mockEstimator = tokenEstimator as jest.Mocked<typeof tokenEstimator>;
+const mockSqliteReader = sqliteReader as jest.Mocked<typeof sqliteReader>;
 
 function setupEmptyDiscovery() {
   mockDiscovery.discoverSessionFiles.mockReturnValue([]);
@@ -59,6 +62,10 @@ beforeEach(() => {
   mockEstimator.estimateTokensFromText.mockImplementation(
     (text: string) => Math.ceil(text.length * 0.25),
   );
+  // Default: sqlite not ready, no vscdb files
+  mockSqliteReader.isSqliteReady.mockReturnValue(false);
+  mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);
+  mockDiscovery.discoverVscdbFiles.mockReturnValue([]);
 });
 
 afterEach(() => {
@@ -640,6 +647,239 @@ describe('Tracker', () => {
       jest.advanceTimersByTime(120_000);
       // Only 1 call from start(), no more after dispose
       expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('vscdb integration', () => {
+    it('does not discover vscdb files when sqlite is not ready', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(false);
+
+      const tracker = new Tracker();
+      tracker.initialize();
+
+      expect(mockDiscovery.discoverVscdbFiles).not.toHaveBeenCalled();
+      tracker.dispose();
+    });
+
+    it('discovers and processes vscdb files when sqlite is ready', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
+      mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+        if (p.toString() === '/ws/state.vscdb') {
+          return { mtimeMs: 5000 } as fs.Stats;
+        }
+        throw new Error('ENOENT');
+      });
+
+      const sessionData = {
+        requests: [
+          {
+            message: { text: 'hello world' },
+            response: [{ value: 'hi there' }],
+          },
+        ],
+      };
+      mockSqliteReader.readSessionsFromVscdb.mockReturnValue([
+        JSON.stringify([sessionData]),
+      ]);
+
+      mockParser.parseSessionFileContent.mockReturnValue({
+        tokens: 150,
+        interactions: 1,
+        modelUsage: { 'gpt-4o': { inputTokens: 80, outputTokens: 70 } },
+        thinkingTokens: 0,
+      });
+
+      const tracker = new Tracker();
+      tracker.initialize();
+
+      // Baseline set, delta = 0
+      expect(tracker.getStats().totalTokens).toBe(0);
+      expect(mockSqliteReader.readSessionsFromVscdb).toHaveBeenCalledWith('/ws/state.vscdb');
+      expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+      tracker.dispose();
+    });
+
+    it('vscdb data contributes to baseline and delta', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
+      mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+        if (p.toString() === '/ws/state.vscdb') {
+          return { mtimeMs: 5000 } as fs.Stats;
+        }
+        throw new Error('ENOENT');
+      });
+
+      const sessionData = { requests: [{ message: { text: 'test' }, response: [{ value: 'reply' }] }] };
+      mockSqliteReader.readSessionsFromVscdb.mockReturnValue([JSON.stringify([sessionData])]);
+      mockParser.parseSessionFileContent.mockReturnValue({
+        tokens: 100,
+        interactions: 1,
+        modelUsage: { 'gpt-4o': { inputTokens: 50, outputTokens: 50 } },
+        thinkingTokens: 0,
+      });
+
+      const tracker = new Tracker();
+      tracker.initialize();
+      expect(tracker.getStats().totalTokens).toBe(0); // baseline = current
+
+      // Now vscdb file updated with more tokens
+      mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+        if (p.toString() === '/ws/state.vscdb') {
+          return { mtimeMs: 6000 } as fs.Stats;
+        }
+        throw new Error('ENOENT');
+      });
+      mockParser.parseSessionFileContent.mockReturnValue({
+        tokens: 250,
+        interactions: 3,
+        modelUsage: { 'gpt-4o': { inputTokens: 130, outputTokens: 120 } },
+        thinkingTokens: 0,
+      });
+
+      tracker.update();
+      const stats = tracker.getStats();
+      expect(stats.totalTokens).toBe(150); // 250 - 100
+      expect(stats.interactions).toBe(2); // 3 - 1
+      expect(stats.models['gpt-4o']).toEqual({
+        inputTokens: 80,  // 130 - 50
+        outputTokens: 70, // 120 - 50
+      });
+      tracker.dispose();
+    });
+
+    it('uses mtime caching for vscdb files', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
+      mockFs.statSync.mockReturnValue({ mtimeMs: 5000 } as fs.Stats);
+
+      const sessionData = { requests: [{ message: { text: 'x' }, response: [{ value: 'y' }] }] };
+      mockSqliteReader.readSessionsFromVscdb.mockReturnValue([JSON.stringify([sessionData])]);
+      mockParser.parseSessionFileContent.mockReturnValue({
+        tokens: 100,
+        interactions: 1,
+        modelUsage: { 'gpt-4o': { inputTokens: 50, outputTokens: 50 } },
+        thinkingTokens: 0,
+      });
+
+      const tracker = new Tracker();
+      tracker.initialize();
+
+      expect(mockSqliteReader.readSessionsFromVscdb).toHaveBeenCalledTimes(1);
+
+      // Same mtime - should use cache, not re-read
+      tracker.update();
+      expect(mockSqliteReader.readSessionsFromVscdb).toHaveBeenCalledTimes(1);
+
+      tracker.dispose();
+    });
+
+    it('continues when readSessionsFromVscdb returns empty array', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
+      mockFs.statSync.mockReturnValue({ mtimeMs: 5000 } as fs.Stats);
+      mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);
+
+      const tracker = new Tracker();
+      // Should not throw
+      tracker.initialize();
+      expect(tracker.getStats().totalTokens).toBe(0);
+      tracker.dispose();
+    });
+
+    it('handles vscdb stat failure gracefully', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/bad.vscdb']);
+      mockFs.statSync.mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+
+      const tracker = new Tracker();
+      // Should not throw
+      tracker.initialize();
+      expect(tracker.getStats().totalTokens).toBe(0);
+      expect(mockSqliteReader.readSessionsFromVscdb).not.toHaveBeenCalled();
+      tracker.dispose();
+    });
+
+    it('handles invalid JSON from vscdb gracefully', () => {
+      setupEmptyDiscovery();
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
+      mockFs.statSync.mockReturnValue({ mtimeMs: 5000 } as fs.Stats);
+      mockSqliteReader.readSessionsFromVscdb.mockReturnValue(['not valid json']);
+
+      const tracker = new Tracker();
+      // Should not throw
+      tracker.initialize();
+      expect(tracker.getStats().totalTokens).toBe(0);
+      tracker.dispose();
+    });
+
+    it('processes both JSON files and vscdb files together', () => {
+      // Setup JSON file
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 100,
+            interactions: 2,
+            modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } },
+            thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      // Also setup vscdb
+      mockSqliteReader.isSqliteReady.mockReturnValue(true);
+      mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
+
+      // Extend statSync to handle both files
+      const origStatSync = mockFs.statSync.getMockImplementation();
+      mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+        if (p.toString() === '/ws/state.vscdb') {
+          return { mtimeMs: 5000 } as fs.Stats;
+        }
+        return origStatSync!(p);
+      });
+
+      const sessionData = { requests: [{ message: { text: 'test' }, response: [{ value: 'reply' }] }] };
+      mockSqliteReader.readSessionsFromVscdb.mockReturnValue([JSON.stringify([sessionData])]);
+
+      // parseSessionFileContent will be called for both JSON file and vscdb session
+      mockParser.parseSessionFileContent.mockImplementation((filePath: string) => {
+        if (filePath === '/sessions/a.json') {
+          return {
+            tokens: 100,
+            interactions: 2,
+            modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40 } } as sessionParser.ModelUsage,
+            thinkingTokens: 0,
+          };
+        }
+        // vscdb session
+        return {
+          tokens: 200,
+          interactions: 3,
+          modelUsage: { 'claude-sonnet-4': { inputTokens: 120, outputTokens: 80 } } as sessionParser.ModelUsage,
+          thinkingTokens: 0,
+        };
+      });
+
+      const tracker = new Tracker();
+      tracker.initialize();
+
+      // Baseline = 300 tokens total (100 + 200), delta = 0
+      expect(tracker.getStats().totalTokens).toBe(0);
+      expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+      tracker.dispose();
     });
   });
 });

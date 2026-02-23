@@ -1,6 +1,7 @@
 import * as fs from 'fs';
-import { discoverSessionFiles } from './sessionDiscovery';
+import { discoverSessionFiles, discoverVscdbFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
+import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
 import { estimateTokensFromText } from './tokenEstimator';
 import { log } from './logger';
 
@@ -63,8 +64,10 @@ export class Tracker {
     modelUsage: ModelUsage;
   } {
     const files = discoverSessionFiles();
-    log(`scanAll: discovered ${files.length} session file(s)`);
-    const currentFiles = new Set(files);
+    const vscdbFiles = isSqliteReady() ? discoverVscdbFiles() : [];
+    log(`scanAll: discovered ${files.length} session file(s), ${vscdbFiles.length} vscdb file(s)`);
+
+    const currentFiles = new Set([...files, ...vscdbFiles]);
     let totalTokens = 0;
     let totalInteractions = 0;
     const mergedModels: ModelUsage = {};
@@ -76,6 +79,7 @@ export class Tracker {
       }
     }
 
+    // Process JSON/JSONL files
     for (const file of files) {
       let stat: fs.Stats;
       try {
@@ -117,6 +121,67 @@ export class Tracker {
       totalTokens += result.tokens;
       totalInteractions += result.interactions;
       mergeModelUsage(mergedModels, result.modelUsage);
+    }
+
+    // Process vscdb files
+    for (const vscdbFile of vscdbFiles) {
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(vscdbFile);
+      } catch {
+        continue;
+      }
+
+      const mtime = stat.mtimeMs;
+      const cached = this.fileCache.get(vscdbFile);
+
+      if (cached && cached.mtime === mtime) {
+        totalTokens += cached.tokens;
+        totalInteractions += cached.interactions;
+        mergeModelUsage(mergedModels, cached.modelUsage);
+        continue;
+      }
+
+      const jsonStrings = readSessionsFromVscdb(vscdbFile);
+      let fileTokens = 0;
+      let fileInteractions = 0;
+      const fileModelUsage: ModelUsage = {};
+
+      for (const jsonStr of jsonStrings) {
+        let sessions: unknown[];
+        try {
+          const parsed = JSON.parse(jsonStr);
+          sessions = Array.isArray(parsed) ? parsed : [parsed];
+        } catch {
+          continue;
+        }
+
+        for (const session of sessions) {
+          if (typeof session !== 'object' || session === null) {
+            continue;
+          }
+          const sessionContent = JSON.stringify(session);
+          const result = parseSessionFileContent(
+            vscdbFile,
+            sessionContent,
+            estimateTokensFromText,
+          );
+          fileTokens += result.tokens;
+          fileInteractions += result.interactions;
+          mergeModelUsage(fileModelUsage, result.modelUsage);
+        }
+      }
+
+      this.fileCache.set(vscdbFile, {
+        mtime,
+        tokens: fileTokens,
+        interactions: fileInteractions,
+        modelUsage: fileModelUsage,
+      });
+
+      totalTokens += fileTokens;
+      totalInteractions += fileInteractions;
+      mergeModelUsage(mergedModels, fileModelUsage);
     }
 
     log(`scanAll: total ${totalTokens} tokens, ${totalInteractions} interactions`);
