@@ -54,9 +54,11 @@ describe('trackingFile', () => {
 
       expect(writtenContent).toContain('TOTAL_TOKENS=3100');
       expect(writtenContent).toContain('INTERACTIONS=15');
+      expect(writtenContent).toContain('PREMIUM_REQUESTS=15.00');
+      expect(writtenContent).toContain('ESTIMATED_COST=0.60');
       expect(writtenContent).toContain('SINCE=2024-01-15T10:30:00Z');
-      expect(writtenContent).toContain('MODEL gpt-4o 1500 800');
-      expect(writtenContent).toContain('MODEL claude-sonnet-4 500 300');
+      expect(writtenContent).toContain('MODEL gpt-4o 1500 800 10.00');
+      expect(writtenContent).toContain('MODEL claude-sonnet-4 500 300 5.00');
     });
 
     it('returns false when no workspace folder', () => {
@@ -116,9 +118,9 @@ describe('trackingFile', () => {
       };
 
       writeTrackingFile(unsafeStats);
-      expect(writtenContent).toContain('MODEL model_with_spaces 100 50');
-      expect(writtenContent).toContain('MODEL model__cmd_ 200 100');
-      expect(writtenContent).toContain('MODEL model_id_ 300 150');
+      expect(writtenContent).toContain('MODEL model_with_spaces 100 50 1.00');
+      expect(writtenContent).toContain('MODEL model__cmd_ 200 100 1.00');
+      expect(writtenContent).toContain('MODEL model_id_ 300 150 1.00');
       expect(writtenContent).not.toMatch(/\$\(cmd\)/);
       expect(writtenContent).not.toMatch(/`id`/);
     });
@@ -143,6 +145,8 @@ describe('trackingFile', () => {
       writeTrackingFile(emptyStats);
       expect(writtenContent).toContain('TOTAL_TOKENS=0');
       expect(writtenContent).toContain('INTERACTIONS=0');
+      expect(writtenContent).toContain('PREMIUM_REQUESTS=0.00');
+      expect(writtenContent).toContain('ESTIMATED_COST=0.00');
       expect(writtenContent).not.toContain('MODEL ');
     });
   });

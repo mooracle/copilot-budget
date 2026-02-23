@@ -23,12 +23,14 @@ export function writeTrackingFile(stats: TrackingStats): boolean {
   const lines: string[] = [
     `TOTAL_TOKENS=${stats.totalTokens}`,
     `INTERACTIONS=${stats.interactions}`,
+    `PREMIUM_REQUESTS=${stats.premiumRequests.toFixed(2)}`,
+    `ESTIMATED_COST=${stats.estimatedCost.toFixed(2)}`,
     `SINCE=${stats.since}`,
   ];
 
   for (const [model, usage] of Object.entries(stats.models)) {
     const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, '_');
-    lines.push(`MODEL ${safeModel} ${usage.inputTokens} ${usage.outputTokens}`);
+    lines.push(`MODEL ${safeModel} ${usage.inputTokens} ${usage.outputTokens} ${usage.premiumRequests.toFixed(2)}`);
   }
 
   try {
