@@ -63,6 +63,7 @@ export function parseApiResponse(data: unknown): PlanInfo | null {
   const planCost = PLAN_COSTS[planName];
 
   if (!planCost) {
+    log(`planDetector: unrecognized plan '${copilotPlan}' from API`);
     return null;
   }
 
@@ -102,6 +103,7 @@ async function detectFromApi(): Promise<PlanInfo | null> {
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
         Accept: 'application/json',
+        'User-Agent': 'copilot-budget-vscode',
       },
     });
 
@@ -157,7 +159,7 @@ function updatePlan(newPlan: PlanInfo): void {
 }
 
 export function getPlanInfo(): PlanInfo {
-  return currentPlan;
+  return { ...currentPlan };
 }
 
 export function onPlanChanged(listener: (plan: PlanInfo) => void): { dispose: () => void } {

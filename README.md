@@ -6,10 +6,11 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 
 - **Premium request tracking** — calculates premium request consumption per model using GitHub Copilot's billing multipliers and displays premium requests and estimated cost in the status bar.
 - **Per-model breakdown** — see premium requests, estimated cost, and input/output tokens grouped by model (GPT-4o, Claude, Gemini, etc.).
-- **Commit hook integration** — automatically appends `AI-Premium-Requests`, `AI-Est-Cost`, and `AI-Model` git trailers to commit messages, accumulating totals across commits.
+- **Plan-aware cost calculation** — automatically detects your GitHub Copilot plan (Free, Pro, Pro+, Business, Enterprise) via the GitHub API for accurate per-request cost. Can also be configured manually. Falls back to the $0.04 overage rate when the plan cannot be determined.
+- **Commit hook integration** — automatically appends `AI-Premium-Requests`, `AI-Est-Cost`, and `AI-Model` git trailers to commit messages.
 - **Session-aware** — tracks only usage since VS Code was opened (baseline subtraction), so counts reset each session.
 - **SQLite session support** — reads Copilot sessions from `state.vscdb` databases, catching sessions that only exist in SQLite after recent Copilot storage migrations.
-- **Lightweight** — polls every two minutes with file-level caching; no network calls.
+- **Lightweight** — polls every two minutes with file-level caching; one optional API call for plan detection.
 
 ## Getting Started
 
@@ -34,6 +35,7 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 |---|---|---|---|
 | `copilot-budget.enabled` | boolean | `true` | Enable or disable Copilot Budget token usage tracking |
 | `copilot-budget.commitHook.enabled` | boolean | `false` | Automatically install the prepare-commit-msg hook when the extension activates |
+| `copilot-budget.plan` | string | `"auto"` | GitHub Copilot plan for cost calculation. Options: `auto` (detect via GitHub API), `free`, `pro`, `pro+`, `business`, `enterprise` |
 
 ## How It Works
 
@@ -41,7 +43,8 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 2. **Parsing** — Each session file is parsed to extract model names, input/output token counts, and interaction counts. When token counts are not available directly, the extension estimates them from message text length using per-model character-to-token ratios.
 3. **Baseline** — A snapshot is taken at startup so only tokens used during the current session are reported.
 4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.
-5. **Commit hook** — When installed, a `prepare-commit-msg` shell script reads the tracking file (`.git/copilot-budget`) and appends git trailers (`AI-Premium-Requests`, `AI-Est-Cost`, `AI-Model`) to the commit message. It reads previous commit trailers to accumulate running totals. After appending, the hook resets the tracking file so the next commit only includes usage since the previous commit.
+5. **Plan detection** — The extension detects your GitHub Copilot plan to determine the effective cost per premium request. It first checks the `copilot-budget.plan` setting; if set to `auto`, it queries the GitHub API using existing authentication. The plan is refreshed every 15 minutes. If detection fails, it falls back to the $0.04 overage rate.
+6. **Commit hook** — When installed, a `prepare-commit-msg` shell script reads the tracking file (`.git/copilot-budget`) and appends git trailers (`AI-Premium-Requests`, `AI-Est-Cost`, `AI-Model`) to the commit message. After appending, the hook resets the tracking file so the next commit only includes usage since the previous commit.
 
 > **Note:** If a `prepare-commit-msg` hook already exists that was not installed by Copilot Budget, the install command will not overwrite it. Remove the existing hook first or integrate manually.
 

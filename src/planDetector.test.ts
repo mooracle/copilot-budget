@@ -350,9 +350,9 @@ describe('disposePlanDetector', () => {
 describe('PLAN_COSTS', () => {
   it('has correct cost per request for each plan', () => {
     expect(PLAN_COSTS.free.costPerRequest).toBe(0);
-    expect(PLAN_COSTS.pro.costPerRequest).toBeCloseTo(0.0333, 3);
+    expect(PLAN_COSTS.pro.costPerRequest).toBe(10 / 300);
     expect(PLAN_COSTS['pro+'].costPerRequest).toBe(39 / 1500);
-    expect(PLAN_COSTS.business.costPerRequest).toBeCloseTo(0.0633, 3);
+    expect(PLAN_COSTS.business.costPerRequest).toBe(19 / 300);
     expect(PLAN_COSTS.enterprise.costPerRequest).toBe(39 / 1000);
   });
 });

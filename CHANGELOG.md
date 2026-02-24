@@ -5,7 +5,23 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-02-24
+
+### Added
+
+- Plan-aware cost calculation with automatic GitHub Copilot plan detection via API
+- New `copilot-budget.plan` setting to manually select plan (auto/free/pro/pro+/business/enterprise)
+- Plan detection with periodic refresh every 15 minutes
+- Plan name displayed in quick pick header when detected
+
+### Changed
+
+- Cost calculation now uses plan-specific effective rate instead of fixed $0.04 overage rate
+- Commit hook simplified to a dumb pipe (reads tracking file, writes trailers, resets file)
+- Removed commit trailer accumulation from hook
+- Status bar quick pick shows per-model cost based on detected plan rate
+
+## [0.2.0] - 2026-02-24
 
 ### Added
 
@@ -26,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Status bar now shows premium requests and estimated cost instead of raw token count
 - Commit hook now uses git trailers (`AI-Premium-Requests`, `AI-Est-Cost`, `AI-Model`) instead of inline text
-- Commit hook accumulates premium request and cost totals from previous commits
+- Commit hook writes premium request and cost data as git trailers
 - Tracking file format extended with `PREMIUM_REQUESTS`, `ESTIMATED_COST`, and per-model premium request data
 - Added `sql.js` as the first runtime dependency (WASM-based SQLite)
 

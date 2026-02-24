@@ -24,7 +24,7 @@ Debug: Press F5 in VS Code to launch Extension Development Host.
 
 The extension follows a **baseline/delta** model: on activation it snapshots all Copilot session tokens as a baseline, then reports only the delta (tokens used during the current VS Code session).
 
-**Entry point**: `src/extension.ts` — `activate()` creates a `Tracker`, wires up the status bar, registers 5 commands (including showDiagnostics), and optionally auto-installs the git hook.
+**Entry point**: `src/extension.ts` — `activate()` initializes SQLite, detects the Copilot plan, creates a `Tracker` with plan info provider, wires up the status bar, registers 5 commands (including showDiagnostics), starts periodic plan refresh, and optionally auto-installs the git hook.
 
 **Core modules** (all in `src/`):
 
@@ -34,9 +34,10 @@ The extension follows a **baseline/delta** model: on activation it snapshots all
 - **tokenEstimator.ts** — Character-to-token estimation using per-model ratios from `data/tokenEstimators.json`. Fallback ratio: 0.25. Also exports `getPremiumMultiplier(model)` for GitHub Copilot billing multipliers.
 - **statusBar.ts** — Status bar item showing premium request count and estimated cost. Quick pick panel with per-model premium request, cost, and token breakdown.
 - **trackingFile.ts** — Writes stats to `.git/copilot-budget` in key=value format for the commit hook to read. Includes `PREMIUM_REQUESTS`, `ESTIMATED_COST`, and per-model premium request data.
-- **commitHook.ts** — Installs/uninstalls a POSIX `prepare-commit-msg` hook that reads `.git/copilot-budget` and appends git trailers (`AI-Premium-Requests`, `AI-Est-Cost`, `AI-Model`) to commit messages. Accumulates totals from previous commit trailers for running cumulative tracking.
+- **planDetector.ts** — Detects GitHub Copilot plan for accurate cost-per-request calculation. Exports `PlanInfo` type, `PLAN_COSTS` map, `DEFAULT_COST_PER_REQUEST` ($0.04 overage), `detectPlan()`, `getPlanInfo()`, `onPlanChanged()`, `startPeriodicRefresh()`/`stopPeriodicRefresh()`, `disposePlanDetector()`, and `parseApiResponse()`. Detection order: user config (`copilot-budget.plan`) > GitHub API (`copilot_internal/user` with `createIfNone: false`) > default ($0.04). Refreshes every 15 minutes.
+- **commitHook.ts** — Installs/uninstalls a POSIX `prepare-commit-msg` hook that reads `.git/copilot-budget` and appends git trailers (`AI-Premium-Requests`, `AI-Est-Cost`, `AI-Model`) to commit messages. Resets the tracking file after appending.
 - **sqliteReader.ts** — Reads Copilot sessions from `state.vscdb` SQLite databases using `sql.js` (WASM-based). Exports `initSqlite()`, `readSessionsFromVscdb()`, `isSqliteReady()`, and `disposeSqlite()`. Loads WASM binary from `dist/sql-wasm.wasm` at activation; gracefully degrades if init fails.
-- **config.ts** — Wraps `copilot-budget.enabled` and `copilot-budget.commitHook.enabled` settings.
+- **config.ts** — Wraps `copilot-budget.enabled`, `copilot-budget.commitHook.enabled`, and `copilot-budget.plan` settings. Exports `PlanSetting` type.
 - **logger.ts** — Shared OutputChannel logger singleton. Exports `log()` (timestamped append), `getOutputChannel()`, and `disposeLogger()`. Used by sessionDiscovery, tracker, and the diagnostics command.
 
 ## Testing
@@ -49,4 +50,4 @@ Tests live alongside source files as `*.test.ts`. The `vscode` module is mocked 
 - **esbuild bundles** to a single `dist/extension.js` (CommonJS, Node 18 target, vscode external). The build also copies `sql-wasm.wasm` to `dist/`.
 - The commit hook is pure POSIX shell with no external dependencies.
 - Prototype pollution prevention is implemented in the JSONL delta parser.
-- The extension never makes network calls — all data is read from local session files.
+- The extension makes one optional network call: plan detection queries `https://api.github.com/copilot_internal/user` via `fetch()` (Node 18 built-in) using existing GitHub authentication (`createIfNone: false`, never prompts). Gracefully degrades to the $0.04 overage rate if the call fails. All session data is read from local files.
