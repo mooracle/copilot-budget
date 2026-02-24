@@ -109,6 +109,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ch.appendLine('Current stats:');
         ch.appendLine(`  Total tokens: ${stats.totalTokens}`);
         ch.appendLine(`  Interactions: ${stats.interactions}`);
+        ch.appendLine(`  Premium requests: ${stats.premiumRequests.toFixed(2)}`);
+        ch.appendLine(`  Estimated cost: $${stats.estimatedCost.toFixed(2)}`);
         ch.appendLine(`  Since: ${stats.since}`);
         ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
       }

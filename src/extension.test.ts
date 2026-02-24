@@ -86,9 +86,11 @@ beforeEach(() => {
     getStats: jest.fn().mockReturnValue({
       since: '2024-01-01T00:00:00Z',
       lastUpdated: '2024-01-01T01:00:00Z',
-      models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+      models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 1 } },
       totalTokens: 300,
       interactions: 5,
+      premiumRequests: 1,
+      estimatedCost: 0.04,
     }),
     onStatsChanged: jest.fn((listener: any) => {
       statsChangedListeners.push(listener);
@@ -171,9 +173,11 @@ beforeEach(() => {
   trackerInstance.getStats.mockReturnValue({
     since: '2024-01-01T00:00:00Z',
     lastUpdated: '2024-01-01T01:00:00Z',
-    models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+    models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 1 } },
     totalTokens: 300,
     interactions: 5,
+    premiumRequests: 1,
+    estimatedCost: 0.04,
   });
 });
 
@@ -329,6 +333,20 @@ describe('extension', () => {
       expect(mockGetDiscoveryDiagnostics).toHaveBeenCalled();
       expect(mockChannel.appendLine).toHaveBeenCalled();
       expect(mockChannel.show).toHaveBeenCalled();
+    });
+
+    it('showDiagnostics command displays premium requests and estimated cost', async () => {
+      const ctx = makeContext();
+      await activate(ctx);
+
+      const mockChannel = mockGetOutputChannel();
+      __commandCallbacks['copilot-budget.showDiagnostics']();
+
+      const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
+        (c: any[]) => c[0],
+      );
+      expect(appendCalls).toContain('  Premium requests: 1.00');
+      expect(appendCalls).toContain('  Estimated cost: $0.04');
     });
 
     it('showDiagnostics command displays vscdb file info', async () => {
