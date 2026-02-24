@@ -258,40 +258,32 @@ describe('commitHook', () => {
       expect(writtenContent).not.toContain('AI-Commit-Tokens:');
     });
 
-    it('reads previous commit trailers for accumulation', () => {
-      expect(writtenContent).toContain('git log -1');
-      expect(writtenContent).toContain('trailers:key=AI-Premium-Requests');
-      expect(writtenContent).toContain('trailers:key=AI-Est-Cost');
-      expect(writtenContent).toContain('trailers:key=AI-Model');
+    it('is a dumb pipe with no accumulation logic', () => {
+      // Should NOT read previous commit trailers
+      expect(writtenContent).not.toContain('git log -1');
+      expect(writtenContent).not.toContain('trailers:key=');
+      // Should NOT use awk for accumulation
+      expect(writtenContent).not.toContain('awk');
+      // Should NOT have validate_num
+      expect(writtenContent).not.toContain('validate_num');
+      // Should NOT have PREV_ or TOTAL_ variables
+      expect(writtenContent).not.toContain('PREV_');
+      expect(writtenContent).not.toContain('TOTAL_');
+      expect(writtenContent).not.toContain('CURRENT_');
     });
 
-    it('uses awk for float accumulation', () => {
-      // Float addition for premium requests and cost
-      expect(writtenContent).toContain('awk "BEGIN {printf');
-      expect(writtenContent).toContain('PREV_PREMIUM');
-      expect(writtenContent).toContain('CURRENT_PREMIUM');
-      expect(writtenContent).toContain('PREV_COST');
-      expect(writtenContent).toContain('CURRENT_COST');
+    it('reads values directly from tracking file', () => {
+      expect(writtenContent).toContain("grep '^PREMIUM_REQUESTS=' \"$TRACKING_FILE\"");
+      expect(writtenContent).toContain("grep '^ESTIMATED_COST=' \"$TRACKING_FILE\"");
     });
 
-    it('accumulates per-model totals with awk including premium requests', () => {
+    it('writes per-model trailers from tracking file', () => {
       expect(writtenContent).toContain('AI-Model:');
-      expect(writtenContent).toContain("grep '^MODEL '");
-      expect(writtenContent).toContain('awk');
-      // Model format includes 4th field for premium requests
-      expect(writtenContent).toMatch(/printf.*%s\/%s\/%s/);
-      // Awk handles missing 4th field as 0 for backward compat
-      expect(writtenContent).toContain('$4');
+      expect(writtenContent).toContain("grep '^MODEL ' \"$TRACKING_FILE\"");
     });
 
-    it('includes validate_num function for numeric sanitization', () => {
-      expect(writtenContent).toContain('validate_num()');
-      // Rejects empty, lone dot, non-numeric, and multiple dots
-      expect(writtenContent).toContain("''|.|*[!0-9.]*|*.*.*");
-    });
-
-    it('validates inp and out fields in model loop', () => {
-      expect(writtenContent).toContain('*[!0-9]*) continue');
+    it('skips when no premium requests', () => {
+      expect(writtenContent).toContain("case \"$PREMIUM\" in ''|0|0.00) exit 0");
     });
   });
 });
