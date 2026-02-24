@@ -87,8 +87,8 @@ describe('statusBar', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('15.00 PR');
-      expect(createdItem.text).toContain('$0.60');
+      expect(createdItem.text).toContain('15 PR');
+      expect(createdItem.text).toContain('$0.6');
     });
 
     it('shows zero for empty stats', () => {
@@ -97,8 +97,8 @@ describe('statusBar', () => {
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('0.00 PR');
-      expect(createdItem.text).toContain('$0.00');
+      expect(createdItem.text).toContain('0 PR');
+      expect(createdItem.text).toContain('$0.0');
     });
 
     it('sets command to copilot-budget.showStats', () => {
@@ -135,12 +135,12 @@ describe('statusBar', () => {
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('0.00 PR');
+      expect(createdItem.text).toContain('0 PR');
 
       fireStatsChanged(makeStats({ premiumRequests: 25.50, estimatedCost: 1.02 }));
 
-      expect(createdItem.text).toContain('25.50 PR');
-      expect(createdItem.text).toContain('$1.02');
+      expect(createdItem.text).toContain('26 PR');
+      expect(createdItem.text).toContain('$1.0');
     });
 
     it('disposes item and subscription on dispose', () => {
@@ -157,14 +157,14 @@ describe('statusBar', () => {
       expect(subDispose).toHaveBeenCalled();
     });
 
-    it('formats fractional premium requests with two decimals', () => {
+    it('formats premium requests as integers and cost with one decimal', () => {
       const { tracker } = createMockTracker(
         makeStats({ premiumRequests: 12.25, estimatedCost: 0.49 }),
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('12.25 PR');
-      expect(createdItem.text).toContain('$0.49');
+      expect(createdItem.text).toContain('12 PR');
+      expect(createdItem.text).toContain('$0.5');
     });
   });
 
@@ -179,8 +179,8 @@ describe('statusBar', () => {
         i.label?.includes('Premium Requests'),
       );
       expect(prItem).toBeDefined();
-      expect(prItem.label).toContain('15.00');
-      expect(prItem.description).toContain('$0.60');
+      expect(prItem.label).toContain('15');
+      expect(prItem.description).toContain('$0.6');
     });
 
     it('shows tracking since timestamp', async () => {
@@ -203,8 +203,8 @@ describe('statusBar', () => {
         i.label?.includes('gpt-4o'),
       );
       expect(gptItem).toBeDefined();
-      expect(gptItem.description).toContain('10.00 PR');
-      expect(gptItem.description).toContain('$0.40');
+      expect(gptItem.description).toContain('10 PR');
+      expect(gptItem.description).toContain('$0.4');
     });
 
     it('shows tokens in detail line', async () => {
@@ -303,8 +303,8 @@ describe('statusBar', () => {
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
       const gptItem = items.find((i: any) => i.label?.includes('gpt-4o'));
       expect(gptItem).toBeDefined();
-      // 10 PR * (10/300) = $0.33
-      expect(gptItem.description).toContain('$0.33');
+      // 10 PR * (10/300) = $0.33, displayed as $0.3
+      expect(gptItem.description).toContain('$0.3');
     });
   });
 });

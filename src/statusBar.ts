@@ -7,11 +7,11 @@ function formatNumber(n: number): string {
 }
 
 function formatPR(n: number): string {
-  return n.toFixed(2);
+  return Math.round(n).toString();
 }
 
 function formatCost(n: number): string {
-  return `$${n.toFixed(2)}`;
+  return `$${n.toFixed(1)}`;
 }
 
 export function createStatusBar(
@@ -21,13 +21,13 @@ export function createStatusBar(
     vscode.StatusBarAlignment.Right,
     100,
   );
-  item.text = '$(symbol-numeric) Copilot: 0.00 PR | $0.00';
+  item.text = '$(symbol-numeric) 0 PR | $0.0';
   item.tooltip = 'Click to view per-model budget breakdown';
   item.command = 'copilot-budget.showStats';
   item.show();
 
   function updateText(stats: TrackingStats): void {
-    item.text = `$(symbol-numeric) Copilot: ${formatPR(stats.premiumRequests)} PR | ${formatCost(stats.estimatedCost)}`;
+    item.text = `$(symbol-numeric) ${formatPR(stats.premiumRequests)} PR | ${formatCost(stats.estimatedCost)}`;
   }
 
   // Set initial text from current stats
