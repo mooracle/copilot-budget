@@ -3,7 +3,7 @@ import { discoverSessionFiles, discoverVscdbFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
 import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
 import { estimateTokensFromText, getPremiumMultiplier } from './tokenEstimator';
-import { DEFAULT_COST_PER_REQUEST } from './planDetector';
+import { DEFAULT_COST_PER_REQUEST, PlanInfo } from './planDetector';
 import { log } from './logger';
 
 export interface TrackingStats {
@@ -57,9 +57,14 @@ export class Tracker {
   private timer: ReturnType<typeof setInterval> | null = null;
   private listeners: StatsListener[] = [];
   private lastStats: TrackingStats | null = null;
+  private planInfoProvider: (() => PlanInfo) | null = null;
 
   constructor() {
     this.since = new Date().toISOString();
+  }
+
+  setPlanInfoProvider(provider: () => PlanInfo): void {
+    this.planInfoProvider = provider;
   }
 
   onStatsChanged(listener: StatsListener): { dispose: () => void } {
@@ -285,7 +290,10 @@ export class Tracker {
       (sum, m) => sum + m.premiumRequests,
       0,
     );
-    const estimatedCost = premiumRequests * DEFAULT_COST_PER_REQUEST;
+    const costPerRequest = this.planInfoProvider
+      ? this.planInfoProvider().costPerRequest
+      : DEFAULT_COST_PER_REQUEST;
+    const estimatedCost = premiumRequests * costPerRequest;
 
     return {
       since: this.since,
@@ -313,7 +321,8 @@ export class Tracker {
       !this.lastStats ||
       stats.totalTokens !== this.lastStats.totalTokens ||
       stats.interactions !== this.lastStats.interactions ||
-      stats.premiumRequests !== this.lastStats.premiumRequests
+      stats.premiumRequests !== this.lastStats.premiumRequests ||
+      stats.estimatedCost !== this.lastStats.estimatedCost
     ) {
       this.lastStats = stats;
       for (const listener of [...this.listeners]) {

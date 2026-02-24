@@ -856,6 +856,190 @@ describe('Tracker', () => {
     });
   });
 
+  describe('setPlanInfoProvider', () => {
+    it('uses plan cost instead of default when provider is set', () => {
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 0,
+            interactions: 0,
+            modelUsage: {},
+            modelInteractions: {}, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      tracker.setPlanInfoProvider(() => ({
+        planName: 'pro',
+        costPerRequest: 10 / 300, // ~0.0333
+        source: 'config',
+      }));
+      tracker.initialize();
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 200,
+            interactions: 3,
+            modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 100 } },
+            modelInteractions: { 'gpt-4o': 3 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      const stats = tracker.getStats();
+
+      expect(stats.premiumRequests).toBe(3);
+      // 3 * (10/300) = 0.1
+      expect(stats.estimatedCost).toBeCloseTo(0.1);
+      tracker.dispose();
+    });
+
+    it('uses default cost when no provider is set', () => {
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 0,
+            interactions: 0,
+            modelUsage: {},
+            modelInteractions: {}, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      // No setPlanInfoProvider call
+      tracker.initialize();
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 200,
+            interactions: 3,
+            modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 100 } },
+            modelInteractions: { 'gpt-4o': 3 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      const stats = tracker.getStats();
+
+      expect(stats.premiumRequests).toBe(3);
+      // 3 * 0.04 = 0.12 (default rate)
+      expect(stats.estimatedCost).toBeCloseTo(0.12);
+      tracker.dispose();
+    });
+
+    it('reflects plan changes on next update', () => {
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 0,
+            interactions: 0,
+            modelUsage: {},
+            modelInteractions: {}, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      let currentCost = 0.04;
+      const tracker = new Tracker();
+      tracker.setPlanInfoProvider(() => ({
+        planName: 'unknown',
+        costPerRequest: currentCost,
+        source: 'default',
+      }));
+      tracker.initialize();
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 200,
+            interactions: 5,
+            modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 100 } },
+            modelInteractions: { 'gpt-4o': 5 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      expect(tracker.getStats().estimatedCost).toBeCloseTo(0.2); // 5 * 0.04
+
+      // Plan changes to pro
+      currentCost = 10 / 300;
+      tracker.update();
+      // Same premium requests but new cost rate
+      expect(tracker.getStats().estimatedCost).toBeCloseTo(5 * (10 / 300)); // ~0.1667
+      tracker.dispose();
+    });
+
+    it('uses free plan cost (zero) correctly', () => {
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 0,
+            interactions: 0,
+            modelUsage: {},
+            modelInteractions: {}, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      tracker.setPlanInfoProvider(() => ({
+        planName: 'free',
+        costPerRequest: 0,
+        source: 'config',
+      }));
+      tracker.initialize();
+
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 200,
+            interactions: 3,
+            modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 100 } },
+            modelInteractions: { 'gpt-4o': 3 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      const stats = tracker.getStats();
+
+      expect(stats.premiumRequests).toBe(3);
+      expect(stats.estimatedCost).toBe(0);
+      tracker.dispose();
+    });
+  });
+
   describe('vscdb integration', () => {
     it('does not discover vscdb files when sqlite is not ready', () => {
       setupEmptyDiscovery();
