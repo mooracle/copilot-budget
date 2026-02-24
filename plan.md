@@ -54,16 +54,16 @@ API detection: uses `fetch()` (Node 18 built-in) with `createIfNone: false` (nev
 
 ### Task 3: Update `src/tracker.ts`
 
-- [ ] Add `setPlanInfoProvider(provider: () => PlanInfo)` method to Tracker
-- [ ] In `computeStats()`, replace `premiumRequests * PREMIUM_REQUEST_COST` with `premiumRequests * planInfo.costPerRequest`
-- [ ] Update `src/tracker.test.ts` with tests for setPlanInfoProvider affecting estimatedCost
+- [x] Add `setPlanInfoProvider(provider: () => PlanInfo)` method to Tracker
+- [x] In `computeStats()`, replace `premiumRequests * PREMIUM_REQUEST_COST` with `premiumRequests * planInfo.costPerRequest`
+- [x] Update `src/tracker.test.ts` with tests for setPlanInfoProvider affecting estimatedCost
 
 ### Task 4: Update `src/statusBar.ts`
 
-- [ ] Import `DEFAULT_COST_PER_REQUEST` from planDetector instead of `PREMIUM_REQUEST_COST` from tokenEstimator
-- [ ] Per-model cost in quick pick: derive cost-per-request from plan info or stats ratio
-- [ ] Add plan name to quick pick header when detected
-- [ ] Update `src/statusBar.test.ts` with plan name display tests
+- [x] Import `DEFAULT_COST_PER_REQUEST` from planDetector instead of `PREMIUM_REQUEST_COST` from tokenEstimator
+- [x] Per-model cost in quick pick: derive cost-per-request from plan info or stats ratio
+- [x] Add plan name to quick pick header when detected
+- [x] Update `src/statusBar.test.ts` with plan name display tests
 
 ### Task 5: Add config setting in `package.json` and `src/config.ts`
 

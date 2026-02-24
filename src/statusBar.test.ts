@@ -1,12 +1,17 @@
 import { createStatusBar, showStatsQuickPick } from './statusBar';
 import { Tracker, TrackingStats } from './tracker';
 import * as vscode from 'vscode';
+import { getPlanInfo } from './planDetector';
 
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
 jest.mock('./planDetector', () => ({
-  DEFAULT_COST_PER_REQUEST: 0.04,
+  getPlanInfo: jest.fn().mockReturnValue({
+    planName: 'unknown',
+    costPerRequest: 0.04,
+    source: 'default',
+  }),
 }));
 jest.mock('fs');
 
@@ -245,6 +250,61 @@ describe('statusBar', () => {
       const options = mockWindow.showQuickPick.mock.calls[0][1];
       expect(options.title).toContain('Copilot Budget');
       expect(options.placeHolder).toBeTruthy();
+    });
+
+    it('shows plan name in title when plan is detected via api', async () => {
+      (getPlanInfo as jest.Mock).mockReturnValue({
+        planName: 'pro',
+        costPerRequest: 10 / 300,
+        source: 'api',
+      });
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const options = mockWindow.showQuickPick.mock.calls[0][1];
+      expect(options.title).toBe('Copilot Budget - Premium Requests (pro plan)');
+    });
+
+    it('shows plan name in title when plan is from config', async () => {
+      (getPlanInfo as jest.Mock).mockReturnValue({
+        planName: 'enterprise',
+        costPerRequest: 0.039,
+        source: 'config',
+      });
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const options = mockWindow.showQuickPick.mock.calls[0][1];
+      expect(options.title).toBe('Copilot Budget - Premium Requests (enterprise plan)');
+    });
+
+    it('does not show plan name when source is default', async () => {
+      (getPlanInfo as jest.Mock).mockReturnValue({
+        planName: 'unknown',
+        costPerRequest: 0.04,
+        source: 'default',
+      });
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const options = mockWindow.showQuickPick.mock.calls[0][1];
+      expect(options.title).toBe('Copilot Budget - Premium Requests');
+    });
+
+    it('uses plan cost per request for per-model cost', async () => {
+      (getPlanInfo as jest.Mock).mockReturnValue({
+        planName: 'pro',
+        costPerRequest: 10 / 300,
+        source: 'api',
+      });
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const gptItem = items.find((i: any) => i.label?.includes('gpt-4o'));
+      expect(gptItem).toBeDefined();
+      // 10 PR * (10/300) = $0.33
+      expect(gptItem.description).toContain('$0.33');
     });
   });
 });

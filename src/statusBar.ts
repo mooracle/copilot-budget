@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Tracker, TrackingStats } from './tracker';
-import { DEFAULT_COST_PER_REQUEST } from './planDetector';
+import { getPlanInfo } from './planDetector';
 
 function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
@@ -65,14 +65,19 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
       const total = usage.inputTokens + usage.outputTokens;
       items.push({
         label: `$(hubot) ${model}`,
-        description: `${formatPR(usage.premiumRequests)} PR | ${formatCost(usage.premiumRequests * DEFAULT_COST_PER_REQUEST)}`,
+        description: `${formatPR(usage.premiumRequests)} PR | ${formatCost(usage.premiumRequests * getPlanInfo().costPerRequest)}`,
         detail: `Tokens: ${formatNumber(total)} (in: ${formatNumber(usage.inputTokens)} / out: ${formatNumber(usage.outputTokens)})`,
       });
     }
   }
 
+  const planInfo = getPlanInfo();
+  const title = planInfo.source !== 'default'
+    ? `Copilot Budget - Premium Requests (${planInfo.planName} plan)`
+    : 'Copilot Budget - Premium Requests';
+
   await vscode.window.showQuickPick(items, {
-    title: 'Copilot Budget - Premium Requests',
+    title,
     placeHolder: 'Per-model budget breakdown',
   });
 }
