@@ -127,11 +127,17 @@ export class Tracker {
         continue;
       }
 
-      const result = parseSessionFileContent(
-        file,
-        content,
-        estimateTokensFromText,
-      );
+      let result;
+      try {
+        result = parseSessionFileContent(
+          file,
+          content,
+          estimateTokensFromText,
+        );
+      } catch {
+        log(`scanAll: failed to parse session file: ${file}`);
+        continue;
+      }
 
       this.fileCache.set(file, {
         mtime,
@@ -187,11 +193,16 @@ export class Tracker {
             continue;
           }
           const sessionContent = JSON.stringify(session);
-          const result = parseSessionFileContent(
-            vscdbFile,
-            sessionContent,
-            estimateTokensFromText,
-          );
+          let result;
+          try {
+            result = parseSessionFileContent(
+              vscdbFile,
+              sessionContent,
+              estimateTokensFromText,
+            );
+          } catch {
+            continue;
+          }
           fileTokens += result.tokens;
           fileInteractions += result.interactions;
           mergeModelUsage(fileModelUsage, result.modelUsage);

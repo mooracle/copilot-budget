@@ -20,15 +20,15 @@ COST=$(grep '^ESTIMATED_COST=' "$TRACKING_FILE" | cut -d= -f2)
 # Skip if no premium requests
 case "$PREMIUM" in ''|0|0.00) exit 0 ;; esac
 
-printf '\\n\\nAI-Premium-Requests: %s\\n' "$PREMIUM" >> "$COMMIT_MSG_FILE"
-printf 'AI-Est-Cost: $%s\\n' "$COST" >> "$COMMIT_MSG_FILE"
+{
+printf '\\n\\nAI-Premium-Requests: %s\\n' "$PREMIUM"
+printf 'AI-Est-Cost: $%s\\n' "$COST"
 
 # Per-model trailers
 grep '^MODEL ' "$TRACKING_FILE" | while read _ name inp out pr; do
-  printf 'AI-Model: %s %s/%s/%s\\n' "$name" "$inp" "$out" "$pr" >> "$COMMIT_MSG_FILE"
+  printf 'AI-Model: %s %s/%s/%s\\n' "$name" "$inp" "$out" "$pr"
 done
-
-: > "$TRACKING_FILE"
+} >> "$COMMIT_MSG_FILE" && : > "$TRACKING_FILE"
 `;
 
 function getHookPath(): string | null {
