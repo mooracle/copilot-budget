@@ -67,14 +67,14 @@ API detection: uses `fetch()` (Node 18 built-in) with `createIfNone: false` (nev
 
 ### Task 5: Add config setting in `package.json` and `src/config.ts`
 
-- [ ] `package.json`: Add `copilot-budget.plan` enum setting with descriptions
-- [ ] `config.ts`: Add `getPlanSetting(): PlanSetting` accessor
-- [ ] Update `src/config.test.ts` with `getPlanSetting()` tests
+- [x] `package.json`: Add `copilot-budget.plan` enum setting with descriptions
+- [x] `config.ts`: Add `getPlanSetting(): PlanSetting` accessor
+- [x] Update `src/config.test.ts` with `getPlanSetting()` tests
 
 ### Task 6: Simplify commit hook — make it a dumb pipe
 
-- [ ] Replace HOOK_SCRIPT in `src/commitHook.ts` with simplified dumb-pipe version
-- [ ] Update `src/commitHook.test.ts` with updated hook script assertions
+- [x] Replace HOOK_SCRIPT in `src/commitHook.ts` with simplified dumb-pipe version
+- [x] Update `src/commitHook.test.ts` with updated hook script assertions
 
 **Current hook behavior** (to be replaced):
 - Reads `PREMIUM_REQUESTS` and `ESTIMATED_COST` from tracking file
@@ -128,14 +128,14 @@ done
 
 ### Task 7: Wire up in `src/extension.ts`
 
-- [ ] Import and call `detectPlan()` during activation (before `tracker.start()`)
-- [ ] Call `tracker.setPlanInfoProvider(getPlanInfo)`
-- [ ] Call `startPeriodicRefresh()`
-- [ ] Subscribe `onPlanChanged` → `tracker.update()` (recompute stats with new rate)
-- [ ] Subscribe config changes → `detectPlan()` (re-detect when plan setting changes)
-- [ ] Add plan info to diagnostics output
-- [ ] Call `disposePlanDetector()` in `deactivate()`
-- [ ] Update `src/extension.test.ts` with plan detection wiring tests
+- [x] Import and call `detectPlan()` during activation (before `tracker.start()`)
+- [x] Call `tracker.setPlanInfoProvider(getPlanInfo)`
+- [x] Call `startPeriodicRefresh()`
+- [x] Subscribe `onPlanChanged` → `tracker.update()` (recompute stats with new rate)
+- [x] Subscribe config changes → `detectPlan()` (re-detect when plan setting changes)
+- [x] Add plan info to diagnostics output
+- [x] Call `disposePlanDetector()` in `deactivate()`
+- [x] Update `src/extension.test.ts` with plan detection wiring tests
 
 ## Key Files
 

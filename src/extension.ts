@@ -7,6 +7,13 @@ import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
 import { log, getOutputChannel, disposeLogger } from './logger';
 import { initSqlite, disposeSqlite } from './sqliteReader';
+import {
+  detectPlan,
+  getPlanInfo,
+  onPlanChanged,
+  startPeriodicRefresh,
+  disposePlanDetector,
+} from './planDetector';
 
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
@@ -39,8 +46,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log('SQLite support unavailable — vscdb files will be skipped');
   }
 
+  // Detect plan before starting tracker so cost calculations use the right rate
+  await detectPlan();
+
   tracker = new Tracker();
+  tracker.setPlanInfoProvider(getPlanInfo);
   tracker.start();
+
+  // Periodic plan refresh (re-detect every 15 min)
+  startPeriodicRefresh();
+
+  // Recompute stats when plan changes
+  const planSub = onPlanChanged(() => {
+    if (tracker) tracker.update();
+  });
+  context.subscriptions.push(planSub);
 
   statusBar = createStatusBar(tracker);
   context.subscriptions.push({ dispose: () => statusBar?.dispose() });
@@ -103,6 +123,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ch.appendLine(`  ${f}`);
       }
 
+      const planInfo = getPlanInfo();
+      ch.appendLine('');
+      ch.appendLine('Plan detection:');
+      ch.appendLine(`  Plan: ${planInfo.planName}`);
+      ch.appendLine(`  Cost per request: $${planInfo.costPerRequest.toFixed(4)}`);
+      ch.appendLine(`  Source: ${planInfo.source}`);
+
       if (tracker) {
         const stats = tracker.getStats();
         ch.appendLine('');
@@ -129,6 +156,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (isCommitHookEnabled() && !isHookInstalled()) {
       installHook();
     }
+    // Re-detect plan when config changes (user may have changed copilot-budget.plan)
+    detectPlan().catch(() => {});
   });
   context.subscriptions.push(configSub);
 }
@@ -144,6 +173,7 @@ export function deactivate(): void {
     statusBar.dispose();
     statusBar = null;
   }
+  disposePlanDetector();
   disposeSqlite();
   disposeLogger();
 }
