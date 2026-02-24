@@ -71,6 +71,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(statsWriter);
 
+  // Also re-write the tracking file on every poll, in case the commit hook
+  // truncated it. The onStatsChanged listener only fires when stats differ,
+  // so without this the file stays empty after a commit until new activity.
+  const trackingFileRefresh = setInterval(() => {
+    if (tracker) writeTrackingFile(tracker.getStats());
+  }, 120_000);
+  context.subscriptions.push({ dispose: () => clearInterval(trackingFileRefresh) });
+
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.showStats', () => {

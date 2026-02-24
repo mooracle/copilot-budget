@@ -236,8 +236,8 @@ describe('extension', () => {
     it('registers 5 commands', async () => {
       const ctx = makeContext();
       await activate(ctx);
-      // subscriptions: planSub + statusBar disposable + statsWriter + 5 commands + configSub = 9
-      expect(ctx.subscriptions.length).toBe(9);
+      // subscriptions: planSub + statusBar disposable + statsWriter + trackingFileRefresh + 5 commands + configSub = 10
+      expect(ctx.subscriptions.length).toBe(10);
     });
 
     it('registers stub commands when disabled', async () => {
@@ -262,6 +262,21 @@ describe('extension', () => {
       };
       statsChangedListeners[0](stats);
       expect(mockWriteTrackingFile).toHaveBeenCalledWith(stats);
+    });
+
+    it('periodically re-writes tracking file even when stats unchanged', async () => {
+      jest.useFakeTimers();
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+
+      // Advance past one 120s interval
+      jest.advanceTimersByTime(120_000);
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
+
+      // Clean up: dispose subscriptions to clear the interval
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
     });
 
     it('auto-installs hook when commitHook.enabled is true', async () => {
