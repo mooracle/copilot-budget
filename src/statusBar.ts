@@ -5,6 +5,14 @@ function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
 }
 
+function formatPR(n: number): string {
+  return n.toFixed(2);
+}
+
+function formatCost(n: number): string {
+  return `$${n.toFixed(2)}`;
+}
+
 export function createStatusBar(
   tracker: Tracker,
 ): { item: vscode.StatusBarItem; dispose: () => void } {
@@ -12,13 +20,13 @@ export function createStatusBar(
     vscode.StatusBarAlignment.Right,
     100,
   );
-  item.text = '$(symbol-numeric) Copilot Budget: 0';
-  item.tooltip = 'Click to view per-model token breakdown';
+  item.text = '$(symbol-numeric) Copilot: 0.00 PR | $0.00';
+  item.tooltip = 'Click to view per-model budget breakdown';
   item.command = 'copilot-budget.showStats';
   item.show();
 
   function updateText(stats: TrackingStats): void {
-    item.text = `$(symbol-numeric) Copilot Budget: ${formatNumber(stats.totalTokens)}`;
+    item.text = `$(symbol-numeric) Copilot: ${formatPR(stats.premiumRequests)} PR | ${formatCost(stats.estimatedCost)}`;
   }
 
   // Set initial text from current stats
@@ -40,8 +48,8 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
   const items: vscode.QuickPickItem[] = [];
 
   items.push({
-    label: `$(symbol-numeric) Total: ${formatNumber(stats.totalTokens)} tokens`,
-    description: `${stats.interactions} interactions`,
+    label: `$(symbol-numeric) Premium Requests: ${formatPR(stats.premiumRequests)}`,
+    description: `Est. cost: ${formatCost(stats.estimatedCost)}`,
   });
 
   items.push({
@@ -56,14 +64,14 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
       const total = usage.inputTokens + usage.outputTokens;
       items.push({
         label: `$(hubot) ${model}`,
-        description: `${formatNumber(total)} tokens`,
-        detail: `Input: ${formatNumber(usage.inputTokens)} | Output: ${formatNumber(usage.outputTokens)}`,
+        description: `${formatPR(usage.premiumRequests)} PR | ${formatCost(usage.premiumRequests * 0.04)}`,
+        detail: `Tokens: ${formatNumber(total)} (in: ${formatNumber(usage.inputTokens)} / out: ${formatNumber(usage.outputTokens)})`,
       });
     }
   }
 
   await vscode.window.showQuickPick(items, {
-    title: 'Copilot Budget - Token Usage',
-    placeHolder: 'Per-model token breakdown',
+    title: 'Copilot Budget - Premium Requests',
+    placeHolder: 'Per-model budget breakdown',
   });
 }
