@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -36,7 +36,10 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "extensionKind": ["ui", "workspace"],
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -76,7 +79,14 @@
         },
         "copilot-budget.plan": {
           "type": "string",
-          "enum": ["auto", "free", "pro", "pro+", "business", "enterprise"],
+          "enum": [
+            "auto",
+            "free",
+            "pro",
+            "pro+",
+            "business",
+            "enterprise"
+          ],
           "default": "auto",
           "enumDescriptions": [
             "Auto-detect plan via GitHub API (falls back to overage rate $0.04/request if unavailable)",
