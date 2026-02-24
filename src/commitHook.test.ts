@@ -72,8 +72,9 @@ describe('commitHook', () => {
       expect(content).toContain(MARKER);
       expect(content).toContain('#!/bin/sh');
       expect(content).toContain('TRACKING_FILE=');
-      expect(content).toContain('TOTAL_TOKENS=');
-      expect(content).toContain('AI Budget:');
+      expect(content).toContain('PREMIUM_REQUESTS=');
+      expect(content).toContain('AI-Premium-Requests:');
+      expect(content).toContain('AI-Model:');
       expect(options.mode).toBe(0o755);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
         'Copilot Budget: Commit hook installed.',
@@ -221,19 +222,22 @@ describe('commitHook', () => {
   });
 
   describe('hook script content', () => {
-    it('includes essential shell logic', () => {
+    let writtenContent: string;
+
+    beforeEach(() => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockImplementation(() => {
         throw new Error('ENOENT');
       });
       (mockFs.existsSync as jest.Mock).mockReturnValue(true);
-      let writtenContent = '';
+      writtenContent = '';
       mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
         writtenContent = data;
       });
-
       installHook();
+    });
 
+    it('includes essential shell logic', () => {
       // Skips merge, squash, and amend commits
       expect(writtenContent).toContain('case "$COMMIT_SOURCE"');
       expect(writtenContent).toContain('merge|squash|commit');
@@ -241,28 +245,52 @@ describe('commitHook', () => {
       expect(writtenContent).toContain('git rev-parse --show-toplevel');
       // Reads the tracking file
       expect(writtenContent).toContain('.git/copilot-budget');
-      // Builds model list
-      expect(writtenContent).toContain("grep '^MODEL '");
       // Appends to commit message
       expect(writtenContent).toContain('>> "$COMMIT_MSG_FILE"');
       // Resets tracking file
       expect(writtenContent).toContain(': > "$TRACKING_FILE"');
     });
 
-    it('validates numeric fields before arithmetic expansion', () => {
-      setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
-      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
-      let writtenContent = '';
-      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
-        writtenContent = data;
-      });
+    it('writes premium request and cost trailers', () => {
+      expect(writtenContent).toContain('AI-Premium-Requests:');
+      expect(writtenContent).toContain('AI-Est-Cost:');
+      expect(writtenContent).not.toContain('AI-Total-Tokens:');
+      expect(writtenContent).not.toContain('AI-Commit-Tokens:');
+    });
 
-      installHook();
+    it('reads previous commit trailers for accumulation', () => {
+      expect(writtenContent).toContain('git log -1');
+      expect(writtenContent).toContain('trailers:key=AI-Premium-Requests');
+      expect(writtenContent).toContain('trailers:key=AI-Est-Cost');
+      expect(writtenContent).toContain('trailers:key=AI-Model');
+    });
 
-      // Hook must validate inp and out are numeric before using in $((..))
+    it('uses awk for float accumulation', () => {
+      // Float addition for premium requests and cost
+      expect(writtenContent).toContain('awk "BEGIN {printf');
+      expect(writtenContent).toContain('PREV_PREMIUM');
+      expect(writtenContent).toContain('CURRENT_PREMIUM');
+      expect(writtenContent).toContain('PREV_COST');
+      expect(writtenContent).toContain('CURRENT_COST');
+    });
+
+    it('accumulates per-model totals with awk including premium requests', () => {
+      expect(writtenContent).toContain('AI-Model:');
+      expect(writtenContent).toContain("grep '^MODEL '");
+      expect(writtenContent).toContain('awk');
+      // Model format includes 4th field for premium requests
+      expect(writtenContent).toMatch(/printf.*%s\/%s\/%s/);
+      // Awk handles missing 4th field as 0 for backward compat
+      expect(writtenContent).toContain('$4');
+    });
+
+    it('includes validate_num function for numeric sanitization', () => {
+      expect(writtenContent).toContain('validate_num()');
+      // Rejects empty, lone dot, non-numeric, and multiple dots
+      expect(writtenContent).toContain("''|.|*[!0-9.]*|*.*.*");
+    });
+
+    it('validates inp and out fields in model loop', () => {
       expect(writtenContent).toContain('*[!0-9]*) continue');
     });
   });

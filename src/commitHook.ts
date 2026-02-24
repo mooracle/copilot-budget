@@ -14,19 +14,50 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 TRACKING_FILE="$REPO_ROOT/.git/copilot-budget"
 [ -f "$TRACKING_FILE" ] || exit 0
 
-TOTAL=$(grep '^TOTAL_TOKENS=' "$TRACKING_FILE" | cut -d= -f2)
-[ -z "$TOTAL" ] || [ "$TOTAL" = "0" ] && exit 0
+validate_num() {
+  case "$1" in
+    ''|.|*[!0-9.]*|*.*.*) echo 0 ; return ;;
+  esac
+  echo "$1"
+}
 
-MODELS=""
-while read _ name inp out; do
-  case "$inp" in *[!0-9]*) continue ;; esac
-  case "$out" in *[!0-9]*) continue ;; esac
-  MODELS="\${MODELS}\${MODELS:+, }\${name} $((inp + out))"
-done <<EOF
-$(grep '^MODEL ' "$TRACKING_FILE")
-EOF
+CURRENT_PREMIUM=$(grep '^PREMIUM_REQUESTS=' "$TRACKING_FILE" | cut -d= -f2)
+CURRENT_PREMIUM=$(validate_num "$CURRENT_PREMIUM")
+CURRENT_COST=$(grep '^ESTIMATED_COST=' "$TRACKING_FILE" | cut -d= -f2)
+CURRENT_COST=$(validate_num "$CURRENT_COST")
 
-printf '\\n\\nAI Budget: %s | total: %s tokens' "$MODELS" "$TOTAL" >> "$COMMIT_MSG_FILE"
+[ "$CURRENT_PREMIUM" = "0" ] && exit 0
+
+PREV_PREMIUM=$(git log -1 --format='%(trailers:key=AI-Premium-Requests,valueonly)' 2>/dev/null | tr -d ' ')
+PREV_PREMIUM=$(validate_num "$PREV_PREMIUM")
+PREV_COST=$(git log -1 --format='%(trailers:key=AI-Est-Cost,valueonly)' 2>/dev/null | tr -d ' $')
+PREV_COST=$(validate_num "$PREV_COST")
+
+TOTAL_PREMIUM=$(awk "BEGIN {printf \\"%.2f\\", \${PREV_PREMIUM} + \${CURRENT_PREMIUM}}")
+TOTAL_COST=$(awk "BEGIN {printf \\"%.2f\\", \${PREV_COST} + \${CURRENT_COST}}")
+
+printf '\\n\\nAI-Premium-Requests: %s\\n' "$TOTAL_PREMIUM" >> "$COMMIT_MSG_FILE"
+printf 'AI-Est-Cost: $%s\\n' "$TOTAL_COST" >> "$COMMIT_MSG_FILE"
+
+# Accumulate per-model totals (previous + current)
+{
+  git log -1 --format='%(trailers:key=AI-Model,valueonly)' 2>/dev/null
+  grep '^MODEL ' "$TRACKING_FILE" | while read _ name inp out pr; do
+    case "$inp" in *[!0-9]*) continue ;; esac
+    case "$out" in *[!0-9]*) continue ;; esac
+    pr=$(validate_num "$pr")
+    printf '%s %s/%s/%s\\n' "$name" "$inp" "$out" "$pr"
+  done
+} | awk -F'[ /]' '
+  \$2 ~ /^[0-9]+$/ && \$3 ~ /^[0-9]+$/ {
+    inp[\$1] += \$2; out[\$1] += \$3
+    pr[\$1] += (\$4 ~ /^[0-9]*\\.?[0-9]+$/ ? \$4 : 0)
+  }
+  END {
+    for (m in inp) printf "AI-Model: %s %d/%d/%.2f\\n", m, inp[m], out[m], pr[m]
+  }
+' >> "$COMMIT_MSG_FILE"
+
 : > "$TRACKING_FILE"
 `;
 
