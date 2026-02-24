@@ -5,7 +5,11 @@ import * as vscode from 'vscode';
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
-jest.mock('./tokenEstimator');
+jest.mock('./tokenEstimator', () => ({
+  PREMIUM_REQUEST_COST: 0.04,
+  estimateTokensFromText: jest.fn(),
+  getPremiumMultiplier: jest.fn(),
+}));
 jest.mock('fs');
 
 const mockWindow = vscode.window as any;

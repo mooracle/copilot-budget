@@ -26,7 +26,7 @@ CURRENT_PREMIUM=$(validate_num "$CURRENT_PREMIUM")
 CURRENT_COST=$(grep '^ESTIMATED_COST=' "$TRACKING_FILE" | cut -d= -f2)
 CURRENT_COST=$(validate_num "$CURRENT_COST")
 
-[ "$CURRENT_PREMIUM" = "0" ] && exit 0
+[ "$CURRENT_PREMIUM" = "0" ] || [ "$CURRENT_PREMIUM" = "0.00" ] && exit 0
 
 PREV_PREMIUM=$(git log -1 --format='%(trailers:key=AI-Premium-Requests,valueonly)' 2>/dev/null | tr -d ' ')
 PREV_PREMIUM=$(validate_num "$PREV_PREMIUM")

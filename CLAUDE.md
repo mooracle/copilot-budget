@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Copilot Budget** is a VS Code extension that tracks GitHub Copilot token usage per session and optionally appends AI budget info to git commit messages. It activates on startup, polls Copilot session files every 120 seconds, and displays a running token count in the status bar.
+**Copilot Budget** is a VS Code extension that tracks GitHub Copilot premium request usage and estimated cost per session and optionally appends AI budget git trailers to commit messages. It activates on startup, polls Copilot session files every 120 seconds, and displays premium requests and estimated cost in the status bar.
 
 ## Build & Development Commands
 
@@ -28,13 +28,13 @@ The extension follows a **baseline/delta** model: on activation it snapshots all
 
 **Core modules** (all in `src/`):
 
-- **tracker.ts** — Central state machine. Polls every 120s, caches parsed results by file mtime, emits `onStatsChanged` events. Returns `TrackingStats` with per-model breakdowns.
+- **tracker.ts** — Central state machine. Polls every 120s, caches parsed results by file mtime, emits `onStatsChanged` events. Returns `TrackingStats` with per-model breakdowns including premium request counts and estimated cost. Tracks per-model interaction counts for premium request calculation.
 - **sessionDiscovery.ts** — Finds Copilot session files across VS Code variants (Code, Insiders, VSCodium, Cursor) and platforms (macOS, Linux, Windows, remote/WSL). Scans `globalStorage` and `workspaceStorage` for both `github.copilot-chat/` and `github.copilot/`. Exports `getDiscoveryDiagnostics()` returning platform, homedir, candidate paths, and files found.
-- **sessionParser.ts** — Parses two formats: plain JSON sessions and delta-based JSONL (VS Code Insiders). Extracts input/output/thinking tokens per model.
-- **tokenEstimator.ts** — Character-to-token estimation using per-model ratios from `data/tokenEstimators.json`. Fallback ratio: 0.25.
-- **statusBar.ts** — Status bar item + quick pick panel showing per-model breakdown.
-- **trackingFile.ts** — Writes stats to `.git/copilot-budget` in key=value format for the commit hook to read.
-- **commitHook.ts** — Installs/uninstalls a POSIX `prepare-commit-msg` hook that reads `.git/copilot-budget` and appends token info to commit messages.
+- **sessionParser.ts** — Parses two formats: plain JSON sessions and delta-based JSONL (VS Code Insiders). Extracts input/output/thinking tokens per model. Also returns per-model interaction counts (`modelInteractions`) used for premium request calculation.
+- **tokenEstimator.ts** — Character-to-token estimation using per-model ratios from `data/tokenEstimators.json`. Fallback ratio: 0.25. Also exports `getPremiumMultiplier(model)` for GitHub Copilot billing multipliers and `PREMIUM_REQUEST_COST` ($0.04 per premium request).
+- **statusBar.ts** — Status bar item showing premium request count and estimated cost. Quick pick panel with per-model premium request, cost, and token breakdown.
+- **trackingFile.ts** — Writes stats to `.git/copilot-budget` in key=value format for the commit hook to read. Includes `PREMIUM_REQUESTS`, `ESTIMATED_COST`, and per-model premium request data.
+- **commitHook.ts** — Installs/uninstalls a POSIX `prepare-commit-msg` hook that reads `.git/copilot-budget` and appends git trailers (`AI-Premium-Requests`, `AI-Est-Cost`, `AI-Model`) to commit messages. Accumulates totals from previous commit trailers for running cumulative tracking.
 - **sqliteReader.ts** — Reads Copilot sessions from `state.vscdb` SQLite databases using `sql.js` (WASM-based). Exports `initSqlite()`, `readSessionsFromVscdb()`, `isSqliteReady()`, and `disposeSqlite()`. Loads WASM binary from `dist/sql-wasm.wasm` at activation; gracefully degrades if init fails.
 - **config.ts** — Wraps `copilot-budget.enabled` and `copilot-budget.commitHook.enabled` settings.
 - **logger.ts** — Shared OutputChannel logger singleton. Exports `log()` (timestamped append), `getOutputChannel()`, and `disposeLogger()`. Used by sessionDiscovery, tracker, and the diagnostics command.

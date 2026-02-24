@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Tracker, TrackingStats } from './tracker';
+import { PREMIUM_REQUEST_COST } from './tokenEstimator';
 
 function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
@@ -64,7 +65,7 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
       const total = usage.inputTokens + usage.outputTokens;
       items.push({
         label: `$(hubot) ${model}`,
-        description: `${formatPR(usage.premiumRequests)} PR | ${formatCost(usage.premiumRequests * 0.04)}`,
+        description: `${formatPR(usage.premiumRequests)} PR | ${formatCost(usage.premiumRequests * PREMIUM_REQUEST_COST)}`,
         detail: `Tokens: ${formatNumber(total)} (in: ${formatNumber(usage.inputTokens)} / out: ${formatNumber(usage.outputTokens)})`,
       });
     }

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Premium request tracking based on per-model GitHub Copilot billing multipliers
+- Estimated cost calculation at $0.04 per premium request
+- Premium multiplier data in `data/tokenEstimators.json` for 30+ models
+- Per-model interaction counting in session parser
 - SQLite (`state.vscdb`) session reading via `sql.js` (WASM-based, no native modules)
 - `state.vscdb` discovery in `workspaceStorage/*/` directories
 - Graceful degradation when SQLite initialization fails (JSON/JSONL files still work)
@@ -20,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Status bar now shows premium requests and estimated cost instead of raw token count
+- Commit hook now uses git trailers (`AI-Premium-Requests`, `AI-Est-Cost`, `AI-Model`) instead of inline text
+- Commit hook accumulates premium request and cost totals from previous commits
+- Tracking file format extended with `PREMIUM_REQUESTS`, `ESTIMATED_COST`, and per-model premium request data
 - Added `sql.js` as the first runtime dependency (WASM-based SQLite)
 
 ### Fixed
