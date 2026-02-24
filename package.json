@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -36,6 +36,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
+  "extensionKind": ["ui", "workspace"],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -72,6 +73,20 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
+        },
+        "copilot-budget.plan": {
+          "type": "string",
+          "enum": ["auto", "free", "pro", "pro+", "business", "enterprise"],
+          "default": "auto",
+          "enumDescriptions": [
+            "Auto-detect plan via GitHub API (falls back to overage rate $0.04/request if unavailable)",
+            "Free plan — 50 included requests/month ($0.00/request)",
+            "Pro plan — 300 included requests/month ($0.0333/request)",
+            "Pro+ plan — 1500 included requests/month ($0.0260/request)",
+            "Business plan — 300 included requests/month ($0.0633/request)",
+            "Enterprise plan — 1000 included requests/month ($0.0390/request)"
+          ],
+          "description": "GitHub Copilot plan for cost calculation. Set to 'auto' to detect via API, or manually select your plan for accurate cost attribution."
         }
       }
     }

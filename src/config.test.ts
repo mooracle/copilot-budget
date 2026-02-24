@@ -1,7 +1,7 @@
 import { __configStore, __configChangeListeners } from './__mocks__/vscode';
 
 // Must import after mock is set up (jest resolves vscode → __mocks__/vscode)
-import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
+import { isEnabled, isCommitHookEnabled, getPlanSetting, onConfigChanged } from './config';
 
 beforeEach(() => {
   // Clear overrides between tests
@@ -29,6 +29,27 @@ describe('config', () => {
     it('returns true when overridden', () => {
       __configStore['copilot-budget.commitHook.enabled'] = true;
       expect(isCommitHookEnabled()).toBe(true);
+    });
+  });
+
+  describe('getPlanSetting', () => {
+    it('returns "auto" by default', () => {
+      expect(getPlanSetting()).toBe('auto');
+    });
+
+    it('returns configured plan value', () => {
+      __configStore['copilot-budget.plan'] = 'pro';
+      expect(getPlanSetting()).toBe('pro');
+    });
+
+    it('returns "pro+" when configured', () => {
+      __configStore['copilot-budget.plan'] = 'pro+';
+      expect(getPlanSetting()).toBe('pro+');
+    });
+
+    it('returns "enterprise" when configured', () => {
+      __configStore['copilot-budget.plan'] = 'enterprise';
+      expect(getPlanSetting()).toBe('enterprise');
     });
   });
 
