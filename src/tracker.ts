@@ -311,7 +311,8 @@ export class Tracker {
     if (
       !this.lastStats ||
       stats.totalTokens !== this.lastStats.totalTokens ||
-      stats.interactions !== this.lastStats.interactions
+      stats.interactions !== this.lastStats.interactions ||
+      stats.premiumRequests !== this.lastStats.premiumRequests
     ) {
       this.lastStats = stats;
       for (const listener of [...this.listeners]) {
