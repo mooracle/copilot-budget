@@ -112,7 +112,7 @@ describe('commitHook', () => {
       );
     });
 
-    it('overwrites an existing Copilot Budget hook', () => {
+    it('refreshes an existing Copilot Budget hook silently', () => {
       setupWorkspace('/project');
       mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nold script`);
       (mockFs.existsSync as jest.Mock).mockReturnValue(true);
@@ -122,6 +122,7 @@ describe('commitHook', () => {
 
       expect(result).toBe(true);
       expect(mockFs.writeFileSync).toHaveBeenCalledTimes(1);
+      expect(mockVscode.window.showInformationMessage).not.toHaveBeenCalled();
     });
 
     it('returns false when no workspace folder', () => {

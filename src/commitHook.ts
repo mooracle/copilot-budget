@@ -57,13 +57,18 @@ export function installHook(): boolean {
   }
 
   // Check if a non-Copilot Budget hook already exists
+  let isRefresh = false;
   try {
     const existing = fs.readFileSync(hookPath, 'utf-8');
-    if (existing.trim() && !existing.includes(MARKER)) {
-      vscode.window.showWarningMessage(
-        'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
-      );
-      return false;
+    if (existing.trim()) {
+      if (existing.includes(MARKER)) {
+        isRefresh = true; // Our hook — will overwrite with latest code
+      } else {
+        vscode.window.showWarningMessage(
+          'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
+        );
+        return false;
+      }
     }
   } catch {
     // File doesn't exist, safe to create
@@ -75,7 +80,9 @@ export function installHook(): boolean {
       fs.mkdirSync(hooksDir, { recursive: true });
     }
     fs.writeFileSync(hookPath, HOOK_SCRIPT, { mode: 0o755 });
-    vscode.window.showInformationMessage('Copilot Budget: Commit hook installed.');
+    if (!isRefresh) {
+      vscode.window.showInformationMessage('Copilot Budget: Commit hook installed.');
+    }
     return true;
   } catch {
     vscode.window.showErrorMessage('Copilot Budget: Failed to install commit hook.');

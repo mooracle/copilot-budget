@@ -281,18 +281,17 @@ describe('extension', () => {
 
     it('auto-installs hook when commitHook.enabled is true', async () => {
       mockIsCommitHookEnabled.mockReturnValue(true);
-      mockIsHookInstalled.mockReturnValue(false);
       const ctx = makeContext();
       await activate(ctx);
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
     });
 
-    it('skips auto-install when hook already installed', async () => {
+    it('always refreshes hook on load when enabled (even if already installed)', async () => {
       mockIsCommitHookEnabled.mockReturnValue(true);
       mockIsHookInstalled.mockReturnValue(true);
       const ctx = makeContext();
       await activate(ctx);
-      expect(mockInstallHook).not.toHaveBeenCalled();
+      expect(mockInstallHook).toHaveBeenCalledTimes(1);
     });
 
     it('does not auto-install hook when commitHook.enabled is false', async () => {
@@ -310,7 +309,6 @@ describe('extension', () => {
 
       // Simulate config change enabling the hook
       mockIsCommitHookEnabled.mockReturnValue(true);
-      mockIsHookInstalled.mockReturnValue(false);
       configChangedCallback!({} as any);
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
     });

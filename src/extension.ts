@@ -154,14 +154,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // Auto-install hook if enabled in settings
-  if (isCommitHookEnabled() && !isHookInstalled()) {
+  // Auto-install/refresh hook if enabled in settings
+  if (isCommitHookEnabled()) {
     installHook();
   }
 
   // Listen for config changes
   const configSub = onConfigChanged(() => {
-    if (isCommitHookEnabled() && !isHookInstalled()) {
+    if (isCommitHookEnabled()) {
       installHook();
     }
     // Re-detect plan when config changes (user may have changed copilot-budget.plan)
