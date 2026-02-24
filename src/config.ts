@@ -14,6 +14,12 @@ export function isCommitHookEnabled(): boolean {
   return cfg().get<boolean>('commitHook.enabled', false);
 }
 
+export type PlanSetting = 'auto' | 'free' | 'pro' | 'pro+' | 'business' | 'enterprise';
+
+export function getPlanSetting(): PlanSetting {
+  return cfg().get<PlanSetting>('plan', 'auto');
+}
+
 export function onConfigChanged(
   callback: (e: vscode.ConfigurationChangeEvent) => void,
 ): vscode.Disposable {

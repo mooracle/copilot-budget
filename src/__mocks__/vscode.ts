@@ -25,6 +25,10 @@ export const workspace = {
   },
 };
 
+export const authentication = {
+  getSession: jest.fn(async () => null),
+};
+
 export const window = {
   createStatusBarItem: () => ({
     text: '',
