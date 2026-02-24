@@ -1,197 +1,162 @@
-# Copilot Budget - VS Code Extension Plan
+# Plan: Hybrid Copilot Plan Detection for Accurate Cost Attribution
 
 ## Context
 
-Build a VS Code extension that tracks GitHub Copilot token usage and optionally appends "AI Budget: MODEL, N tokens" to git commit messages. Based on the reference implementation at [rajbos/github-copilot-token-usage](https://github.com/rajbos/github-copilot-token-usage).
+The extension hardcodes `PREMIUM_REQUEST_COST = 0.04` (the overage rate) for all cost calculations. This overstates costs for users within their plan's included allowance. The goal is to enable accurate cost aggregation across commits/PRs/repos/teams — e.g., "25 features by 5 devs cost $45 in Copilot this month."
 
-**Two decoupled parts:**
-1. **VS Code Extension** - discovers Copilot session files, estimates tokens, writes stats to `.git/copilot-budget`
-2. **Git `prepare-commit-msg` hook** - reads the tracking file, appends budget line, resets the file
+The fix: replace the hardcoded cost with a plan-aware effective rate (subscription / included requests), auto-detected via GitHub's internal API or manually configured.
 
-## Architecture
+Additionally, simplify the commit hook to be a dumb pipe: read values from `.git/copilot-budget`, write them as git trailers, reset the file. All calculation (including accumulation of previous commit totals) moves into the extension.
 
-```
-Copilot Session Files (on disk)
-        ↓
-  VS Code Extension (parses, estimates tokens)
-        ↓
-  .git/copilot-budget  ← tracking file (not committed)
-        ↓
-  prepare-commit-msg hook (reads file, appends to commit msg, resets)
-```
+## Plan-to-Cost Mapping
 
-## File Structure
+| Plan       | $/month | Included PRs | Effective $/PR |
+|------------|---------|-------------|----------------|
+| free       | $0      | 50          | $0.00          |
+| pro        | $10     | 300         | $0.0333        |
+| pro+       | $39     | 1500        | $0.0260        |
+| business   | $19     | 300         | $0.0633        |
+| enterprise | $39     | 1000        | $0.0390        |
 
-```
-copilot-budget/
-├── package.json                  # Extension manifest
-├── tsconfig.json
-├── esbuild.js
-├── .vscodeignore
-├── .gitignore
-├── .vscode/
-│   ├── launch.json               # F5 debug config
-│   └── tasks.json
-├── src/
-│   ├── extension.ts              # Entry point
-│   ├── sessionParser.ts          # Parse Copilot session JSON/JSONL (from reference)
-│   ├── tokenEstimator.ts         # Character-to-token ratio estimation
-│   ├── sessionDiscovery.ts       # Find session files on disk
-│   ├── tracker.ts                # Core: baseline/delta tracking logic
-│   ├── trackingFile.ts           # Read/write .git/copilot-budget
-│   ├── statusBar.ts              # Status bar display
-│   ├── commitHook.ts             # Install/uninstall the git hook
-│   └── config.ts                 # Extension settings
-├── data/
-│   └── tokenEstimators.json      # Character-to-token ratios per model (from reference)
-└── scripts/
-    └── prepare-commit-msg        # The git hook script (standalone reference)
-```
+Overage (beyond plan limit): $0.04/PR — used as fallback when plan is unknown.
+
+## Detection Strategy (Hybrid)
+
+1. **Primary: Internal API** — `GET https://api.github.com/copilot_internal/user` via `vscode.authentication.getSession("github", ["user:email"], { createIfNone: false })`. Parse `copilot_plan` field to determine plan type.
+2. **Fallback: User config** — New setting `copilot-budget.plan` (enum: auto/free/pro/pro+/business/enterprise, default: auto).
+3. **Graceful degradation** — If API fails and setting is "auto", use current $0.04 rate (overage rate as conservative default).
 
 ## Implementation Steps
 
-### Step 1: Project Scaffolding
-- [x] `package.json` with commands: `showStats`, `resetTracking`, `installHook`, `uninstallHook`
-- [x] Settings: `copilot-budget.enabled`, `copilot-budget.commitHook.enabled`
-- [x] `tsconfig.json`, `esbuild.js`, `.vscodeignore`, `.gitignore`, `.vscode/launch.json`
-- [x] Zero runtime dependencies (only Node.js built-ins + VS Code API)
+### Task 1: New module `src/planDetector.ts`
 
-### Step 2: Data Files
-- [x] Copy `tokenEstimators.json` from reference (`/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/tokenEstimators.json`)
-- [x] 50 models with character-to-token ratios (GPT: 0.25, Claude: 0.24)
+- [x] Create `src/planDetector.ts` with PlanInfo type, PLAN_COSTS map, DEFAULT_COST_PER_REQUEST, detectPlan(), getPlanInfo(), onPlanChanged(), startPeriodicRefresh()/stopPeriodicRefresh(), disposePlanDetector(), parseApiResponse()
+- [x] Create `src/planDetector.test.ts` with tests for parseApiResponse, detectPlan with mocked auth/fetch/config, listener pattern, periodic refresh
+- [x] Add `authentication` mock to `src/__mocks__/vscode.ts`
 
-### Step 3: `src/config.ts` (~40 lines)
-- [x] Typed getters for all extension settings
-- [x] Listen for configuration changes
+New file. Exports:
+- `PlanInfo` type: `{ planName, costPerRequest, source: 'api'|'config'|'default' }`
+- `PLAN_COSTS` map: plan name → `{ costPerRequest, monthlyPrice, includedRequests }`
+- `DEFAULT_COST_PER_REQUEST = 0.04`
+- `detectPlan(): Promise<PlanInfo>` — tries API, then config, then default ($0.04)
+- `getPlanInfo(): PlanInfo` — returns cached result
+- `onPlanChanged(listener): Disposable` — listener pattern (same as Tracker)
+- `startPeriodicRefresh() / stopPeriodicRefresh()` — re-detect every 15 min
+- `disposePlanDetector()`
+- `parseApiResponse(data): PlanInfo | null` — exported for testability
 
-### Step 4: `src/tokenEstimator.ts` (~30 lines)
-- [x] `estimateTokensFromText(text, model?)` - look up ratio, return `Math.ceil(text.length * ratio)`
-- [x] Adapted from reference `extension.ts:5075-5088`
+API detection: uses `fetch()` (Node 18 built-in) with `createIfNone: false` (never prompts user). Maps API's `copilot_plan` string (e.g. `"individual_pro"`) to our plan names.
 
-### Step 5: `src/sessionParser.ts` (~375 lines)
-- [x] **Copy directly** from reference `/Users/mgyk/mooracle/github-copilot-token-usage-ref/src/sessionParser.ts`
-- [x] Handles both JSON and delta-based JSONL (VS Code Insiders)
-- [x] Returns `{ tokens, interactions, modelUsage, thinkingTokens }`
-- [x] Includes prototype pollution prevention
+### Task 2: Update `src/tokenEstimator.ts`
 
-### Step 6: `src/sessionDiscovery.ts` (~150 lines)
-- [x] Discover Copilot session files from standard locations:
-  - macOS: `~/Library/Application Support/Code/User/globalStorage/`
-  - Linux: `~/.config/Code/User/globalStorage/`
-  - Windows: `%APPDATA%/Code/User/globalStorage/`
-- [x] Scan `workspaceStorage/*/chatSessions/`, `globalStorage/github.copilot-chat/`, `emptyWindowChatSessions/`
-- [x] Filter out non-session files (embeddings, index, cache, etc.)
-- [x] Adapted from reference `extension.ts:4515-4734`
+- [x] Remove the `PREMIUM_REQUEST_COST = 0.04` constant export (moved to planDetector as `DEFAULT_COST_PER_REQUEST`)
+- [x] Update all imports across the codebase
 
-### Step 7: `src/tracker.ts` (~200 lines)
-- [x] On activation: scan all sessions → compute **baseline** token snapshot
-- [x] Every 2 minutes: re-scan → compute **delta** (current - baseline)
-- [x] Delta = "tokens used since tracking started / last reset"
-- [x] mtime-based cache (skip unchanged files)
-- [x] Emits events when stats change
+### Task 3: Update `src/tracker.ts`
 
-**TrackingStats interface:**
-```typescript
-{
-  since: string;           // ISO timestamp
-  lastUpdated: string;
-  models: { [model: string]: { inputTokens: number; outputTokens: number } };
-  totalTokens: number;
-  interactions: number;
-}
-```
+- [ ] Add `setPlanInfoProvider(provider: () => PlanInfo)` method to Tracker
+- [ ] In `computeStats()`, replace `premiumRequests * PREMIUM_REQUEST_COST` with `premiumRequests * planInfo.costPerRequest`
+- [ ] Update `src/tracker.test.ts` with tests for setPlanInfoProvider affecting estimatedCost
 
-### Step 8: `src/trackingFile.ts` (~60 lines)
-- [x] Write `TrackingStats` to `.git/copilot-budget` (key=value plain text format)
-- [x] Read/reset the tracking file
-- [x] Resolve workspace root via `vscode.workspace.workspaceFolders`
+### Task 4: Update `src/statusBar.ts`
 
-**File format** (`.git/copilot-budget`):
-```
-TOTAL_TOKENS=2800
-INTERACTIONS=15
-SINCE=2024-01-15T10:30:00Z
-MODEL gpt-4o 1500 800
-MODEL claude-sonnet-4 500 300
-```
-- `TOTAL_TOKENS=N` - total estimated tokens
-- `INTERACTIONS=N` - number of chat interactions
-- `SINCE=ISO` - when tracking started
-- `MODEL name inputTokens outputTokens` - per-model breakdown
+- [ ] Import `DEFAULT_COST_PER_REQUEST` from planDetector instead of `PREMIUM_REQUEST_COST` from tokenEstimator
+- [ ] Per-model cost in quick pick: derive cost-per-request from plan info or stats ratio
+- [ ] Add plan name to quick pick header when detected
+- [ ] Update `src/statusBar.test.ts` with plan name display tests
 
-### Step 9: `src/statusBar.ts` (~60 lines)
-- [x] Right-aligned status bar item: `$(symbol-numeric) Copilot Budget: 2,800`
-- [x] Click → quick pick with per-model breakdown
-- [x] Updates on tracker events
+### Task 5: Add config setting in `package.json` and `src/config.ts`
 
-### Step 10: `src/commitHook.ts` (~80 lines)
-- [x] `installHook()` - writes `prepare-commit-msg` to `.git/hooks/`
-- [x] `uninstallHook()` - removes it
-- [x] `isHookInstalled()` - checks for marker comment
-- [x] Won't overwrite existing non-Copilot Budget hooks (warns user)
+- [ ] `package.json`: Add `copilot-budget.plan` enum setting with descriptions
+- [ ] `config.ts`: Add `getPlanSetting(): PlanSetting` accessor
+- [ ] Update `src/config.test.ts` with `getPlanSetting()` tests
 
-**Hook script** is pure POSIX shell (no python3/node dependency):
-- Reads `.git/copilot-budget` using `grep`/`cut`/`read`
-- Lists all models with their token counts
-- Appends structured footer, e.g.:
-  ```
-  AI Budget: gpt-4o 1500, claude-sonnet-4 800 | total: 2800 tokens
-  ```
-- Resets the tracking file (truncates to empty)
-- Silently does nothing if no data exists
-- Works on macOS, Linux, and Windows (Git Bash/MINGW)
+### Task 6: Simplify commit hook — make it a dumb pipe
 
-**Hook script example:**
+- [ ] Replace HOOK_SCRIPT in `src/commitHook.ts` with simplified dumb-pipe version
+- [ ] Update `src/commitHook.test.ts` with updated hook script assertions
+
+**Current hook behavior** (to be replaced):
+- Reads `PREMIUM_REQUESTS` and `ESTIMATED_COST` from tracking file
+- Reads previous commit's `AI-Premium-Requests` and `AI-Est-Cost` trailers via `git log`
+- Accumulates: `total = previous + current`
+- Runs awk to merge per-model data from previous trailers + current tracking file
+- Writes accumulated totals as trailers
+- Resets tracking file
+
+**New hook behavior** (dumb pipe):
+- Reads all key=value pairs and MODEL lines from `.git/copilot-budget`
+- Writes them directly as trailers (no accumulation, no calculation)
+- Resets tracking file
+
+**Move accumulation to the extension**: `src/trackingFile.ts` already writes the tracking file. To accumulate previous commit totals, the extension should:
+1. On `writeTrackingFile()`, read the last commit's trailers via `git log` (or pre-read them on activation)
+2. Add accumulated totals to the tracking file output
+
+OR simpler: the tracking file already gets the correct session-delta values. The hook just copies them. If accumulation across commits is needed, the extension handles it. This is a design choice — accumulation can be a separate follow-up since the primary goal is cost accuracy.
+
+**Recommended approach**: For this PR, simplify the hook to a dumb pipe that copies values as trailers. Drop accumulation for now (it can be re-added in the extension layer later if needed). The tracking file already contains `ESTIMATED_COST` with the correct plan-aware rate.
+
+**New HOOK_SCRIPT**:
 ```sh
 #!/bin/sh
 # Copilot Budget prepare-commit-msg hook
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
-[ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ] && exit 0
+case "$COMMIT_SOURCE" in merge|squash|commit) exit 0 ;; esac
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 TRACKING_FILE="$REPO_ROOT/.git/copilot-budget"
 [ -f "$TRACKING_FILE" ] || exit 0
 
-TOTAL=$(grep '^TOTAL_TOKENS=' "$TRACKING_FILE" | cut -d= -f2)
-[ -z "$TOTAL" ] || [ "$TOTAL" = "0" ] && exit 0
+PREMIUM=$(grep '^PREMIUM_REQUESTS=' "$TRACKING_FILE" | cut -d= -f2)
+COST=$(grep '^ESTIMATED_COST=' "$TRACKING_FILE" | cut -d= -f2)
 
-MODELS=""
-while read _ name inp out; do
-  MODELS="${MODELS}${MODELS:+, }${name} $((inp + out))"
-done <<EOF
-$(grep '^MODEL ' "$TRACKING_FILE")
-EOF
+# Skip if no premium requests
+case "$PREMIUM" in ''|0|0.00) exit 0 ;; esac
 
-printf '\n\nAI Budget: %s | total: %s tokens' "$MODELS" "$TOTAL" >> "$COMMIT_MSG_FILE"
+printf '\n\nAI-Premium-Requests: %s\n' "$PREMIUM" >> "$COMMIT_MSG_FILE"
+printf 'AI-Est-Cost: $%s\n' "$COST" >> "$COMMIT_MSG_FILE"
+
+# Per-model trailers
+grep '^MODEL ' "$TRACKING_FILE" | while read _ name inp out pr; do
+  printf 'AI-Model: %s %s/%s/%s\n' "$name" "$inp" "$out" "$pr" >> "$COMMIT_MSG_FILE"
+done
+
 : > "$TRACKING_FILE"
 ```
 
-### Step 11: `src/extension.ts` (~120 lines)
-- [x] `activate()`: init tracker, status bar, register commands, start update timer
-- [x] Auto-install hook if `copilot-budget.commitHook.enabled` is true
-- [x] `deactivate()`: final tracking file write, cleanup
+### Task 7: Wire up in `src/extension.ts`
 
-## Key Decisions
+- [ ] Import and call `detectPlan()` during activation (before `tracker.start()`)
+- [ ] Call `tracker.setPlanInfoProvider(getPlanInfo)`
+- [ ] Call `startPeriodicRefresh()`
+- [ ] Subscribe `onPlanChanged` → `tracker.update()` (recompute stats with new rate)
+- [ ] Subscribe config changes → `detectPlan()` (re-detect when plan setting changes)
+- [ ] Add plan info to diagnostics output
+- [ ] Call `disposePlanDetector()` in `deactivate()`
+- [ ] Update `src/extension.test.ts` with plan detection wiring tests
 
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Tracking file location | `.git/copilot-budget` | Auto-excluded from VCS, hook finds it via `git rev-parse` |
-| Hook parsing | Pure POSIX shell | No runtime deps, cross-platform (Git Bash on Windows), key=value format |
-| Tracking file format | Key=value plain text | Parseable with grep/cut/read, no JSON parser needed |
-| Token estimation | Character-to-token ratio | Same as reference; no tokenizer dependency |
-| Update interval | 2 minutes | Balance responsiveness vs filesystem load |
-| No webview | Status bar + quick pick only | MVP simplicity |
-| Existing hook handling | Warn, don't overwrite | Respect user's existing hooks (husky, etc.) |
+## Key Files
+
+| File | Change |
+|------|--------|
+| `src/planDetector.ts` | **NEW** — core plan detection module |
+| `src/planDetector.test.ts` | **NEW** — tests for plan detection |
+| `src/tokenEstimator.ts` | Remove `PREMIUM_REQUEST_COST` (moved to planDetector) |
+| `src/tracker.ts` | Add `setPlanInfoProvider()`, use plan rate in `computeStats()` |
+| `src/statusBar.ts` | Show plan name in quick pick, update cost import source |
+| `src/config.ts` | Add `getPlanSetting()` |
+| `src/commitHook.ts` | Simplify to dumb pipe — no accumulation/calculation |
+| `src/extension.ts` | Wire plan detection into lifecycle |
+| `src/__mocks__/vscode.ts` | Add `authentication` mock |
+| `package.json` | Add `copilot-budget.plan` setting |
 
 ## Verification
 
-1. **Build**: `npm install && npm run compile` - should produce `dist/extension.js`
-2. **Debug**: F5 in VS Code → Extension Development Host opens
-3. **Status bar**: Should show "Copilot Budget: 0" then token count after scan
-4. **Use Copilot Chat**: Token count should increase on next 2-min refresh
-5. **Show Stats**: Command palette → "Copilot Budget: Show Token Stats" → shows per-model breakdown
-6. **Install Hook**: Command palette → "Copilot Budget: Install Commit Hook" → check `.git/hooks/prepare-commit-msg` exists
-7. **Commit test**: Make a commit → verify "AI Budget: model, N tokens" appended
-8. **Reset**: After commit, tracking file should reset to 0
-9. **Package**: `npx vsce package` → produces `.vsix` file
+1. `npm run compile` — builds without errors
+2. `npm test` — all tests pass
+3. Manual: Set `copilot-budget.plan` to "pro" → status bar shows cost at ~$0.033/request instead of $0.04
+4. Manual: With GitHub auth available and setting on "auto" → diagnostics show detected plan
+5. Manual: With no auth and "auto" → falls back to $0.04 (overage rate)
+6. Manual: Commit with hook enabled → trailers match tracking file values exactly (no hook-side calculation)

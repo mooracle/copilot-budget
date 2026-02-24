@@ -4,12 +4,14 @@ import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
 import * as tokenEstimator from './tokenEstimator';
 import * as sqliteReader from './sqliteReader';
+import * as planDetector from './planDetector';
 
 jest.mock('fs');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
 jest.mock('./tokenEstimator');
 jest.mock('./sqliteReader');
+jest.mock('./planDetector');
 jest.mock('./logger');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
@@ -63,7 +65,7 @@ beforeEach(() => {
     (text: string) => Math.ceil(text.length * 0.25),
   );
   mockEstimator.getPremiumMultiplier.mockReturnValue(1);
-  (tokenEstimator as any).PREMIUM_REQUEST_COST = 0.04;
+  (planDetector as any).DEFAULT_COST_PER_REQUEST = 0.04;
   // Default: sqlite not ready, no vscdb files
   mockSqliteReader.isSqliteReady.mockReturnValue(false);
   mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);

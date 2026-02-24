@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import { discoverSessionFiles, discoverVscdbFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
 import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
-import { estimateTokensFromText, getPremiumMultiplier, PREMIUM_REQUEST_COST } from './tokenEstimator';
+import { estimateTokensFromText, getPremiumMultiplier } from './tokenEstimator';
+import { DEFAULT_COST_PER_REQUEST } from './planDetector';
 import { log } from './logger';
 
 export interface TrackingStats {
@@ -284,7 +285,7 @@ export class Tracker {
       (sum, m) => sum + m.premiumRequests,
       0,
     );
-    const estimatedCost = premiumRequests * PREMIUM_REQUEST_COST;
+    const estimatedCost = premiumRequests * DEFAULT_COST_PER_REQUEST;
 
     return {
       since: this.since,

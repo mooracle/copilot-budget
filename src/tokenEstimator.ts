@@ -8,7 +8,6 @@ interface EstimatorsData {
 
 const DEFAULT_RATIO = 0.25;
 const DEFAULT_PREMIUM_MULTIPLIER = 1;
-export const PREMIUM_REQUEST_COST = 0.04;
 
 // Load estimators once at module level
 const dataPath = path.join(__dirname, '..', 'data', 'tokenEstimators.json');

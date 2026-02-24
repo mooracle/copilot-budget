@@ -1,4 +1,4 @@
-import { estimateTokensFromText, getPremiumMultiplier, PREMIUM_REQUEST_COST } from './tokenEstimator';
+import { estimateTokensFromText, getPremiumMultiplier } from './tokenEstimator';
 
 describe('tokenEstimator', () => {
   describe('estimateTokensFromText', () => {
@@ -47,12 +47,6 @@ describe('tokenEstimator', () => {
       const text = 'a'.repeat(10000);
       // 10000 * 0.25 = 2500
       expect(estimateTokensFromText(text, 'gpt-4')).toBe(2500);
-    });
-  });
-
-  describe('PREMIUM_REQUEST_COST', () => {
-    it('is $0.04 per premium request', () => {
-      expect(PREMIUM_REQUEST_COST).toBe(0.04);
     });
   });
 
