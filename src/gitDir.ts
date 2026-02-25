@@ -24,7 +24,7 @@ export async function resolveGitDir(workspaceRoot: vscode.Uri): Promise<vscode.U
   if (!match) return null;
 
   const gitdir = match[1];
-  if (path.posix.isAbsolute(gitdir)) {
+  if (path.isAbsolute(gitdir)) {
     return workspaceRoot.with({ path: gitdir });
   }
   return vscode.Uri.joinPath(workspaceRoot, gitdir);
@@ -48,7 +48,7 @@ export async function resolveGitCommonDir(workspaceRoot: vscode.Uri): Promise<vs
   }
 
   const trimmed = commondir.trim();
-  if (path.posix.isAbsolute(trimmed)) {
+  if (path.isAbsolute(trimmed)) {
     return gitDir.with({ path: trimmed });
   }
   return vscode.Uri.joinPath(gitDir, trimmed);
