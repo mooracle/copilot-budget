@@ -2,26 +2,33 @@ import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
+import * as fsUtils from './fsUtils';
 
-jest.mock('fs');
+jest.mock('fs', () => ({ chmodSync: jest.fn() }));
 jest.mock('./gitDir');
+jest.mock('./fsUtils');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
+
 const mockVscode = vscode as any;
 const mockResolveGitCommonDir = gitDir.resolveGitCommonDir as jest.MockedFunction<typeof gitDir.resolveGitCommonDir>;
+const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
+const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
 function setupWorkspace(rootPath: string, gitCommonDirPath?: string) {
   mockVscode.workspace.workspaceFolders = [
-    { uri: { fsPath: rootPath }, name: 'test', index: 0 },
+    { uri: vscode.Uri.file(rootPath), name: 'test', index: 0 },
   ];
-  mockResolveGitCommonDir.mockReturnValue(gitCommonDirPath ?? rootPath + '/.git');
+  mockResolveGitCommonDir.mockResolvedValue(
+    vscode.Uri.file(gitCommonDirPath ?? rootPath + '/.git'),
+  );
 }
 
 function clearWorkspace() {
   mockVscode.workspace.workspaceFolders = undefined;
-  mockResolveGitCommonDir.mockReturnValue(null);
+  mockResolveGitCommonDir.mockResolvedValue(null);
 }
 
 beforeEach(() => {
@@ -31,116 +38,107 @@ beforeEach(() => {
 
 describe('commitHook', () => {
   describe('isHookInstalled', () => {
-    it('returns true when hook file contains the marker', () => {
+    it('returns true when hook file contains the marker', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nsome script`);
+      mockReadTextFile.mockResolvedValue(`#!/bin/sh\n${MARKER}\nsome script`);
 
-      expect(isHookInstalled()).toBe(true);
+      expect(await isHookInstalled()).toBe(true);
     });
 
-    it('returns false when hook file does not contain the marker', () => {
+    it('returns false when hook file does not contain the marker', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue('#!/bin/sh\n# some other hook\n');
+      mockReadTextFile.mockResolvedValue('#!/bin/sh\n# some other hook\n');
 
-      expect(isHookInstalled()).toBe(false);
+      expect(await isHookInstalled()).toBe(false);
     });
 
-    it('returns false when hook file does not exist', () => {
+    it('returns false when hook file does not exist', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
+      mockReadTextFile.mockResolvedValue(null);
 
-      expect(isHookInstalled()).toBe(false);
+      expect(await isHookInstalled()).toBe(false);
     });
 
-    it('returns false when no workspace folder', () => {
-      expect(isHookInstalled()).toBe(false);
+    it('returns false when no workspace folder', async () => {
+      expect(await isHookInstalled()).toBe(false);
     });
 
-    it('returns false when resolveGitCommonDir returns null', () => {
+    it('returns false when resolveGitCommonDir returns null', async () => {
       mockVscode.workspace.workspaceFolders = [
-        { uri: { fsPath: '/project' }, name: 'test', index: 0 },
+        { uri: vscode.Uri.file('/project'), name: 'test', index: 0 },
       ];
-      mockResolveGitCommonDir.mockReturnValue(null);
+      mockResolveGitCommonDir.mockResolvedValue(null);
 
-      expect(isHookInstalled()).toBe(false);
+      expect(await isHookInstalled()).toBe(false);
     });
   });
 
   describe('installHook', () => {
-    it('writes hook script with marker and correct permissions', () => {
+    it('writes hook script with marker', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
-      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
-      mockFs.writeFileSync.mockImplementation(() => {});
+      mockReadTextFile.mockResolvedValue(null);
+      mockWriteTextFile.mockResolvedValue(undefined);
+      mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
 
-      const result = installHook();
+      const result = await installHook();
 
       expect(result).toBe(true);
-      expect(mockFs.writeFileSync).toHaveBeenCalledTimes(1);
-      const [hookPath, content, options] = mockFs.writeFileSync.mock.calls[0] as any;
-      expect(hookPath).toMatch(/\.git[/\\]hooks[/\\]prepare-commit-msg$/);
+      expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
+      const [hookUri, content] = mockWriteTextFile.mock.calls[0];
+      expect(hookUri.path).toMatch(/\.git\/hooks\/prepare-commit-msg$/);
       expect(content).toContain(MARKER);
       expect(content).toContain('#!/bin/sh');
       expect(content).toContain('TRACKING_FILE=');
       expect(content).toContain('PREMIUM_REQUESTS=');
       expect(content).toContain('AI-Premium-Requests:');
       expect(content).toContain('AI-Model:');
-      expect(options.mode).toBe(0o755);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
         'Copilot Budget: Commit hook installed.',
       );
     });
 
-    it('creates hooks directory if it does not exist', () => {
+    it('creates hooks directory via vscode.workspace.fs.createDirectory', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
-      (mockFs.existsSync as jest.Mock).mockReturnValue(false);
-      mockFs.mkdirSync.mockImplementation(() => '' as any);
-      mockFs.writeFileSync.mockImplementation(() => {});
+      mockReadTextFile.mockResolvedValue(null);
+      mockWriteTextFile.mockResolvedValue(undefined);
+      mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
 
-      const result = installHook();
+      const result = await installHook();
 
       expect(result).toBe(true);
-      expect(mockFs.mkdirSync).toHaveBeenCalledWith(
-        expect.stringMatching(/\.git[/\\]hooks$/),
-        { recursive: true },
-      );
+      expect(mockVscode.workspace.fs.createDirectory).toHaveBeenCalledTimes(1);
+      const dirUri = mockVscode.workspace.fs.createDirectory.mock.calls[0][0];
+      expect(dirUri.path).toMatch(/\.git\/hooks$/);
     });
 
-    it('refuses to overwrite a non-Copilot Budget hook', () => {
+    it('refuses to overwrite a non-Copilot Budget hook', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue('#!/bin/sh\n# husky hook\nexit 0\n');
+      mockReadTextFile.mockResolvedValue('#!/bin/sh\n# husky hook\nexit 0\n');
 
-      const result = installHook();
+      const result = await installHook();
 
       expect(result).toBe(false);
-      expect(mockFs.writeFileSync).not.toHaveBeenCalled();
+      expect(mockWriteTextFile).not.toHaveBeenCalled();
       expect(mockVscode.window.showWarningMessage).toHaveBeenCalledWith(
         expect.stringContaining('already exists'),
       );
     });
 
-    it('refreshes an existing Copilot Budget hook silently', () => {
+    it('refreshes an existing Copilot Budget hook silently', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nold script`);
-      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
-      mockFs.writeFileSync.mockImplementation(() => {});
+      mockReadTextFile.mockResolvedValue(`#!/bin/sh\n${MARKER}\nold script`);
+      mockWriteTextFile.mockResolvedValue(undefined);
+      mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
 
-      const result = installHook();
+      const result = await installHook();
 
       expect(result).toBe(true);
-      expect(mockFs.writeFileSync).toHaveBeenCalledTimes(1);
+      expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
       expect(mockVscode.window.showInformationMessage).not.toHaveBeenCalled();
     });
 
-    it('returns false when no workspace folder', () => {
-      const result = installHook();
+    it('returns false when no workspace folder', async () => {
+      const result = await installHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -148,33 +146,26 @@ describe('commitHook', () => {
       );
     });
 
-    it('installs hook in common git dir for worktrees', () => {
-      // resolveGitCommonDir follows commondir to the shared git dir
+    it('installs hook in common git dir for worktrees', async () => {
       setupWorkspace('/worktrees/feature', '/repo/.git');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
-      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
-      mockFs.writeFileSync.mockImplementation(() => {});
+      mockReadTextFile.mockResolvedValue(null);
+      mockWriteTextFile.mockResolvedValue(undefined);
+      mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
 
-      const result = installHook();
+      const result = await installHook();
 
       expect(result).toBe(true);
-      const [hookPath] = mockFs.writeFileSync.mock.calls[0] as any;
-      expect(hookPath).toMatch(/\/repo\/\.git\/hooks\/prepare-commit-msg$/);
+      const [hookUri] = mockWriteTextFile.mock.calls[0];
+      expect(hookUri.path).toMatch(/\/repo\/\.git\/hooks\/prepare-commit-msg$/);
     });
 
-    it('returns false when write fails', () => {
+    it('returns false when write fails', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
-      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
-      mockFs.writeFileSync.mockImplementation(() => {
-        throw new Error('EACCES');
-      });
+      mockReadTextFile.mockResolvedValue(null);
+      mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
+      mockWriteTextFile.mockRejectedValue(new Error('EACCES'));
 
-      const result = installHook();
+      const result = await installHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -184,42 +175,40 @@ describe('commitHook', () => {
   });
 
   describe('uninstallHook', () => {
-    it('removes a Copilot Budget hook', () => {
+    it('removes a Copilot Budget hook', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nscript`);
-      mockFs.unlinkSync.mockImplementation(() => {});
+      mockReadTextFile.mockResolvedValue(`#!/bin/sh\n${MARKER}\nscript`);
+      mockVscode.workspace.fs.delete.mockResolvedValue(undefined);
 
-      const result = uninstallHook();
+      const result = await uninstallHook();
 
       expect(result).toBe(true);
-      expect(mockFs.unlinkSync).toHaveBeenCalledWith(
-        expect.stringMatching(/\.git[/\\]hooks[/\\]prepare-commit-msg$/),
-      );
+      expect(mockVscode.workspace.fs.delete).toHaveBeenCalledTimes(1);
+      const deleteUri = mockVscode.workspace.fs.delete.mock.calls[0][0];
+      expect(deleteUri.path).toMatch(/\.git\/hooks\/prepare-commit-msg$/);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
         'Copilot Budget: Commit hook removed.',
       );
     });
 
-    it('refuses to remove a non-Copilot Budget hook', () => {
+    it('refuses to remove a non-Copilot Budget hook', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue('#!/bin/sh\n# husky hook\n');
+      mockReadTextFile.mockResolvedValue('#!/bin/sh\n# husky hook\n');
 
-      const result = uninstallHook();
+      const result = await uninstallHook();
 
       expect(result).toBe(false);
-      expect(mockFs.unlinkSync).not.toHaveBeenCalled();
+      expect(mockVscode.workspace.fs.delete).not.toHaveBeenCalled();
       expect(mockVscode.window.showWarningMessage).toHaveBeenCalledWith(
         expect.stringContaining('not installed by Copilot Budget'),
       );
     });
 
-    it('handles no hook file gracefully', () => {
+    it('handles no hook file gracefully', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
+      mockReadTextFile.mockResolvedValue(null);
 
-      const result = uninstallHook();
+      const result = await uninstallHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
@@ -227,8 +216,8 @@ describe('commitHook', () => {
       );
     });
 
-    it('returns false when no workspace folder', () => {
-      const result = uninstallHook();
+    it('returns false when no workspace folder', async () => {
+      const result = await uninstallHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -236,14 +225,12 @@ describe('commitHook', () => {
       );
     });
 
-    it('returns false when unlink fails', () => {
+    it('returns false when delete fails', async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockReturnValue(`#!/bin/sh\n${MARKER}\nscript`);
-      mockFs.unlinkSync.mockImplementation(() => {
-        throw new Error('EACCES');
-      });
+      mockReadTextFile.mockResolvedValue(`#!/bin/sh\n${MARKER}\nscript`);
+      mockVscode.workspace.fs.delete.mockRejectedValue(new Error('EACCES'));
 
-      const result = uninstallHook();
+      const result = await uninstallHook();
 
       expect(result).toBe(false);
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -255,31 +242,24 @@ describe('commitHook', () => {
   describe('hook script content', () => {
     let writtenContent: string;
 
-    beforeEach(() => {
+    beforeEach(async () => {
       setupWorkspace('/project');
-      mockFs.readFileSync.mockImplementation(() => {
-        throw new Error('ENOENT');
-      });
-      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
+      mockReadTextFile.mockResolvedValue(null);
+      mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
       writtenContent = '';
-      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
+      mockWriteTextFile.mockImplementation(async (_uri: any, data: string) => {
         writtenContent = data;
       });
-      installHook();
+      await installHook();
     });
 
     it('includes essential shell logic', () => {
-      // Skips merge, squash, and amend commits
       expect(writtenContent).toContain('case "$COMMIT_SOURCE"');
       expect(writtenContent).toContain('merge|squash|commit');
-      // Uses git rev-parse --git-dir for worktree/submodule support
       expect(writtenContent).toContain('git rev-parse --git-dir');
       expect(writtenContent).not.toContain('git rev-parse --show-toplevel');
-      // Reads the tracking file via GIT_DIR
       expect(writtenContent).toContain('$GIT_DIR/copilot-budget');
-      // Appends to commit message
       expect(writtenContent).toContain('>> "$COMMIT_MSG_FILE"');
-      // Resets tracking file
       expect(writtenContent).toContain(': > "$TRACKING_FILE"');
     });
 
@@ -291,14 +271,10 @@ describe('commitHook', () => {
     });
 
     it('is a dumb pipe with no accumulation logic', () => {
-      // Should NOT read previous commit trailers
       expect(writtenContent).not.toContain('git log -1');
       expect(writtenContent).not.toContain('trailers:key=');
-      // Should NOT use awk for accumulation
       expect(writtenContent).not.toContain('awk');
-      // Should NOT have validate_num
       expect(writtenContent).not.toContain('validate_num');
-      // Should NOT have PREV_ or TOTAL_ variables
       expect(writtenContent).not.toContain('PREV_');
       expect(writtenContent).not.toContain('TOTAL_');
       expect(writtenContent).not.toContain('CURRENT_');

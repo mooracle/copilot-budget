@@ -1,8 +1,8 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { log } from './logger';
 import { resolveGitCommonDir } from './gitDir';
+import { readTextFile, writeTextFile } from './fsUtils';
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
@@ -33,38 +33,63 @@ done
 } >> "$COMMIT_MSG_FILE" && : > "$TRACKING_FILE"
 `;
 
-function getHookPath(): string | null {
+async function getHookUri(): Promise<vscode.Uri | null> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) {
-    log('[commitHook] getHookPath: no workspace folders');
+    log('[commitHook] getHookUri: no workspace folders');
     return null;
   }
-  const gitDir = resolveGitCommonDir(folders[0].uri.fsPath);
-  if (!gitDir) {
-    log('[commitHook] getHookPath: could not resolve git directory');
+  const gitCommonDir = await resolveGitCommonDir(folders[0].uri);
+  if (!gitCommonDir) {
+    log(`[commitHook] getHookUri: could not resolve git directory for ${folders[0].uri.path}`);
     return null;
   }
-  const p = path.join(gitDir, 'hooks', 'prepare-commit-msg');
-  log(`[commitHook] getHookPath: ${p}`);
-  return p;
+  const hookUri = vscode.Uri.joinPath(gitCommonDir, 'hooks', 'prepare-commit-msg');
+  log(`[commitHook] getHookUri: ${hookUri.path}`);
+  return hookUri;
 }
 
-export function isHookInstalled(): boolean {
-  const hookPath = getHookPath();
-  if (!hookPath) return false;
-
-  try {
-    const content = fs.readFileSync(hookPath, 'utf-8');
-    return content.includes(MARKER);
-  } catch {
-    return false;
+async function makeExecutable(uri: vscode.Uri): Promise<void> {
+  if (uri.scheme === 'file') {
+    fs.chmodSync(uri.fsPath, 0o755);
+  } else {
+    const task = new vscode.Task(
+      { type: 'shell' }, vscode.TaskScope.Workspace,
+      'chmod-hook', 'copilot-budget',
+      new vscode.ShellExecution('chmod', ['+x', uri.path]),
+    );
+    task.presentationOptions = { reveal: vscode.TaskRevealKind.Silent };
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        const d = vscode.tasks.onDidEndTaskProcess((e: any) => {
+          if (e.execution.task === task) {
+            d.dispose();
+            e.exitCode === 0 ? resolve() : reject(new Error(`chmod exit ${e.exitCode}`));
+          }
+        });
+        vscode.tasks.executeTask(task).then(undefined, reject);
+      }),
+      new Promise<void>((resolve) => setTimeout(() => {
+        log('[commitHook] chmod task timed out, hook may not be executable');
+        resolve();
+      }, 5000)),
+    ]);
   }
 }
 
-export function installHook(): boolean {
-  const hookPath = getHookPath();
-  log(`[commitHook] installHook called, hookPath=${hookPath}`);
-  if (!hookPath) {
+export async function isHookInstalled(): Promise<boolean> {
+  const hookUri = await getHookUri();
+  if (!hookUri) return false;
+
+  const content = await readTextFile(hookUri);
+  if (!content) return false;
+  return content.includes(MARKER);
+}
+
+export async function installHook(): Promise<boolean> {
+  const hookUri = await getHookUri();
+  log(`[commitHook] installHook called, hookUri=${hookUri?.path}`);
+  if (!hookUri) {
     log('[commitHook] No workspace folder found');
     vscode.window.showErrorMessage('Copilot Budget: No workspace folder found.');
     return false;
@@ -72,32 +97,26 @@ export function installHook(): boolean {
 
   // Check if a non-Copilot Budget hook already exists
   let isRefresh = false;
-  try {
-    const existing = fs.readFileSync(hookPath, 'utf-8');
+  const existing = await readTextFile(hookUri);
+  if (existing && existing.trim()) {
     log(`[commitHook] Existing hook found (${existing.length} bytes)`);
-    if (existing.trim()) {
-      if (existing.includes(MARKER)) {
-        isRefresh = true; // Our hook — will overwrite with latest code
-        log('[commitHook] Existing hook is ours, will refresh');
-      } else {
-        log('[commitHook] Existing hook is NOT ours, aborting');
-        vscode.window.showWarningMessage(
-          'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
-        );
-        return false;
-      }
+    if (existing.includes(MARKER)) {
+      isRefresh = true;
+      log('[commitHook] Existing hook is ours, will refresh');
+    } else {
+      log('[commitHook] Existing hook is NOT ours, aborting');
+      vscode.window.showWarningMessage(
+        'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
+      );
+      return false;
     }
-  } catch (err) {
-    log(`[commitHook] No existing hook file: ${err instanceof Error ? err.message : err}`);
   }
 
   try {
-    const hooksDir = path.dirname(hookPath);
-    if (!fs.existsSync(hooksDir)) {
-      log(`[commitHook] Creating hooks directory: ${hooksDir}`);
-      fs.mkdirSync(hooksDir, { recursive: true });
-    }
-    fs.writeFileSync(hookPath, HOOK_SCRIPT, { mode: 0o755 });
+    const hooksDirUri = vscode.Uri.joinPath(hookUri, '..');
+    await vscode.workspace.fs.createDirectory(hooksDirUri);
+    await writeTextFile(hookUri, HOOK_SCRIPT);
+    await makeExecutable(hookUri);
     log(`[commitHook] Hook written successfully (refresh=${isRefresh})`);
     if (!isRefresh) {
       vscode.window.showInformationMessage('Copilot Budget: Commit hook installed.');
@@ -111,31 +130,31 @@ export function installHook(): boolean {
   }
 }
 
-export function uninstallHook(): boolean {
-  const hookPath = getHookPath();
-  log(`[commitHook] uninstallHook called, hookPath=${hookPath}`);
-  if (!hookPath) {
+export async function uninstallHook(): Promise<boolean> {
+  const hookUri = await getHookUri();
+  log(`[commitHook] uninstallHook called, hookUri=${hookUri?.path}`);
+  if (!hookUri) {
     vscode.window.showErrorMessage('Copilot Budget: No workspace folder found.');
     return false;
   }
 
-  try {
-    const content = fs.readFileSync(hookPath, 'utf-8');
-    if (!content.includes(MARKER)) {
-      log('[commitHook] Hook file exists but is not ours');
-      vscode.window.showWarningMessage(
-        'Copilot Budget: The prepare-commit-msg hook was not installed by Copilot Budget.',
-      );
-      return false;
-    }
-  } catch (err) {
-    log(`[commitHook] Cannot read hook for uninstall: ${err instanceof Error ? err.message : err}`);
+  const content = await readTextFile(hookUri);
+  if (!content) {
+    log('[commitHook] Cannot read hook for uninstall');
     vscode.window.showInformationMessage('Copilot Budget: No commit hook to remove.');
     return false;
   }
 
+  if (!content.includes(MARKER)) {
+    log('[commitHook] Hook file exists but is not ours');
+    vscode.window.showWarningMessage(
+      'Copilot Budget: The prepare-commit-msg hook was not installed by Copilot Budget.',
+    );
+    return false;
+  }
+
   try {
-    fs.unlinkSync(hookPath);
+    await vscode.workspace.fs.delete(hookUri);
     log('[commitHook] Hook removed successfully');
     vscode.window.showInformationMessage('Copilot Budget: Commit hook removed.');
     return true;

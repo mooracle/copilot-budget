@@ -126,10 +126,10 @@ beforeEach(() => {
   };
   mockCreateStatusBar.mockReturnValue(mockStatusBarItem as any);
   mockShowStatsQuickPick.mockResolvedValue(undefined);
-  mockWriteTrackingFile.mockReturnValue(true);
-  mockInstallHook.mockReturnValue(true);
-  mockUninstallHook.mockReturnValue(true);
-  mockIsHookInstalled.mockReturnValue(false);
+  mockWriteTrackingFile.mockResolvedValue(true);
+  mockInstallHook.mockResolvedValue(true);
+  mockUninstallHook.mockResolvedValue(true);
+  mockIsHookInstalled.mockResolvedValue(false);
   mockIsEnabled.mockReturnValue(true);
   mockIsCommitHookEnabled.mockReturnValue(false);
   mockOnConfigChanged.mockImplementation((cb: any) => {
@@ -183,8 +183,8 @@ beforeEach(() => {
     configChangedCallback = cb;
     return { dispose: jest.fn() };
   });
-  mockWriteTrackingFile.mockReturnValue(true);
-  mockIsHookInstalled.mockReturnValue(false);
+  mockWriteTrackingFile.mockResolvedValue(true);
+  mockIsHookInstalled.mockResolvedValue(false);
   mockInitSqlite.mockResolvedValue(true);
   mockDetectPlan.mockResolvedValue({
     planName: 'unknown',
@@ -288,7 +288,7 @@ describe('extension', () => {
 
     it('always refreshes hook on load when enabled (even if already installed)', async () => {
       mockIsCommitHookEnabled.mockReturnValue(true);
-      mockIsHookInstalled.mockReturnValue(true);
+      mockIsHookInstalled.mockResolvedValue(true);
       const ctx = makeContext();
       await activate(ctx);
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
