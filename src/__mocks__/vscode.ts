@@ -23,6 +23,13 @@ export const workspace = {
       },
     };
   },
+  fs: {
+    stat: jest.fn(),
+    readFile: jest.fn(),
+    writeFile: jest.fn(),
+    delete: jest.fn(),
+    createDirectory: jest.fn(),
+  },
 };
 
 export const authentication = {
@@ -72,9 +79,42 @@ export enum QuickPickItemKind {
   Separator = -1,
 }
 
+export enum FileType {
+  Unknown = 0,
+  File = 1,
+  Directory = 2,
+  SymbolicLink = 64,
+}
+
 export class Uri {
-  static file(path: string) {
-    return { fsPath: path, scheme: 'file', path };
+  readonly scheme: string;
+  readonly path: string;
+  readonly fsPath: string;
+
+  private constructor(scheme: string, filePath: string) {
+    this.scheme = scheme;
+    this.path = filePath;
+    this.fsPath = filePath;
+  }
+
+  static file(filePath: string): Uri {
+    return new Uri('file', filePath);
+  }
+
+  static joinPath(base: Uri, ...segments: string[]): Uri {
+    const joined = [base.path, ...segments].join('/').replace(/\/+/g, '/');
+    return new Uri(base.scheme, joined);
+  }
+
+  with(change: { scheme?: string; path?: string }): Uri {
+    return new Uri(
+      change.scheme ?? this.scheme,
+      change.path ?? this.path,
+    );
+  }
+
+  toString(): string {
+    return `${this.scheme}://${this.path}`;
   }
 }
 
@@ -91,3 +131,37 @@ export class EventEmitter {
   fire() {}
   dispose() {}
 }
+
+export enum TaskScope {
+  Global = 1,
+  Workspace = 2,
+}
+
+export enum TaskRevealKind {
+  Always = 1,
+  Silent = 2,
+  Never = 3,
+}
+
+export class ShellExecution {
+  constructor(
+    public command: string,
+    public args?: string[],
+  ) {}
+}
+
+export class Task {
+  public presentationOptions: any = {};
+  constructor(
+    public definition: any,
+    public scope: any,
+    public name: string,
+    public source: string,
+    public execution?: any,
+  ) {}
+}
+
+export const tasks = {
+  executeTask: jest.fn(async () => undefined),
+  onDidEndTaskProcess: jest.fn(() => ({ dispose: () => {} })),
+};
