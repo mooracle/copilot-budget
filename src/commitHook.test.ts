@@ -8,20 +8,20 @@ jest.mock('./gitDir');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockVscode = vscode as any;
-const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
+const mockResolveGitCommonDir = gitDir.resolveGitCommonDir as jest.MockedFunction<typeof gitDir.resolveGitCommonDir>;
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
-function setupWorkspace(rootPath: string, gitDirPath?: string) {
+function setupWorkspace(rootPath: string, gitCommonDirPath?: string) {
   mockVscode.workspace.workspaceFolders = [
     { uri: { fsPath: rootPath }, name: 'test', index: 0 },
   ];
-  mockResolveGitDir.mockReturnValue(gitDirPath ?? rootPath + '/.git');
+  mockResolveGitCommonDir.mockReturnValue(gitCommonDirPath ?? rootPath + '/.git');
 }
 
 function clearWorkspace() {
   mockVscode.workspace.workspaceFolders = undefined;
-  mockResolveGitDir.mockReturnValue(null);
+  mockResolveGitCommonDir.mockReturnValue(null);
 }
 
 beforeEach(() => {
@@ -58,11 +58,11 @@ describe('commitHook', () => {
       expect(isHookInstalled()).toBe(false);
     });
 
-    it('returns false when resolveGitDir returns null', () => {
+    it('returns false when resolveGitCommonDir returns null', () => {
       mockVscode.workspace.workspaceFolders = [
         { uri: { fsPath: '/project' }, name: 'test', index: 0 },
       ];
-      mockResolveGitDir.mockReturnValue(null);
+      mockResolveGitCommonDir.mockReturnValue(null);
 
       expect(isHookInstalled()).toBe(false);
     });
@@ -148,8 +148,9 @@ describe('commitHook', () => {
       );
     });
 
-    it('installs hook in worktree git dir', () => {
-      setupWorkspace('/worktrees/feature', '/repo/.git/worktrees/feature');
+    it('installs hook in common git dir for worktrees', () => {
+      // resolveGitCommonDir follows commondir to the shared git dir
+      setupWorkspace('/worktrees/feature', '/repo/.git');
       mockFs.readFileSync.mockImplementation(() => {
         throw new Error('ENOENT');
       });
@@ -160,7 +161,7 @@ describe('commitHook', () => {
 
       expect(result).toBe(true);
       const [hookPath] = mockFs.writeFileSync.mock.calls[0] as any;
-      expect(hookPath).toMatch(/\/repo\/\.git\/worktrees\/feature\/hooks\/prepare-commit-msg$/);
+      expect(hookPath).toMatch(/\/repo\/\.git\/hooks\/prepare-commit-msg$/);
     });
 
     it('returns false when write fails', () => {

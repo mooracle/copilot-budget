@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { log } from './logger';
-import { resolveGitDir } from './gitDir';
+import { resolveGitCommonDir } from './gitDir';
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
@@ -39,7 +39,7 @@ function getHookPath(): string | null {
     log('[commitHook] getHookPath: no workspace folders');
     return null;
   }
-  const gitDir = resolveGitDir(folders[0].uri.fsPath);
+  const gitDir = resolveGitCommonDir(folders[0].uri.fsPath);
   if (!gitDir) {
     log('[commitHook] getHookPath: could not resolve git directory');
     return null;

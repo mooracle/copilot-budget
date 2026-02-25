@@ -5,6 +5,18 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-02-25
+
+### Added
+
+- Worktree, submodule, and devcontainer support — the extension now correctly follows `.git` files to resolve the real git directory
+- New `gitDir.ts` module with `resolveGitDir()` and `resolveGitCommonDir()` utilities
+
+### Fixed
+
+- Commit hook now installs to the shared git hooks directory (via `resolveGitCommonDir`), so it works correctly in git worktrees
+- Tracking file writes to the worktree-specific git directory, so each worktree tracks independently
+
 ## [0.4.2] - 2026-02-24
 
 ### Changed
@@ -12,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Commit hook is now refreshed with latest code on every activation when setting is enabled
 - `installHook()` silently overwrites an existing Copilot Budget hook instead of re-announcing installation
 - Removed redundant `isHookInstalled()` guard from auto-install path — always ensures hook is up to date
+
+## [0.4.1] - 2026-02-24
+
+### Changed
+
+- Status bar shows integer premium requests and one-decimal cost for brevity
+- Removed "Copilot" label prefix from status bar item
 
 ## [0.3.0] - 2026-02-24
 

@@ -1,4 +1,4 @@
-import { resolveGitDir } from './gitDir';
+import { resolveGitDir, resolveGitCommonDir } from './gitDir';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -54,5 +54,56 @@ describe('resolveGitDir', () => {
     });
 
     expect(resolveGitDir('/project')).toBeNull();
+  });
+});
+
+describe('resolveGitCommonDir', () => {
+  it('returns git dir when no commondir file exists (regular repo)', () => {
+    // statSync: .git is a directory
+    mockFs.statSync.mockReturnValue({ isDirectory: () => true } as any);
+    // readFileSync: commondir file does not exist
+    mockFs.readFileSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    expect(resolveGitCommonDir('/project')).toBe(path.join('/project', '.git'));
+  });
+
+  it('follows commondir file in worktree to reach shared git dir', () => {
+    // statSync: .git is a file (not a directory)
+    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
+    // readFileSync called twice: first for .git file, then for commondir
+    mockFs.readFileSync
+      .mockReturnValueOnce('gitdir: /repo/.git/worktrees/feature\n')
+      .mockReturnValueOnce('../..\n');
+
+    const result = resolveGitCommonDir('/worktrees/feature');
+    expect(result).toBe(path.resolve('/repo/.git/worktrees/feature', '../..'));
+  });
+
+  it('handles absolute commondir path', () => {
+    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
+    mockFs.readFileSync
+      .mockReturnValueOnce('gitdir: /repo/.git/worktrees/feature\n')
+      .mockReturnValueOnce('/repo/.git\n');
+
+    expect(resolveGitCommonDir('/worktrees/feature')).toBe('/repo/.git');
+  });
+
+  it('returns null when resolveGitDir returns null', () => {
+    mockFs.statSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    expect(resolveGitCommonDir('/nonexistent')).toBeNull();
+  });
+
+  it('returns git dir for submodule (no commondir file)', () => {
+    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
+    mockFs.readFileSync
+      .mockReturnValueOnce('gitdir: /repo/.git/modules/my-sub\n')
+      .mockImplementationOnce(() => { throw new Error('ENOENT'); });
+
+    expect(resolveGitCommonDir('/repo/my-sub')).toBe('/repo/.git/modules/my-sub');
   });
 });

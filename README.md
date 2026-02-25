@@ -10,6 +10,7 @@ Track GitHub Copilot token usage and optionally append AI budget info to git com
 - **Commit hook integration** — automatically appends `AI-Premium-Requests`, `AI-Est-Cost`, and `AI-Model` git trailers to commit messages.
 - **Session-aware** — tracks only usage since VS Code was opened (baseline subtraction), so counts reset each session.
 - **SQLite session support** — reads Copilot sessions from `state.vscdb` databases, catching sessions that only exist in SQLite after recent Copilot storage migrations.
+- **Worktree & submodule support** — correctly follows `.git` files in git worktrees, submodules, and devcontainers for both hook installation and tracking file placement.
 - **Lightweight** — polls every two minutes with file-level caching; one optional API call for plan detection.
 
 ## Getting Started
