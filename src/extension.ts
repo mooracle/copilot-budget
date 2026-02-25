@@ -67,7 +67,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Write tracking file whenever stats change
   const statsWriter = tracker.onStatsChanged((stats) => {
-    writeTrackingFile(stats);
+    writeTrackingFile(stats).catch(() => {});
   });
   context.subscriptions.push(statsWriter);
 
@@ -75,7 +75,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // truncated it. The onStatsChanged listener only fires when stats differ,
   // so without this the file stays empty after a commit until new activity.
   const trackingFileRefresh = setInterval(() => {
-    if (tracker) writeTrackingFile(tracker.getStats());
+    if (tracker) writeTrackingFile(tracker.getStats()).catch(() => {});
   }, 120_000);
   context.subscriptions.push({ dispose: () => clearInterval(trackingFileRefresh) });
 
@@ -96,14 +96,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-budget.installHook', () => {
-      installHook();
+    vscode.commands.registerCommand('copilot-budget.installHook', async () => {
+      await installHook();
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-budget.uninstallHook', () => {
-      uninstallHook();
+    vscode.commands.registerCommand('copilot-budget.uninstallHook', async () => {
+      await uninstallHook();
     }),
   );
 
@@ -156,13 +156,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Auto-install/refresh hook if enabled in settings
   if (isCommitHookEnabled()) {
-    installHook();
+    installHook().catch(() => {});
   }
 
   // Listen for config changes
   const configSub = onConfigChanged(() => {
     if (isCommitHookEnabled()) {
-      installHook();
+      installHook().catch(() => {});
     }
     // Re-detect plan when config changes (user may have changed copilot-budget.plan)
     detectPlan().catch(() => {});
@@ -170,10 +170,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(configSub);
 }
 
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
   if (tracker) {
     // Final write of current stats
-    writeTrackingFile(tracker.getStats());
+    await writeTrackingFile(tracker.getStats()).catch(() => {});
     tracker.dispose();
     tracker = null;
   }

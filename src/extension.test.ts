@@ -84,7 +84,7 @@ let trackerInstance: any;
 let statsChangedListeners: Array<(stats: any) => void>;
 let configChangedCallback: ((e: any) => void) | null;
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
   for (const key of Object.keys(__commandCallbacks)) delete __commandCallbacks[key];
 
@@ -169,7 +169,7 @@ beforeEach(() => {
   mockOnPlanChanged.mockImplementation(() => ({ dispose: jest.fn() }));
 
   // Reset module-level state by calling deactivate
-  deactivate();
+  await deactivate();
   jest.clearAllMocks();
   // Re-setup mocks after deactivate cleared them
   MockTracker.mockImplementation(() => trackerInstance);
@@ -505,7 +505,7 @@ describe('extension', () => {
       const ctx = makeContext();
       await activate(ctx);
 
-      deactivate();
+      await deactivate();
 
       expect(mockWriteTrackingFile).toHaveBeenCalledWith(
         trackerInstance.getStats(),
@@ -513,8 +513,8 @@ describe('extension', () => {
       expect(trackerInstance.dispose).toHaveBeenCalledTimes(1);
     });
 
-    it('does not throw when called without activate', () => {
-      expect(() => deactivate()).not.toThrow();
+    it('does not throw when called without activate', async () => {
+      await expect(deactivate()).resolves.not.toThrow();
     });
 
     it('cleans up status bar', async () => {
@@ -526,7 +526,7 @@ describe('extension', () => {
 
       const ctx = makeContext();
       await activate(ctx);
-      deactivate();
+      await deactivate();
 
       expect(disposeFn).toHaveBeenCalled();
     });
@@ -534,18 +534,18 @@ describe('extension', () => {
     it('sets tracker and statusBar to null after cleanup', async () => {
       const ctx = makeContext();
       await activate(ctx);
-      deactivate();
+      await deactivate();
 
       // Calling deactivate again should not throw or call dispose again
       trackerInstance.dispose.mockClear();
-      deactivate();
+      await deactivate();
       expect(trackerInstance.dispose).not.toHaveBeenCalled();
     });
 
     it('calls disposeLogger', async () => {
       const ctx = makeContext();
       await activate(ctx);
-      deactivate();
+      await deactivate();
       expect(mockDisposeLogger).toHaveBeenCalled();
     });
 
@@ -553,7 +553,7 @@ describe('extension', () => {
       const ctx = makeContext();
       await activate(ctx);
       mockDisposePlanDetector.mockClear();
-      deactivate();
+      await deactivate();
       expect(mockDisposePlanDetector).toHaveBeenCalledTimes(1);
     });
 
@@ -562,7 +562,7 @@ describe('extension', () => {
       await activate(ctx);
       mockDisposePlanDetector.mockClear();
       mockDisposeSqlite.mockClear();
-      deactivate();
+      await deactivate();
       const planOrder = mockDisposePlanDetector.mock.invocationCallOrder[0];
       const sqliteOrder = mockDisposeSqlite.mock.invocationCallOrder[0];
       expect(planOrder).toBeLessThan(sqliteOrder);
@@ -571,7 +571,7 @@ describe('extension', () => {
     it('calls disposeSqlite before disposeLogger', async () => {
       const ctx = makeContext();
       await activate(ctx);
-      deactivate();
+      await deactivate();
       expect(mockDisposeSqlite).toHaveBeenCalledTimes(1);
       const sqliteOrder = mockDisposeSqlite.mock.invocationCallOrder[0];
       const loggerOrder = mockDisposeLogger.mock.invocationCallOrder[0];
