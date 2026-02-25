@@ -1,109 +1,107 @@
 import { resolveGitDir, resolveGitCommonDir } from './gitDir';
-import * as fs from 'fs';
-import * as path from 'path';
+import * as vscode from 'vscode';
+import { stat, readTextFile } from './fsUtils';
 
-jest.mock('fs');
+jest.mock('./fsUtils');
 
-const mockFs = fs as jest.Mocked<typeof fs>;
+const mockStat = stat as jest.MockedFunction<typeof stat>;
+const mockReadTextFile = readTextFile as jest.MockedFunction<typeof readTextFile>;
 
 beforeEach(() => {
   jest.clearAllMocks();
 });
 
 describe('resolveGitDir', () => {
-  it('returns root/.git when .git is a directory', () => {
-    mockFs.statSync.mockReturnValue({ isDirectory: () => true } as any);
+  it('returns root/.git when .git is a directory', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.Directory } as vscode.FileStat);
 
-    expect(resolveGitDir('/project')).toBe(path.join('/project', '.git'));
+    const result = await resolveGitDir(vscode.Uri.file('/project'));
+    expect(result?.path).toBe('/project/.git');
   });
 
-  it('resolves relative gitdir from .git file', () => {
-    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
-    mockFs.readFileSync.mockReturnValue('gitdir: ../.git/worktrees/my-branch\n');
+  it('resolves relative gitdir from .git file', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.File } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue('gitdir: ../.git/worktrees/my-branch\n');
 
-    const result = resolveGitDir('/repos/my-branch');
-    expect(result).toBe(path.resolve('/repos/my-branch', '../.git/worktrees/my-branch'));
+    const result = await resolveGitDir(vscode.Uri.file('/repos/my-branch'));
+    expect(result?.path).toBe('/repos/.git/worktrees/my-branch');
   });
 
-  it('returns absolute gitdir path from .git file', () => {
-    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
-    mockFs.readFileSync.mockReturnValue('gitdir: /home/user/repo/.git/worktrees/feature\n');
+  it('returns absolute gitdir path from .git file', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.File } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue('gitdir: /home/user/repo/.git/worktrees/feature\n');
 
-    expect(resolveGitDir('/some/worktree')).toBe('/home/user/repo/.git/worktrees/feature');
+    const result = await resolveGitDir(vscode.Uri.file('/some/worktree'));
+    expect(result?.path).toBe('/home/user/repo/.git/worktrees/feature');
   });
 
-  it('returns null when .git does not exist', () => {
-    mockFs.statSync.mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
+  it('returns null when .git does not exist', async () => {
+    mockStat.mockResolvedValue(null);
 
-    expect(resolveGitDir('/nonexistent')).toBeNull();
+    const result = await resolveGitDir(vscode.Uri.file('/nonexistent'));
+    expect(result).toBeNull();
   });
 
-  it('returns null when .git file has invalid content', () => {
-    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
-    mockFs.readFileSync.mockReturnValue('not a valid gitdir reference\n');
+  it('returns null when .git file has invalid content', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.File } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue('not a valid gitdir reference\n');
 
-    expect(resolveGitDir('/project')).toBeNull();
+    const result = await resolveGitDir(vscode.Uri.file('/project'));
+    expect(result).toBeNull();
   });
 
-  it('returns null when .git file cannot be read', () => {
-    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
-    mockFs.readFileSync.mockImplementation(() => {
-      throw new Error('EACCES');
-    });
+  it('returns null when .git file cannot be read', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.File } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue(null);
 
-    expect(resolveGitDir('/project')).toBeNull();
+    const result = await resolveGitDir(vscode.Uri.file('/project'));
+    expect(result).toBeNull();
   });
 });
 
 describe('resolveGitCommonDir', () => {
-  it('returns git dir when no commondir file exists (regular repo)', () => {
-    // statSync: .git is a directory
-    mockFs.statSync.mockReturnValue({ isDirectory: () => true } as any);
-    // readFileSync: commondir file does not exist
-    mockFs.readFileSync.mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
+  it('returns git dir when no commondir file exists (regular repo)', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.Directory } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue(null);
 
-    expect(resolveGitCommonDir('/project')).toBe(path.join('/project', '.git'));
+    const result = await resolveGitCommonDir(vscode.Uri.file('/project'));
+    expect(result?.path).toBe('/project/.git');
   });
 
-  it('follows commondir file in worktree to reach shared git dir', () => {
-    // statSync: .git is a file (not a directory)
-    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
-    // readFileSync called twice: first for .git file, then for commondir
-    mockFs.readFileSync
-      .mockReturnValueOnce('gitdir: /repo/.git/worktrees/feature\n')
-      .mockReturnValueOnce('../..\n');
+  it('follows commondir file in worktree to reach shared git dir', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.File } as vscode.FileStat);
+    mockReadTextFile
+      .mockResolvedValueOnce('gitdir: /repo/.git/worktrees/feature\n')
+      .mockResolvedValueOnce('../..\n');
 
-    const result = resolveGitCommonDir('/worktrees/feature');
-    expect(result).toBe(path.resolve('/repo/.git/worktrees/feature', '../..'));
+    const result = await resolveGitCommonDir(vscode.Uri.file('/worktrees/feature'));
+    expect(result?.path).toBe('/repo/.git');
   });
 
-  it('handles absolute commondir path', () => {
-    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
-    mockFs.readFileSync
-      .mockReturnValueOnce('gitdir: /repo/.git/worktrees/feature\n')
-      .mockReturnValueOnce('/repo/.git\n');
+  it('handles absolute commondir path', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.File } as vscode.FileStat);
+    mockReadTextFile
+      .mockResolvedValueOnce('gitdir: /repo/.git/worktrees/feature\n')
+      .mockResolvedValueOnce('/repo/.git\n');
 
-    expect(resolveGitCommonDir('/worktrees/feature')).toBe('/repo/.git');
+    const result = await resolveGitCommonDir(vscode.Uri.file('/worktrees/feature'));
+    expect(result?.path).toBe('/repo/.git');
   });
 
-  it('returns null when resolveGitDir returns null', () => {
-    mockFs.statSync.mockImplementation(() => {
-      throw new Error('ENOENT');
-    });
+  it('returns null when resolveGitDir returns null', async () => {
+    mockStat.mockResolvedValue(null);
 
-    expect(resolveGitCommonDir('/nonexistent')).toBeNull();
+    const result = await resolveGitCommonDir(vscode.Uri.file('/nonexistent'));
+    expect(result).toBeNull();
   });
 
-  it('returns git dir for submodule (no commondir file)', () => {
-    mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
-    mockFs.readFileSync
-      .mockReturnValueOnce('gitdir: /repo/.git/modules/my-sub\n')
-      .mockImplementationOnce(() => { throw new Error('ENOENT'); });
+  it('returns git dir for submodule (no commondir file)', async () => {
+    mockStat.mockResolvedValue({ type: vscode.FileType.File } as vscode.FileStat);
+    mockReadTextFile
+      .mockResolvedValueOnce('gitdir: /repo/.git/modules/my-sub\n')
+      .mockResolvedValueOnce(null);
 
-    expect(resolveGitCommonDir('/repo/my-sub')).toBe('/repo/.git/modules/my-sub');
+    const result = await resolveGitCommonDir(vscode.Uri.file('/repo/my-sub'));
+    expect(result?.path).toBe('/repo/.git/modules/my-sub');
   });
 });

@@ -102,8 +102,18 @@ export class Uri {
   }
 
   static joinPath(base: Uri, ...segments: string[]): Uri {
-    const joined = [base.path, ...segments].join('/').replace(/\/+/g, '/');
-    return new Uri(base.scheme, joined);
+    let joined = [base.path, ...segments].join('/').replace(/\/+/g, '/');
+    // Normalize '..' segments to match VS Code behavior
+    const parts = joined.split('/');
+    const stack: string[] = [];
+    for (const part of parts) {
+      if (part === '..') {
+        stack.pop();
+      } else if (part !== '.') {
+        stack.push(part);
+      }
+    }
+    return new Uri(base.scheme, stack.join('/') || '/');
   }
 
   with(change: { scheme?: string; path?: string }): Uri {
