@@ -1,22 +1,27 @@
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
+import * as gitDir from './gitDir';
 
 jest.mock('fs');
+jest.mock('./gitDir');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockVscode = vscode as any;
+const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
-function setupWorkspace(rootPath: string) {
+function setupWorkspace(rootPath: string, gitDirPath?: string) {
   mockVscode.workspace.workspaceFolders = [
     { uri: { fsPath: rootPath }, name: 'test', index: 0 },
   ];
+  mockResolveGitDir.mockReturnValue(gitDirPath ?? rootPath + '/.git');
 }
 
 function clearWorkspace() {
   mockVscode.workspace.workspaceFolders = undefined;
+  mockResolveGitDir.mockReturnValue(null);
 }
 
 beforeEach(() => {
@@ -50,6 +55,15 @@ describe('commitHook', () => {
     });
 
     it('returns false when no workspace folder', () => {
+      expect(isHookInstalled()).toBe(false);
+    });
+
+    it('returns false when resolveGitDir returns null', () => {
+      mockVscode.workspace.workspaceFolders = [
+        { uri: { fsPath: '/project' }, name: 'test', index: 0 },
+      ];
+      mockResolveGitDir.mockReturnValue(null);
+
       expect(isHookInstalled()).toBe(false);
     });
   });
@@ -132,6 +146,21 @@ describe('commitHook', () => {
       expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
         expect.stringContaining('No workspace folder'),
       );
+    });
+
+    it('installs hook in worktree git dir', () => {
+      setupWorkspace('/worktrees/feature', '/repo/.git/worktrees/feature');
+      mockFs.readFileSync.mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      (mockFs.existsSync as jest.Mock).mockReturnValue(true);
+      mockFs.writeFileSync.mockImplementation(() => {});
+
+      const result = installHook();
+
+      expect(result).toBe(true);
+      const [hookPath] = mockFs.writeFileSync.mock.calls[0] as any;
+      expect(hookPath).toMatch(/\/repo\/\.git\/worktrees\/feature\/hooks\/prepare-commit-msg$/);
     });
 
     it('returns false when write fails', () => {
@@ -242,10 +271,11 @@ describe('commitHook', () => {
       // Skips merge, squash, and amend commits
       expect(writtenContent).toContain('case "$COMMIT_SOURCE"');
       expect(writtenContent).toContain('merge|squash|commit');
-      // Uses git rev-parse to find repo root
-      expect(writtenContent).toContain('git rev-parse --show-toplevel');
-      // Reads the tracking file
-      expect(writtenContent).toContain('.git/copilot-budget');
+      // Uses git rev-parse --git-dir for worktree/submodule support
+      expect(writtenContent).toContain('git rev-parse --git-dir');
+      expect(writtenContent).not.toContain('git rev-parse --show-toplevel');
+      // Reads the tracking file via GIT_DIR
+      expect(writtenContent).toContain('$GIT_DIR/copilot-budget');
       // Appends to commit message
       expect(writtenContent).toContain('>> "$COMMIT_MSG_FILE"');
       // Resets tracking file

@@ -2,21 +2,25 @@ import { writeTrackingFile } from './trackingFile';
 import { TrackingStats } from './tracker';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
+import * as gitDir from './gitDir';
 
 jest.mock('fs');
+jest.mock('./gitDir');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockVscode = vscode as any;
+const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
 
-function setupWorkspace(rootPath: string) {
+function setupWorkspace(rootPath: string, gitDirPath?: string) {
   mockVscode.workspace.workspaceFolders = [
     { uri: { fsPath: rootPath }, name: 'test', index: 0 },
   ];
-  mockFs.statSync.mockReturnValue({ isDirectory: () => true } as any);
+  mockResolveGitDir.mockReturnValue(gitDirPath ?? rootPath + '/.git');
 }
 
 function clearWorkspace() {
   mockVscode.workspace.workspaceFolders = undefined;
+  mockResolveGitDir.mockReturnValue(null);
 }
 
 const sampleStats: TrackingStats = {
@@ -67,24 +71,28 @@ describe('trackingFile', () => {
       expect(mockFs.writeFileSync).not.toHaveBeenCalled();
     });
 
-    it('returns false when .git is not a directory', () => {
+    it('returns false when resolveGitDir returns null', () => {
       mockVscode.workspace.workspaceFolders = [
         { uri: { fsPath: '/project' }, name: 'test', index: 0 },
       ];
-      mockFs.statSync.mockReturnValue({ isDirectory: () => false } as any);
+      mockResolveGitDir.mockReturnValue(null);
 
       expect(writeTrackingFile(sampleStats)).toBe(false);
     });
 
-    it('returns false when .git does not exist', () => {
-      mockVscode.workspace.workspaceFolders = [
-        { uri: { fsPath: '/project' }, name: 'test', index: 0 },
-      ];
-      mockFs.statSync.mockImplementation(() => {
-        throw new Error('ENOENT');
+    it('writes to worktree git dir when .git is a file', () => {
+      setupWorkspace('/worktrees/feature', '/repo/.git/worktrees/feature');
+      let writtenContent = '';
+      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
+        writtenContent = data;
       });
 
-      expect(writeTrackingFile(sampleStats)).toBe(false);
+      const result = writeTrackingFile(sampleStats);
+
+      expect(result).toBe(true);
+      const callArgs = mockFs.writeFileSync.mock.calls[0];
+      expect(callArgs[0]).toMatch(/\/repo\/\.git\/worktrees\/feature\/copilot-budget$/);
+      expect(writtenContent).toContain('PREMIUM_REQUESTS=15.00');
     });
 
     it('returns false when write fails', () => {

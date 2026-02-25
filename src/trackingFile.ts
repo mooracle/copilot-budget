@@ -1,18 +1,14 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { TrackingStats } from './tracker';
+import { resolveGitDir } from './gitDir';
 
 function getTrackingFilePath(): string | null {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) return null;
-  const gitDir = path.join(folders[0].uri.fsPath, '.git');
-  try {
-    const stat = fs.statSync(gitDir);
-    if (!stat.isDirectory()) return null;
-  } catch {
-    return null;
-  }
+  const gitDir = resolveGitDir(folders[0].uri.fsPath);
+  if (!gitDir) return null;
   return path.join(gitDir, 'copilot-budget');
 }
 
