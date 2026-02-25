@@ -50,35 +50,40 @@ async function getHookUri(): Promise<vscode.Uri | null> {
 }
 
 async function makeExecutable(uri: vscode.Uri): Promise<void> {
-  if (uri.scheme === 'file') {
+  // In remote development the extension host runs on the remote machine,
+  // so fs.chmodSync works regardless of URI scheme.
+  try {
     fs.chmodSync(uri.fsPath, 0o755);
-  } else {
-    const task = new vscode.Task(
-      { type: 'shell' }, vscode.TaskScope.Workspace,
-      'chmod-hook', 'copilot-budget',
-      new vscode.ShellExecution('chmod', ['+x', uri.path]),
-    );
-    task.presentationOptions = { reveal: vscode.TaskRevealKind.Silent };
-    let disposable: vscode.Disposable | undefined;
-    try {
-      await Promise.race([
-        new Promise<void>((resolve, reject) => {
-          disposable = vscode.tasks.onDidEndTaskProcess((e: any) => {
-            if (e.execution.task === task) {
-              disposable?.dispose();
-              e.exitCode === 0 ? resolve() : reject(new Error(`chmod exit ${e.exitCode}`));
-            }
-          });
-          vscode.tasks.executeTask(task).then(undefined, reject);
-        }),
-        new Promise<void>((resolve) => setTimeout(() => {
-          log('[commitHook] chmod task timed out, hook may not be executable');
-          resolve();
-        }, 5000)),
-      ]);
-    } finally {
-      disposable?.dispose();
-    }
+    return;
+  } catch {
+    log('[commitHook] chmodSync failed, falling back to shell task');
+  }
+  // Fallback: run chmod via a VS Code shell task
+  const task = new vscode.Task(
+    { type: 'copilot-budget', task: 'chmod' }, vscode.TaskScope.Workspace,
+    'chmod-hook', 'copilot-budget',
+    new vscode.ShellExecution('chmod', ['+x', uri.path]),
+  );
+  task.presentationOptions = { reveal: vscode.TaskRevealKind.Silent };
+  let disposable: vscode.Disposable | undefined;
+  try {
+    await Promise.race([
+      new Promise<void>((resolve, reject) => {
+        disposable = vscode.tasks.onDidEndTaskProcess((e: any) => {
+          if (e.execution.task === task) {
+            disposable?.dispose();
+            e.exitCode === 0 ? resolve() : reject(new Error(`chmod exit ${e.exitCode}`));
+          }
+        });
+        vscode.tasks.executeTask(task).then(undefined, reject);
+      }),
+      new Promise<void>((resolve) => setTimeout(() => {
+        log('[commitHook] chmod task timed out, hook may not be executable');
+        resolve();
+      }, 5000)),
+    ]);
+  } finally {
+    disposable?.dispose();
   }
 }
 
