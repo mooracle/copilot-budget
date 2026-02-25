@@ -1,20 +1,19 @@
-import * as fs from 'fs';
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { TrackingStats } from './tracker';
 import { resolveGitDir } from './gitDir';
+import { writeTextFile } from './fsUtils';
 
-function getTrackingFilePath(): string | null {
+async function getTrackingFileUri(): Promise<vscode.Uri | null> {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) return null;
-  const gitDir = resolveGitDir(folders[0].uri.fsPath);
+  const gitDir = await resolveGitDir(folders[0].uri);
   if (!gitDir) return null;
-  return path.join(gitDir, 'copilot-budget');
+  return vscode.Uri.joinPath(gitDir, 'copilot-budget');
 }
 
-export function writeTrackingFile(stats: TrackingStats): boolean {
-  const filePath = getTrackingFilePath();
-  if (!filePath) return false;
+export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> {
+  const uri = await getTrackingFileUri();
+  if (!uri) return false;
 
   const lines: string[] = [
     `TOTAL_TOKENS=${stats.totalTokens}`,
@@ -30,7 +29,7 @@ export function writeTrackingFile(stats: TrackingStats): boolean {
   }
 
   try {
-    fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf-8');
+    await writeTextFile(uri, lines.join('\n') + '\n');
     return true;
   } catch {
     return false;

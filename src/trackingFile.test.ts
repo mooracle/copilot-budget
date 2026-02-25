@@ -1,26 +1,27 @@
 import { writeTrackingFile } from './trackingFile';
 import { TrackingStats } from './tracker';
-import * as fs from 'fs';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
+import * as fsUtils from './fsUtils';
 
-jest.mock('fs');
 jest.mock('./gitDir');
+jest.mock('./fsUtils');
 
-const mockFs = fs as jest.Mocked<typeof fs>;
 const mockVscode = vscode as any;
 const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
+const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
 
 function setupWorkspace(rootPath: string, gitDirPath?: string) {
+  const rootUri = vscode.Uri.file(rootPath);
   mockVscode.workspace.workspaceFolders = [
-    { uri: { fsPath: rootPath }, name: 'test', index: 0 },
+    { uri: rootUri, name: 'test', index: 0 },
   ];
-  mockResolveGitDir.mockReturnValue(gitDirPath ?? rootPath + '/.git');
+  mockResolveGitDir.mockResolvedValue(vscode.Uri.file(gitDirPath ?? rootPath + '/.git'));
 }
 
 function clearWorkspace() {
   mockVscode.workspace.workspaceFolders = undefined;
-  mockResolveGitDir.mockReturnValue(null);
+  mockResolveGitDir.mockResolvedValue(null);
 }
 
 const sampleStats: TrackingStats = {
@@ -38,78 +39,65 @@ const sampleStats: TrackingStats = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockWriteTextFile.mockResolvedValue(undefined);
 });
 
 describe('trackingFile', () => {
   describe('writeTrackingFile', () => {
-    it('writes stats in key=value format', () => {
+    it('writes stats in key=value format', async () => {
       setupWorkspace('/project');
-      let writtenContent = '';
-      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
-        writtenContent = data;
-      });
 
-      const result = writeTrackingFile(sampleStats);
+      const result = await writeTrackingFile(sampleStats);
 
       expect(result).toBe(true);
-      expect(mockFs.writeFileSync).toHaveBeenCalledTimes(1);
-      const callArgs = mockFs.writeFileSync.mock.calls[0];
-      expect(callArgs[0]).toMatch(/\.git[/\\]copilot-budget$/);
+      expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
+      const [uri, content] = mockWriteTextFile.mock.calls[0];
+      expect(uri.path).toMatch(/\.git\/copilot-budget$/);
 
-      expect(writtenContent).toContain('TOTAL_TOKENS=3100');
-      expect(writtenContent).toContain('INTERACTIONS=15');
-      expect(writtenContent).toContain('PREMIUM_REQUESTS=15.00');
-      expect(writtenContent).toContain('ESTIMATED_COST=0.60');
-      expect(writtenContent).toContain('SINCE=2024-01-15T10:30:00Z');
-      expect(writtenContent).toContain('MODEL gpt-4o 1500 800 10.00');
-      expect(writtenContent).toContain('MODEL claude-sonnet-4 500 300 5.00');
+      expect(content).toContain('TOTAL_TOKENS=3100');
+      expect(content).toContain('INTERACTIONS=15');
+      expect(content).toContain('PREMIUM_REQUESTS=15.00');
+      expect(content).toContain('ESTIMATED_COST=0.60');
+      expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
+      expect(content).toContain('MODEL gpt-4o 1500 800 10.00');
+      expect(content).toContain('MODEL claude-sonnet-4 500 300 5.00');
     });
 
-    it('returns false when no workspace folder', () => {
+    it('returns false when no workspace folder', async () => {
       clearWorkspace();
-      expect(writeTrackingFile(sampleStats)).toBe(false);
-      expect(mockFs.writeFileSync).not.toHaveBeenCalled();
+      expect(await writeTrackingFile(sampleStats)).toBe(false);
+      expect(mockWriteTextFile).not.toHaveBeenCalled();
     });
 
-    it('returns false when resolveGitDir returns null', () => {
+    it('returns false when resolveGitDir returns null', async () => {
       mockVscode.workspace.workspaceFolders = [
-        { uri: { fsPath: '/project' }, name: 'test', index: 0 },
+        { uri: vscode.Uri.file('/project'), name: 'test', index: 0 },
       ];
-      mockResolveGitDir.mockReturnValue(null);
+      mockResolveGitDir.mockResolvedValue(null);
 
-      expect(writeTrackingFile(sampleStats)).toBe(false);
+      expect(await writeTrackingFile(sampleStats)).toBe(false);
     });
 
-    it('writes to worktree git dir when .git is a file', () => {
+    it('writes to worktree git dir when .git is a file', async () => {
       setupWorkspace('/worktrees/feature', '/repo/.git/worktrees/feature');
-      let writtenContent = '';
-      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
-        writtenContent = data;
-      });
 
-      const result = writeTrackingFile(sampleStats);
+      const result = await writeTrackingFile(sampleStats);
 
       expect(result).toBe(true);
-      const callArgs = mockFs.writeFileSync.mock.calls[0];
-      expect(callArgs[0]).toMatch(/\/repo\/\.git\/worktrees\/feature\/copilot-budget$/);
-      expect(writtenContent).toContain('PREMIUM_REQUESTS=15.00');
+      const [uri, content] = mockWriteTextFile.mock.calls[0];
+      expect(uri.path).toMatch(/\/repo\/\.git\/worktrees\/feature\/copilot-budget$/);
+      expect(content).toContain('PREMIUM_REQUESTS=15.00');
     });
 
-    it('returns false when write fails', () => {
+    it('returns false when write fails', async () => {
       setupWorkspace('/project');
-      mockFs.writeFileSync.mockImplementation(() => {
-        throw new Error('EACCES');
-      });
+      mockWriteTextFile.mockRejectedValue(new Error('EACCES'));
 
-      expect(writeTrackingFile(sampleStats)).toBe(false);
+      expect(await writeTrackingFile(sampleStats)).toBe(false);
     });
 
-    it('sanitizes model names with unsafe characters', () => {
+    it('sanitizes model names with unsafe characters', async () => {
       setupWorkspace('/project');
-      let writtenContent = '';
-      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
-        writtenContent = data;
-      });
 
       const unsafeStats: TrackingStats = {
         since: '2024-01-15T10:30:00Z',
@@ -125,20 +113,17 @@ describe('trackingFile', () => {
         estimatedCost: 0.12,
       };
 
-      writeTrackingFile(unsafeStats);
-      expect(writtenContent).toContain('MODEL model_with_spaces 100 50 1.00');
-      expect(writtenContent).toContain('MODEL model__cmd_ 200 100 1.00');
-      expect(writtenContent).toContain('MODEL model_id_ 300 150 1.00');
-      expect(writtenContent).not.toMatch(/\$\(cmd\)/);
-      expect(writtenContent).not.toMatch(/`id`/);
+      await writeTrackingFile(unsafeStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+      expect(content).toContain('MODEL model_with_spaces 100 50 1.00');
+      expect(content).toContain('MODEL model__cmd_ 200 100 1.00');
+      expect(content).toContain('MODEL model_id_ 300 150 1.00');
+      expect(content).not.toMatch(/\$\(cmd\)/);
+      expect(content).not.toMatch(/`id`/);
     });
 
-    it('handles stats with no models', () => {
+    it('handles stats with no models', async () => {
       setupWorkspace('/project');
-      let writtenContent = '';
-      mockFs.writeFileSync.mockImplementation((_p: any, data: any) => {
-        writtenContent = data;
-      });
 
       const emptyStats: TrackingStats = {
         since: '2024-01-15T10:30:00Z',
@@ -150,12 +135,13 @@ describe('trackingFile', () => {
         estimatedCost: 0,
       };
 
-      writeTrackingFile(emptyStats);
-      expect(writtenContent).toContain('TOTAL_TOKENS=0');
-      expect(writtenContent).toContain('INTERACTIONS=0');
-      expect(writtenContent).toContain('PREMIUM_REQUESTS=0.00');
-      expect(writtenContent).toContain('ESTIMATED_COST=0.00');
-      expect(writtenContent).not.toContain('MODEL ');
+      await writeTrackingFile(emptyStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+      expect(content).toContain('TOTAL_TOKENS=0');
+      expect(content).toContain('INTERACTIONS=0');
+      expect(content).toContain('PREMIUM_REQUESTS=0.00');
+      expect(content).toContain('ESTIMATED_COST=0.00');
+      expect(content).not.toContain('MODEL ');
     });
   });
 });
