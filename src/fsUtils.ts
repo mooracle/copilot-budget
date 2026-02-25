@@ -28,12 +28,3 @@ export async function stat(
     return null;
   }
 }
-
-export async function deleteFile(uri: vscode.Uri): Promise<boolean> {
-  try {
-    await vscode.workspace.fs.delete(uri);
-    return true;
-  } catch {
-    return false;
-  }
-}

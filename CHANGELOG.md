@@ -5,6 +5,17 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-02-25
+
+### Changed
+
+- Migrated workspace-side file operations (`gitDir.ts`, `trackingFile.ts`, `commitHook.ts`) from Node.js `fs` to `vscode.workspace.fs` for proper devcontainer and remote filesystem support
+- New `fsUtils.ts` module providing thin wrappers (`readTextFile`, `writeTextFile`, `stat`) around `vscode.workspace.fs`
+- `resolveGitDir()` and `resolveGitCommonDir()` now accept `vscode.Uri` and return `Promise<vscode.Uri | null>`
+- `writeTrackingFile()`, `installHook()`, `uninstallHook()`, `isHookInstalled()` are now async
+- `deactivate()` is now async
+- Commit hook `chmod` on remote filesystems uses a VS Code shell task fallback when `fs.chmodSync` is unavailable
+
 ## [0.4.3] - 2026-02-25
 
 ### Added

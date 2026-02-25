@@ -59,21 +59,26 @@ async function makeExecutable(uri: vscode.Uri): Promise<void> {
       new vscode.ShellExecution('chmod', ['+x', uri.path]),
     );
     task.presentationOptions = { reveal: vscode.TaskRevealKind.Silent };
-    await Promise.race([
-      new Promise<void>((resolve, reject) => {
-        const d = vscode.tasks.onDidEndTaskProcess((e: any) => {
-          if (e.execution.task === task) {
-            d.dispose();
-            e.exitCode === 0 ? resolve() : reject(new Error(`chmod exit ${e.exitCode}`));
-          }
-        });
-        vscode.tasks.executeTask(task).then(undefined, reject);
-      }),
-      new Promise<void>((resolve) => setTimeout(() => {
-        log('[commitHook] chmod task timed out, hook may not be executable');
-        resolve();
-      }, 5000)),
-    ]);
+    let disposable: vscode.Disposable | undefined;
+    try {
+      await Promise.race([
+        new Promise<void>((resolve, reject) => {
+          disposable = vscode.tasks.onDidEndTaskProcess((e: any) => {
+            if (e.execution.task === task) {
+              disposable?.dispose();
+              e.exitCode === 0 ? resolve() : reject(new Error(`chmod exit ${e.exitCode}`));
+            }
+          });
+          vscode.tasks.executeTask(task).then(undefined, reject);
+        }),
+        new Promise<void>((resolve) => setTimeout(() => {
+          log('[commitHook] chmod task timed out, hook may not be executable');
+          resolve();
+        }, 5000)),
+      ]);
+    } finally {
+      disposable?.dispose();
+    }
   }
 }
 
