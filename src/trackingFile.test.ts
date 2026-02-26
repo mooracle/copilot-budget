@@ -1,4 +1,4 @@
-import { writeTrackingFile } from './trackingFile';
+import { writeTrackingFile, parseTrackingFileContent, readTrackingFile } from './trackingFile';
 import { TrackingStats } from './tracker';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
@@ -10,6 +10,7 @@ jest.mock('./fsUtils');
 const mockVscode = vscode as any;
 const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
 const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
+const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
 
 function setupWorkspace(rootPath: string, gitDirPath?: string) {
   const rootUri = vscode.Uri.file(rootPath);
@@ -142,6 +143,131 @@ describe('trackingFile', () => {
       expect(content).toContain('PREMIUM_REQUESTS=0.00');
       expect(content).toContain('ESTIMATED_COST=0.00');
       expect(content).not.toContain('MODEL ');
+    });
+  });
+
+  describe('parseTrackingFileContent', () => {
+    it('parses a valid tracking file', () => {
+      const content = [
+        'TOTAL_TOKENS=3100',
+        'INTERACTIONS=15',
+        'PREMIUM_REQUESTS=15.00',
+        'ESTIMATED_COST=0.60',
+        'SINCE=2024-01-15T10:30:00Z',
+        'MODEL gpt-4o 1500 800 10.00',
+        'MODEL claude-sonnet-4 500 300 5.00',
+        '',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe('2024-01-15T10:30:00Z');
+      expect(result!.interactions).toBe(15);
+      expect(result!.models['gpt-4o']).toEqual({ inputTokens: 1500, outputTokens: 800, premiumRequests: 10 });
+      expect(result!.models['claude-sonnet-4']).toEqual({ inputTokens: 500, outputTokens: 300, premiumRequests: 5 });
+    });
+
+    it('returns null for empty content', () => {
+      expect(parseTrackingFileContent('')).toBeNull();
+      expect(parseTrackingFileContent('   ')).toBeNull();
+      expect(parseTrackingFileContent('\n\n')).toBeNull();
+    });
+
+    it('returns null when SINCE is missing', () => {
+      const content = [
+        'TOTAL_TOKENS=100',
+        'INTERACTIONS=1',
+        'MODEL gpt-4o 50 50 1.00',
+      ].join('\n');
+
+      expect(parseTrackingFileContent(content)).toBeNull();
+    });
+
+    it('handles file with no MODEL lines', () => {
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=0',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe('2024-01-15T10:30:00Z');
+      expect(result!.interactions).toBe(0);
+      expect(result!.models).toEqual({});
+    });
+
+    it('skips MODEL lines with invalid numbers', () => {
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=5',
+        'MODEL good-model 100 200 3.00',
+        'MODEL bad-model abc def ghi',
+        'MODEL short-model 100',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+      expect(result).not.toBeNull();
+      expect(Object.keys(result!.models)).toEqual(['good-model']);
+    });
+
+    it('roundtrips with writeTrackingFile output', async () => {
+      setupWorkspace('/project');
+      await writeTrackingFile(sampleStats);
+      const written = mockWriteTextFile.mock.calls[0][1];
+
+      const result = parseTrackingFileContent(written);
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe(sampleStats.since);
+      expect(result!.interactions).toBe(sampleStats.interactions);
+      expect(result!.models['gpt-4o']).toEqual(sampleStats.models['gpt-4o']);
+      expect(result!.models['claude-sonnet-4']).toEqual(sampleStats.models['claude-sonnet-4']);
+    });
+  });
+
+  describe('readTrackingFile', () => {
+    it('reads and parses the tracking file', async () => {
+      setupWorkspace('/project');
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=5',
+        'MODEL gpt-4o 100 200 3.00',
+        '',
+      ].join('\n');
+      mockReadTextFile.mockResolvedValue(content);
+
+      const result = await readTrackingFile();
+
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe('2024-01-15T10:30:00Z');
+      expect(result!.interactions).toBe(5);
+      expect(result!.models['gpt-4o']).toEqual({ inputTokens: 100, outputTokens: 200, premiumRequests: 3 });
+    });
+
+    it('returns null when no workspace folder', async () => {
+      clearWorkspace();
+      expect(await readTrackingFile()).toBeNull();
+    });
+
+    it('returns null when readTextFile returns null', async () => {
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue(null);
+
+      expect(await readTrackingFile()).toBeNull();
+    });
+
+    it('returns null for empty file (truncated by commit hook)', async () => {
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue('');
+
+      expect(await readTrackingFile()).toBeNull();
+    });
+
+    it('returns null for corrupt file missing SINCE', async () => {
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue('INTERACTIONS=5\nMODEL gpt-4o 100 200 3.00\n');
+
+      expect(await readTrackingFile()).toBeNull();
     });
   });
 });
