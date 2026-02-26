@@ -1292,6 +1292,7 @@ describe('Tracker', () => {
       expect(stats.totalTokens).toBe(150); // 100 + 50
       expect(stats.interactions).toBe(5);
       expect(stats.premiumRequests).toBe(3);
+      expect(stats.estimatedCost).toBeCloseTo(3 * 0.04);
       expect(stats.since).toBe('2025-01-01T00:00:00.000Z');
       expect(stats.models['gpt-4o']).toEqual({
         inputTokens: 100,

@@ -211,6 +211,16 @@ describe('trackingFile', () => {
       expect(Object.keys(result!.models)).toEqual(['good-model']);
     });
 
+    it('returns null when SINCE is not a valid date', () => {
+      const content = [
+        'SINCE=not-a-date',
+        'INTERACTIONS=5',
+        'MODEL gpt-4o 100 200 3.00',
+      ].join('\n');
+
+      expect(parseTrackingFileContent(content)).toBeNull();
+    });
+
     it('roundtrips with writeTrackingFile output', async () => {
       setupWorkspace('/project');
       await writeTrackingFile(sampleStats);

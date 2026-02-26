@@ -49,7 +49,10 @@ export function parseTrackingFileContent(content: string): RestoredStats | null 
     if (!trimmed) continue;
 
     if (trimmed.startsWith('SINCE=')) {
-      since = trimmed.slice('SINCE='.length);
+      const val = trimmed.slice('SINCE='.length);
+      if (!isNaN(Date.parse(val))) {
+        since = val;
+      }
     } else if (trimmed.startsWith('INTERACTIONS=')) {
       const val = parseInt(trimmed.slice('INTERACTIONS='.length), 10);
       if (!isNaN(val)) interactions = val;

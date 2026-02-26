@@ -5,6 +5,18 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-26
+
+### Added
+
+- Stats now persist across VS Code restarts — on activation, the extension reads the tracking file written during the previous session and merges prior premium requests, tokens, and interaction counts into the current session
+- New `readTrackingFile()` and `parseTrackingFileContent()` exports in `trackingFile.ts`
+- New `RestoredStats` type and `setPreviousStats()` method on `Tracker`
+
+### Changed
+
+- "Reset Tracking" command now also clears restored previous-session stats
+
 ## [0.4.5] - 2026-02-25
 
 ### Changed

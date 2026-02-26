@@ -32,6 +32,10 @@ interface FileCache {
 
 type StatsListener = (stats: TrackingStats) => void;
 
+function sanitizeModelName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
 function mergeModelUsage(target: ModelUsage, source: ModelUsage): void {
   for (const [model, usage] of Object.entries(source)) {
     if (!target[model]) {
@@ -282,18 +286,26 @@ export class Tracker {
       const deltaOutput = Math.max(0, usage.outputTokens - base.outputTokens);
       const modelPremium = (deltaModelInteractions[model] || 0) * getPremiumMultiplier(model);
       if (deltaInput > 0 || deltaOutput > 0 || modelPremium > 0) {
-        deltaModels[model] = {
-          inputTokens: deltaInput,
-          outputTokens: deltaOutput,
-          premiumRequests: modelPremium,
-        };
+        const key = sanitizeModelName(model);
+        if (deltaModels[key]) {
+          deltaModels[key].inputTokens += deltaInput;
+          deltaModels[key].outputTokens += deltaOutput;
+          deltaModels[key].premiumRequests += modelPremium;
+        } else {
+          deltaModels[key] = {
+            inputTokens: deltaInput,
+            outputTokens: deltaOutput,
+            premiumRequests: modelPremium,
+          };
+        }
       }
     }
 
     // Also handle models with interactions but no token usage
     for (const [model, delta] of Object.entries(deltaModelInteractions)) {
-      if (!deltaModels[model] && delta > 0) {
-        deltaModels[model] = {
+      const key = sanitizeModelName(model);
+      if (!deltaModels[key] && delta > 0) {
+        deltaModels[key] = {
           inputTokens: 0,
           outputTokens: 0,
           premiumRequests: delta * getPremiumMultiplier(model),

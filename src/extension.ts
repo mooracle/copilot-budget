@@ -56,6 +56,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const restored = await readTrackingFile();
   if (restored) {
     tracker.setPreviousStats(restored);
+    log('Restored stats from previous session');
+  } else {
+    log('No previous stats to restore');
   }
 
   tracker.start();
