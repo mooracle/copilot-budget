@@ -13,7 +13,7 @@ import { __commandCallbacks } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
-import { writeTrackingFile } from './trackingFile';
+import { writeTrackingFile, readTrackingFile } from './trackingFile';
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
@@ -36,6 +36,9 @@ const mockShowStatsQuickPick = showStatsQuickPick as jest.MockedFunction<
 >;
 const mockWriteTrackingFile = writeTrackingFile as jest.MockedFunction<
   typeof writeTrackingFile
+>;
+const mockReadTrackingFile = readTrackingFile as jest.MockedFunction<
+  typeof readTrackingFile
 >;
 const mockInstallHook = installHook as jest.MockedFunction<typeof installHook>;
 const mockUninstallHook = uninstallHook as jest.MockedFunction<
@@ -98,6 +101,7 @@ beforeEach(async () => {
     update: jest.fn(),
     dispose: jest.fn(),
     setPlanInfoProvider: jest.fn(),
+    setPreviousStats: jest.fn(),
     getStats: jest.fn().mockReturnValue({
       since: '2024-01-01T00:00:00Z',
       lastUpdated: '2024-01-01T01:00:00Z',
@@ -127,6 +131,7 @@ beforeEach(async () => {
   mockCreateStatusBar.mockReturnValue(mockStatusBarItem as any);
   mockShowStatsQuickPick.mockResolvedValue(undefined);
   mockWriteTrackingFile.mockResolvedValue(true);
+  mockReadTrackingFile.mockResolvedValue(null);
   mockInstallHook.mockResolvedValue(true);
   mockUninstallHook.mockResolvedValue(true);
   mockIsHookInstalled.mockResolvedValue(false);
@@ -184,6 +189,7 @@ beforeEach(async () => {
     return { dispose: jest.fn() };
   });
   mockWriteTrackingFile.mockResolvedValue(true);
+  mockReadTrackingFile.mockResolvedValue(null);
   mockIsHookInstalled.mockResolvedValue(false);
   mockInitSqlite.mockResolvedValue(true);
   mockDetectPlan.mockResolvedValue({
@@ -395,6 +401,44 @@ describe('extension', () => {
       const ctx = makeContext();
       await activate(ctx);
       expect(mockDetectPlan).not.toHaveBeenCalled();
+    });
+
+    it('restores previous stats from tracking file', async () => {
+      const restored = {
+        since: '2024-01-01T00:00:00Z',
+        interactions: 5,
+        models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 5 } },
+      };
+      mockReadTrackingFile.mockResolvedValue(restored);
+
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockReadTrackingFile).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.setPreviousStats).toHaveBeenCalledWith(restored);
+    });
+
+    it('does not call setPreviousStats when readTrackingFile returns null', async () => {
+      mockReadTrackingFile.mockResolvedValue(null);
+
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockReadTrackingFile).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+    });
+
+    it('calls readTrackingFile after setPlanInfoProvider and before start', async () => {
+      mockReadTrackingFile.mockResolvedValue(null);
+
+      const ctx = makeContext();
+      await activate(ctx);
+
+      const providerOrder = trackerInstance.setPlanInfoProvider.mock.invocationCallOrder[0];
+      const readOrder = mockReadTrackingFile.mock.invocationCallOrder[0];
+      const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
+      expect(providerOrder).toBeLessThan(readOrder);
+      expect(readOrder).toBeLessThan(startOrder);
     });
   });
 

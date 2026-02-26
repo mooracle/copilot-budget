@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
-import { writeTrackingFile } from './trackingFile';
+import { writeTrackingFile, readTrackingFile } from './trackingFile';
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
@@ -51,6 +51,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   tracker = new Tracker();
   tracker.setPlanInfoProvider(getPlanInfo);
+
+  // Restore stats from previous session (if tracking file exists)
+  const restored = await readTrackingFile();
+  if (restored) {
+    tracker.setPreviousStats(restored);
+  }
+
   tracker.start();
 
   // Periodic plan refresh (re-detect every 15 min)
