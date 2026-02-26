@@ -1,4 +1,4 @@
-import { Tracker, TrackingStats } from './tracker';
+import { Tracker, TrackingStats, RestoredStats } from './tracker';
 import * as fs from 'fs';
 import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
@@ -1270,6 +1270,174 @@ describe('Tracker', () => {
       // Baseline = 300 tokens total (100 + 200), delta = 0
       expect(tracker.getStats().totalTokens).toBe(0);
       expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+      tracker.dispose();
+    });
+  });
+
+  describe('previousStats', () => {
+    it('adds previous values to delta when no new sessions', () => {
+      setupEmptyDiscovery();
+
+      const tracker = new Tracker();
+      tracker.setPreviousStats({
+        since: '2025-01-01T00:00:00.000Z',
+        interactions: 5,
+        models: {
+          'gpt-4o': { inputTokens: 100, outputTokens: 50, premiumRequests: 3 },
+        },
+      });
+      tracker.initialize();
+
+      const stats = tracker.getStats();
+      expect(stats.totalTokens).toBe(150); // 100 + 50
+      expect(stats.interactions).toBe(5);
+      expect(stats.premiumRequests).toBe(3);
+      expect(stats.since).toBe('2025-01-01T00:00:00.000Z');
+      expect(stats.models['gpt-4o']).toEqual({
+        inputTokens: 100,
+        outputTokens: 50,
+        premiumRequests: 3,
+      });
+      tracker.dispose();
+    });
+
+    it('merges with new session delta', () => {
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 1000,
+          content: '{}',
+          parseResult: {
+            tokens: 0,
+            interactions: 0,
+            modelUsage: {},
+            modelInteractions: {}, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      const tracker = new Tracker();
+      tracker.setPreviousStats({
+        since: '2025-01-01T00:00:00.000Z',
+        interactions: 5,
+        models: {
+          'gpt-4o': { inputTokens: 100, outputTokens: 50, premiumRequests: 3 },
+        },
+      });
+      tracker.initialize();
+
+      // Simulate new usage
+      setupFiles([
+        {
+          path: '/sessions/a.json',
+          mtime: 2000,
+          content: '{}',
+          parseResult: {
+            tokens: 200,
+            interactions: 4,
+            modelUsage: { 'gpt-4o': { inputTokens: 120, outputTokens: 80 } },
+            modelInteractions: { 'gpt-4o': 4 }, thinkingTokens: 0,
+          },
+        },
+      ]);
+
+      tracker.update();
+      const stats = tracker.getStats();
+
+      // Delta from sessions: 120 + 80 = 200 tokens, plus previous: 100 + 50 = 150
+      expect(stats.totalTokens).toBe(350);
+      // Delta interactions: 4 + previous: 5 = 9
+      expect(stats.interactions).toBe(9);
+      // Delta premium: 4 * 1 + previous: 3 = 7
+      expect(stats.models['gpt-4o'].premiumRequests).toBe(7);
+      expect(stats.premiumRequests).toBe(7);
+      tracker.dispose();
+    });
+
+    it('uses restored since timestamp', () => {
+      setupEmptyDiscovery();
+
+      const tracker = new Tracker();
+      const originalSince = tracker.getStats().since;
+
+      tracker.setPreviousStats({
+        since: '2024-06-15T12:00:00.000Z',
+        interactions: 0,
+        models: {},
+      });
+
+      expect(tracker.getStats().since).not.toBe(originalSince);
+      expect(tracker.getStats().since).toBe('2024-06-15T12:00:00.000Z');
+      tracker.dispose();
+    });
+
+    it('recomputes estimatedCost from premiumRequests and current costPerRequest', () => {
+      setupEmptyDiscovery();
+
+      const tracker = new Tracker();
+      tracker.setPlanInfoProvider(() => ({
+        planName: 'pro',
+        costPerRequest: 10 / 300, // ~0.0333
+        source: 'config',
+      }));
+      tracker.setPreviousStats({
+        since: '2025-01-01T00:00:00.000Z',
+        interactions: 3,
+        models: {
+          'gpt-4o': { inputTokens: 100, outputTokens: 50, premiumRequests: 6 },
+        },
+      });
+      tracker.initialize();
+
+      const stats = tracker.getStats();
+      // 6 premium requests * (10/300) = 0.2
+      expect(stats.estimatedCost).toBeCloseTo(0.2);
+      tracker.dispose();
+    });
+
+    it('reset() clears previousStats', () => {
+      setupEmptyDiscovery();
+
+      const tracker = new Tracker();
+      tracker.setPreviousStats({
+        since: '2025-01-01T00:00:00.000Z',
+        interactions: 5,
+        models: {
+          'gpt-4o': { inputTokens: 100, outputTokens: 50, premiumRequests: 3 },
+        },
+      });
+      tracker.initialize();
+
+      expect(tracker.getStats().totalTokens).toBe(150);
+
+      tracker.reset();
+      const stats = tracker.getStats();
+      expect(stats.totalTokens).toBe(0);
+      expect(stats.interactions).toBe(0);
+      expect(stats.premiumRequests).toBe(0);
+      tracker.dispose();
+    });
+
+    it('models only in previousStats still appear in output', () => {
+      setupEmptyDiscovery();
+
+      const tracker = new Tracker();
+      tracker.setPreviousStats({
+        since: '2025-01-01T00:00:00.000Z',
+        interactions: 2,
+        models: {
+          'claude-sonnet-4': { inputTokens: 200, outputTokens: 100, premiumRequests: 2 },
+        },
+      });
+      tracker.initialize();
+
+      const stats = tracker.getStats();
+      expect(stats.models['claude-sonnet-4']).toEqual({
+        inputTokens: 200,
+        outputTokens: 100,
+        premiumRequests: 2,
+      });
+      expect(stats.totalTokens).toBe(300);
       tracker.dispose();
     });
   });

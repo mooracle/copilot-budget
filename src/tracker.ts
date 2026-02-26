@@ -16,6 +16,12 @@ export interface TrackingStats {
   estimatedCost: number;
 }
 
+export interface RestoredStats {
+  since: string;
+  interactions: number;
+  models: { [model: string]: { inputTokens: number; outputTokens: number; premiumRequests: number } };
+}
+
 interface FileCache {
   mtime: number;
   tokens: number;
@@ -58,6 +64,7 @@ export class Tracker {
   private listeners: StatsListener[] = [];
   private lastStats: TrackingStats | null = null;
   private planInfoProvider: (() => PlanInfo) | null = null;
+  private previousStats: RestoredStats | null = null;
 
   constructor() {
     this.since = new Date().toISOString();
@@ -65,6 +72,11 @@ export class Tracker {
 
   setPlanInfoProvider(provider: () => PlanInfo): void {
     this.planInfoProvider = provider;
+  }
+
+  setPreviousStats(restored: RestoredStats): void {
+    this.previousStats = restored;
+    this.since = restored.since;
   }
 
   onStatsChanged(listener: StatsListener): { dispose: () => void } {
@@ -289,6 +301,23 @@ export class Tracker {
       }
     }
 
+    // Merge previousStats (restored from prior session) into delta
+    if (this.previousStats) {
+      for (const [model, prev] of Object.entries(this.previousStats.models)) {
+        if (deltaModels[model]) {
+          deltaModels[model].inputTokens += prev.inputTokens;
+          deltaModels[model].outputTokens += prev.outputTokens;
+          deltaModels[model].premiumRequests += prev.premiumRequests;
+        } else {
+          deltaModels[model] = {
+            inputTokens: prev.inputTokens,
+            outputTokens: prev.outputTokens,
+            premiumRequests: prev.premiumRequests,
+          };
+        }
+      }
+    }
+
     const totalTokens = Object.values(deltaModels).reduce(
       (sum, m) => sum + m.inputTokens + m.outputTokens,
       0,
@@ -296,7 +325,7 @@ export class Tracker {
     const interactions = Math.max(
       0,
       current.interactions - baseline.interactions,
-    );
+    ) + (this.previousStats ? this.previousStats.interactions : 0);
     const premiumRequests = Object.values(deltaModels).reduce(
       (sum, m) => sum + m.premiumRequests,
       0,
@@ -355,6 +384,7 @@ export class Tracker {
   }
 
   reset(): void {
+    this.previousStats = null;
     const snapshot = this.scanAll();
     this.baseline = snapshot;
     this.since = new Date().toISOString();
@@ -384,5 +414,6 @@ export class Tracker {
     this.stop();
     this.listeners = [];
     this.fileCache.clear();
+    this.previousStats = null;
   }
 }
