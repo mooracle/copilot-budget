@@ -1,48 +1,73 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for version bump
+        id: check
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — skipping release"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version $VERSION detected — will release"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Node.js
+        if: steps.check.outputs.should_release == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: steps.check.outputs.should_release == 'true'
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Run tests
-        run: npm test
-
       - name: Compile
+        if: steps.check.outputs.should_release == 'true'
         run: npm run compile
 
       - name: Package extension
+        if: steps.check.outputs.should_release == 'true'
         run: npx @vscode/vsce package --no-dependencies
 
+      - name: Create git tag
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          git tag "v${{ steps.check.outputs.version }}"
+          git push origin "v${{ steps.check.outputs.version }}"
+
       - name: Publish to VS Code Marketplace
+        if: steps.check.outputs.should_release == 'true'
         run: npx @vscode/vsce publish --no-dependencies --packagePath *.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Upload VSIX to GitHub Release
+        if: steps.check.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.check.outputs.version }}
           files: "*.vsix"
