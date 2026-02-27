@@ -12,9 +12,22 @@ const mockOs = os as jest.Mocked<typeof os>;
 // Must import after mocks are set up
 import { getVSCodeUserPaths, discoverSessionFiles, discoverVscdbFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
 
+let savedXdg: string | undefined;
+
 beforeEach(() => {
   jest.resetAllMocks();
   mockOs.homedir.mockReturnValue('/home/testuser');
+  // Clear XDG_CONFIG_HOME so Linux path tests use the mocked homedir
+  savedXdg = process.env.XDG_CONFIG_HOME;
+  delete process.env.XDG_CONFIG_HOME;
+});
+
+afterEach(() => {
+  if (savedXdg === undefined) {
+    delete process.env.XDG_CONFIG_HOME;
+  } else {
+    process.env.XDG_CONFIG_HOME = savedXdg;
+  }
 });
 
 describe('getVSCodeUserPaths', () => {
