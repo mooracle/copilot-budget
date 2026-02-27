@@ -17,19 +17,13 @@ TRACKING_FILE="$GIT_DIR/copilot-budget"
 [ -f "$TRACKING_FILE" ] || exit 0
 
 PREMIUM=$(grep '^PREMIUM_REQUESTS=' "$TRACKING_FILE" | cut -d= -f2)
-COST=$(grep '^ESTIMATED_COST=' "$TRACKING_FILE" | cut -d= -f2)
 
 # Skip if no premium requests
 case "$PREMIUM" in ''|0|0.00) exit 0 ;; esac
 
 {
-printf '\\n\\nAI-Premium-Requests: %s\\n' "$PREMIUM"
-printf 'AI-Est-Cost: $%s\\n' "$COST"
-
-# Per-model trailers
-grep '^MODEL ' "$TRACKING_FILE" | while read _ name inp out pr; do
-  printf 'AI-Model: %s %s/%s/%s\\n' "$name" "$inp" "$out" "$pr"
-done
+printf '\\n\\n'
+grep '^TR_' "$TRACKING_FILE" | sed 's/^TR_\\([^=]*\\)=/\\1: /'
 } >> "$COMMIT_MSG_FILE" && : > "$TRACKING_FILE"
 `;
 

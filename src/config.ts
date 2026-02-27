@@ -20,6 +20,21 @@ export function getPlanSetting(): PlanSetting {
   return cfg().get<PlanSetting>('plan', 'auto');
 }
 
+export interface TrailerConfig {
+  premiumRequests: string | false;
+  estimatedCost: string | false;
+  model: string | false;
+}
+
+export function getTrailerConfig(): TrailerConfig {
+  const c = cfg();
+  return {
+    premiumRequests: c.get<string | false>('commitHook.trailers.premiumRequests', 'Copilot-Premium-Requests'),
+    estimatedCost: c.get<string | false>('commitHook.trailers.estimatedCost', 'Copilot-Est-Cost'),
+    model: c.get<string | false>('commitHook.trailers.model', false),
+  };
+}
+
 export function onConfigChanged(
   callback: (e: vscode.ConfigurationChangeEvent) => void,
 ): vscode.Disposable {

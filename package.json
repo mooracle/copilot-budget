@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -74,8 +74,23 @@
         },
         "copilot-budget.commitHook.enabled": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
+        },
+        "copilot-budget.commitHook.trailers.premiumRequests": {
+          "type": ["string", "boolean"],
+          "default": "Copilot-Premium-Requests",
+          "markdownDescription": "Git trailer key for premium request count. Set to `false` to disable."
+        },
+        "copilot-budget.commitHook.trailers.estimatedCost": {
+          "type": ["string", "boolean"],
+          "default": "Copilot-Est-Cost",
+          "markdownDescription": "Git trailer key for estimated cost. Set to `false` to disable."
+        },
+        "copilot-budget.commitHook.trailers.model": {
+          "type": ["string", "boolean"],
+          "default": false,
+          "markdownDescription": "Git trailer key for per-model breakdown. Set to `false` to disable."
         },
         "copilot-budget.plan": {
           "type": "string",

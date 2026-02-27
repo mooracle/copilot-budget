@@ -90,8 +90,8 @@ describe('commitHook', () => {
       expect(content).toContain('#!/bin/sh');
       expect(content).toContain('TRACKING_FILE=');
       expect(content).toContain('PREMIUM_REQUESTS=');
-      expect(content).toContain('AI-Premium-Requests:');
-      expect(content).toContain('AI-Model:');
+      expect(content).toContain("grep '^TR_'");
+      expect(content).toContain("sed 's/^TR_");
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
         'Copilot Budget: Commit hook installed.',
       );
@@ -263,9 +263,11 @@ describe('commitHook', () => {
       expect(writtenContent).toContain(': > "$TRACKING_FILE"');
     });
 
-    it('writes premium request and cost trailers', () => {
-      expect(writtenContent).toContain('AI-Premium-Requests:');
-      expect(writtenContent).toContain('AI-Est-Cost:');
+    it('uses generic TR_ grep pattern for trailers', () => {
+      expect(writtenContent).toContain("grep '^TR_'");
+      expect(writtenContent).toContain("sed 's/^TR_");
+      expect(writtenContent).not.toContain('AI-Premium-Requests:');
+      expect(writtenContent).not.toContain('AI-Est-Cost:');
       expect(writtenContent).not.toContain('AI-Total-Tokens:');
       expect(writtenContent).not.toContain('AI-Commit-Tokens:');
     });
@@ -280,14 +282,14 @@ describe('commitHook', () => {
       expect(writtenContent).not.toContain('CURRENT_');
     });
 
-    it('reads values directly from tracking file', () => {
+    it('reads premium requests for skip check', () => {
       expect(writtenContent).toContain("grep '^PREMIUM_REQUESTS=' \"$TRACKING_FILE\"");
-      expect(writtenContent).toContain("grep '^ESTIMATED_COST=' \"$TRACKING_FILE\"");
+      expect(writtenContent).not.toContain("grep '^ESTIMATED_COST=' \"$TRACKING_FILE\"");
     });
 
-    it('writes per-model trailers from tracking file', () => {
-      expect(writtenContent).toContain('AI-Model:');
-      expect(writtenContent).toContain("grep '^MODEL ' \"$TRACKING_FILE\"");
+    it('reads TR_ lines for trailer output', () => {
+      expect(writtenContent).toContain("grep '^TR_' \"$TRACKING_FILE\"");
+      expect(writtenContent).not.toContain("grep '^MODEL ' \"$TRACKING_FILE\"");
     });
 
     it('skips when no premium requests', () => {

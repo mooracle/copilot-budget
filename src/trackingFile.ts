@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { TrackingStats, RestoredStats } from './tracker';
 import { resolveGitDir } from './gitDir';
 import { readTextFile, writeTextFile } from './fsUtils';
+import { getTrailerConfig } from './config';
 
 async function getTrackingFileUri(): Promise<vscode.Uri | null> {
   const folders = vscode.workspace.workspaceFolders;
@@ -26,6 +27,21 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   for (const [model, usage] of Object.entries(stats.models)) {
     const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, '_');
     lines.push(`MODEL ${safeModel} ${usage.inputTokens} ${usage.outputTokens} ${usage.premiumRequests.toFixed(2)}`);
+  }
+
+  // Write TR_ lines for the commit hook
+  const trailers = getTrailerConfig();
+  if (trailers.premiumRequests) {
+    lines.push(`TR_${trailers.premiumRequests}=${stats.premiumRequests.toFixed(2)}`);
+  }
+  if (trailers.estimatedCost) {
+    lines.push(`TR_${trailers.estimatedCost}=$${stats.estimatedCost.toFixed(2)}`);
+  }
+  if (trailers.model) {
+    for (const [model, usage] of Object.entries(stats.models)) {
+      const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, '_');
+      lines.push(`TR_${trailers.model}=${safeModel} ${usage.inputTokens}/${usage.outputTokens}/${usage.premiumRequests.toFixed(2)}`);
+    }
   }
 
   try {

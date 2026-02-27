@@ -3,14 +3,17 @@ import { TrackingStats } from './tracker';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
 import * as fsUtils from './fsUtils';
+import * as config from './config';
 
 jest.mock('./gitDir');
 jest.mock('./fsUtils');
+jest.mock('./config');
 
 const mockVscode = vscode as any;
 const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
 const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
 const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
+const mockGetTrailerConfig = config.getTrailerConfig as jest.MockedFunction<typeof config.getTrailerConfig>;
 
 function setupWorkspace(rootPath: string, gitDirPath?: string) {
   const rootUri = vscode.Uri.file(rootPath);
@@ -41,6 +44,11 @@ const sampleStats: TrackingStats = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockWriteTextFile.mockResolvedValue(undefined);
+  mockGetTrailerConfig.mockReturnValue({
+    premiumRequests: 'Copilot-Premium-Requests',
+    estimatedCost: 'Copilot-Est-Cost',
+    model: false,
+  });
 });
 
 describe('trackingFile', () => {
@@ -121,6 +129,54 @@ describe('trackingFile', () => {
       expect(content).toContain('MODEL model_id_ 300 150 1.00');
       expect(content).not.toMatch(/\$\(cmd\)/);
       expect(content).not.toMatch(/`id`/);
+    });
+
+    it('writes TR_ lines with configured trailer names', async () => {
+      setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
+        premiumRequests: 'Copilot-Premium-Requests',
+        estimatedCost: 'Copilot-Est-Cost',
+        model: 'Copilot-Model',
+      });
+
+      await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).toContain('TR_Copilot-Premium-Requests=15.00');
+      expect(content).toContain('TR_Copilot-Est-Cost=$0.60');
+      expect(content).toContain('TR_Copilot-Model=gpt-4o 1500/800/10.00');
+      expect(content).toContain('TR_Copilot-Model=claude-sonnet-4 500/300/5.00');
+    });
+
+    it('omits TR_ lines when trailer set to false', async () => {
+      setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
+        premiumRequests: false,
+        estimatedCost: false,
+        model: false,
+      });
+
+      await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).not.toContain('TR_');
+    });
+
+    it('writes TR_ lines with custom trailer names', async () => {
+      setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
+        premiumRequests: 'AI-Requests',
+        estimatedCost: 'AI-Cost',
+        model: false,
+      });
+
+      await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).toContain('TR_AI-Requests=15.00');
+      expect(content).toContain('TR_AI-Cost=$0.60');
+      expect(content).not.toContain('TR_AI-Model');
+      expect(content).not.toContain('TR_Copilot-');
     });
 
     it('handles stats with no models', async () => {
@@ -219,6 +275,23 @@ describe('trackingFile', () => {
       ].join('\n');
 
       expect(parseTrackingFileContent(content)).toBeNull();
+    });
+
+    it('ignores TR_ lines (used by commit hook)', () => {
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=5',
+        'MODEL gpt-4o 100 200 3.00',
+        'TR_Copilot-Premium-Requests=3.00',
+        'TR_Copilot-Est-Cost=$0.12',
+        '',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe('2024-01-15T10:30:00Z');
+      expect(result!.interactions).toBe(5);
+      expect(result!.models['gpt-4o']).toEqual({ inputTokens: 100, outputTokens: 200, premiumRequests: 3 });
     });
 
     it('roundtrips with writeTrackingFile output', async () => {
