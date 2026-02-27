@@ -5,3 +5,4 @@ coverage/
 *.vsix
 .ralphex/progress/
 .claude/
+plan.md
