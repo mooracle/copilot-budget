@@ -61,13 +61,17 @@ export class Tracker {
     interactions: number;
     modelUsage: ModelUsage;
     modelInteractions: { [model: string]: number };
-  } | null = null;
+  } = { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {} };
   private fileCache = new Map<string, FileCache>();
   private since: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private listeners: StatsListener[] = [];
   private lastStats: TrackingStats | null = null;
-  private planInfoProvider: (() => PlanInfo) | null = null;
+  private planInfoProvider: () => PlanInfo = () => ({
+    planName: 'unknown',
+    costPerRequest: DEFAULT_COST_PER_REQUEST,
+    source: 'default' as const,
+  });
   private previousStats: RestoredStats | null = null;
 
   constructor() {
@@ -256,12 +260,7 @@ export class Tracker {
     modelUsage: ModelUsage;
     modelInteractions: { [model: string]: number };
   }): TrackingStats {
-    const baseline = this.baseline || {
-      tokens: 0,
-      interactions: 0,
-      modelUsage: {},
-      modelInteractions: {},
-    };
+    const baseline = this.baseline;
 
     const deltaModels: {
       [model: string]: { inputTokens: number; outputTokens: number; premiumRequests: number };
@@ -342,9 +341,7 @@ export class Tracker {
       (sum, m) => sum + m.premiumRequests,
       0,
     );
-    const costPerRequest = this.planInfoProvider
-      ? this.planInfoProvider().costPerRequest
-      : DEFAULT_COST_PER_REQUEST;
+    const costPerRequest = this.planInfoProvider().costPerRequest;
     const estimatedCost = premiumRequests * costPerRequest;
 
     return {
