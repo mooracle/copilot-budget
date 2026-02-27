@@ -3,6 +3,7 @@ import { TrackingStats, RestoredStats } from './tracker';
 import { resolveGitDir } from './gitDir';
 import { readTextFile, writeTextFile } from './fsUtils';
 import { getTrailerConfig } from './config';
+import { sanitizeModelName } from './utils';
 
 async function getTrackingFileUri(): Promise<vscode.Uri | null> {
   const folders = vscode.workspace.workspaceFolders;
@@ -26,7 +27,7 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   const trailers = getTrailerConfig();
 
   for (const [model, usage] of Object.entries(stats.models)) {
-    const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const safeModel = sanitizeModelName(model);
     lines.push(`MODEL ${safeModel} ${usage.inputTokens} ${usage.outputTokens} ${usage.premiumRequests.toFixed(2)}`);
     if (trailers.model) {
       lines.push(`TR_${trailers.model}=${safeModel} ${usage.inputTokens}/${usage.outputTokens}/${usage.premiumRequests.toFixed(2)}`);

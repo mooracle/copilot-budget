@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { log } from './logger';
 import { resolveGitCommonDir } from './gitDir';
 import { readTextFile, writeTextFile } from './fsUtils';
+import { errorMessage } from './utils';
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
@@ -127,7 +128,7 @@ export async function installHook(): Promise<boolean> {
     }
     return true;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     log(`[commitHook] Failed to install hook: ${msg}`);
     vscode.window.showErrorMessage(`Copilot Budget: Failed to install commit hook: ${msg}`);
     return false;
@@ -163,7 +164,7 @@ export async function uninstallHook(): Promise<boolean> {
     vscode.window.showInformationMessage('Copilot Budget: Commit hook removed.');
     return true;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     log(`[commitHook] Failed to remove hook: ${msg}`);
     vscode.window.showErrorMessage(`Copilot Budget: Failed to remove commit hook: ${msg}`);
     return false;

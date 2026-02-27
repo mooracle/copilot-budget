@@ -5,6 +5,7 @@ import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
 import { estimateTokensFromText, getPremiumMultiplier } from './tokenEstimator';
 import { DEFAULT_COST_PER_REQUEST, PlanInfo } from './planDetector';
 import { log } from './logger';
+import { sanitizeModelName } from './utils';
 
 export interface TrackingStats {
   since: string;
@@ -31,10 +32,6 @@ interface FileCache {
 }
 
 type StatsListener = (stats: TrackingStats) => void;
-
-function sanitizeModelName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
 
 function mergeModelUsage(target: ModelUsage, source: ModelUsage): void {
   for (const [model, usage] of Object.entries(source)) {

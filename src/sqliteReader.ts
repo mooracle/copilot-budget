@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { log } from './logger';
+import { errorMessage } from './utils';
 
 interface SqlJsDatabase {
   exec(sql: string): { columns: string[]; values: unknown[][] }[];
@@ -29,7 +30,7 @@ export async function initSqlite(): Promise<boolean> {
     log('sqliteReader: sql.js initialized successfully');
     return true;
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     log(`sqliteReader: failed to initialize sql.js: ${message}`);
     return false;
   }
@@ -69,7 +70,7 @@ export function readSessionsFromVscdb(vscdbPath: string): string[] {
     }
     return values;
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     log(`sqliteReader: error reading ${vscdbPath}: ${message}`);
     return [];
   } finally {
