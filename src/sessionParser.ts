@@ -209,20 +209,16 @@ export function parseSessionFileContent(
 
 	const ensureModel = (m?: string) => (typeof m === 'string' && m ? m : defaultModel);
 
-	const addInput = (model: string, text: string) => {
+	const addTokens = (model: string, text: string, kind: 'inputTokens' | 'outputTokens') => {
 		const m = ensureModel(model);
 		if (!modelUsage[m]) {modelUsage[m] = { inputTokens: 0, outputTokens: 0 };}
 		const t = estimateTokensFromText(text, m);
-		modelUsage[m].inputTokens += t;
-		totalInputTokens += t;
-	};
-
-	const addOutput = (model: string, text: string) => {
-		const m = ensureModel(model);
-		if (!modelUsage[m]) {modelUsage[m] = { inputTokens: 0, outputTokens: 0 };}
-		const t = estimateTokensFromText(text, m);
-		modelUsage[m].outputTokens += t;
-		totalOutputTokens += t;
+		modelUsage[m][kind] += t;
+		if (kind === 'inputTokens') {
+			totalInputTokens += t;
+		} else {
+			totalOutputTokens += t;
+		}
 	};
 
 	// Handle delta-based JSONL format (VS Code Insiders)
@@ -282,13 +278,13 @@ export function parseSessionFileContent(
 							interactions++;
 							modelInteractions[model] = (modelInteractions[model] || 0) + 1;
 						}
-						addInput(model, (message as any).text);
+						addTokens(model, (message as any).text, 'inputTokens');
 					}
 
 					// Extract response text (separating thinking text)
 					const { responseText, thinkingText } = extractResponseAndThinkingText((request as any).response);
 					if (responseText) {
-						addOutput(model, responseText);
+						addTokens(model, responseText, 'outputTokens');
 					}
 					if (thinkingText) {
 						const thinkT = estimateTokensFromText(thinkingText, model);
