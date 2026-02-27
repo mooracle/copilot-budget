@@ -121,25 +121,11 @@ async function detectFromApi(): Promise<PlanInfo | null> {
 }
 
 export async function detectPlan(): Promise<PlanInfo> {
-  // 1. Check user config first
-  const setting = getPlanSetting();
-  const configPlan = planFromConfig(setting);
-  if (configPlan) {
-    updatePlan(configPlan);
-    return configPlan;
-  }
-
-  // 2. Try API detection (only when setting is "auto")
-  const apiPlan = await detectFromApi();
-  if (apiPlan) {
-    updatePlan(apiPlan);
-    return apiPlan;
-  }
-
-  // 3. Fallback to default
-  const fallback: PlanInfo = { ...DEFAULT_PLAN_INFO };
-  updatePlan(fallback);
-  return fallback;
+  const plan = planFromConfig(getPlanSetting())
+    ?? await detectFromApi()
+    ?? { ...DEFAULT_PLAN_INFO };
+  updatePlan(plan);
+  return plan;
 }
 
 function updatePlan(newPlan: PlanInfo): void {
