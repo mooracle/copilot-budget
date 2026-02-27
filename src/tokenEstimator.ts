@@ -22,37 +22,30 @@ try {
   // Fallback: use defaults only
 }
 
+function findBestMatch<T>(record: Record<string, T>, model: string, fallback: T): T {
+  let best = fallback;
+  let bestLen = 0;
+
+  for (const [key, value] of Object.entries(record)) {
+    if (model.includes(key) || model.includes(key.replace(/-/g, ''))) {
+      if (key.length > bestLen) {
+        bestLen = key.length;
+        best = value;
+      }
+    }
+  }
+
+  return best;
+}
+
 export function estimateTokensFromText(
   text: string,
   model: string = 'gpt-4',
 ): number {
-  let tokensPerChar = DEFAULT_RATIO;
-  let bestMatchLen = 0;
-
-  for (const [modelKey, ratio] of Object.entries(estimators)) {
-    if (model.includes(modelKey) || model.includes(modelKey.replace(/-/g, ''))) {
-      if (modelKey.length > bestMatchLen) {
-        bestMatchLen = modelKey.length;
-        tokensPerChar = ratio;
-      }
-    }
-  }
-
+  const tokensPerChar = findBestMatch(estimators, model, DEFAULT_RATIO);
   return Math.ceil(text.length * tokensPerChar);
 }
 
 export function getPremiumMultiplier(model: string): number {
-  let multiplier = DEFAULT_PREMIUM_MULTIPLIER;
-  let bestMatchLen = 0;
-
-  for (const [modelKey, mult] of Object.entries(premiumMultipliers)) {
-    if (model.includes(modelKey) || model.includes(modelKey.replace(/-/g, ''))) {
-      if (modelKey.length > bestMatchLen) {
-        bestMatchLen = modelKey.length;
-        multiplier = mult;
-      }
-    }
-  }
-
-  return multiplier;
+  return findBestMatch(premiumMultipliers, model, DEFAULT_PREMIUM_MULTIPLIER);
 }
