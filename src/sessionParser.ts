@@ -205,8 +205,6 @@ export function parseSessionFileContent(
 	let totalOutputTokens = 0;
 	let totalThinkingTokens = 0;
 
-	let sessionJson: any | undefined;
-
 	const defaultModel = 'gpt-4o';
 
 	const ensureModel = (m?: string) => (typeof m === 'string' && m ? m : defaultModel);
@@ -310,22 +308,14 @@ export function parseSessionFileContent(
 				thinkingTokens: totalThinkingTokens
 			};
 		}
-
-		// Not delta-based JSONL. Best-effort: sometimes files are JSON objects with a .jsonl extension.
-		try {
-			sessionJson = JSON.parse(fileContent.trim());
-		} catch {
-			return { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 };
-		}
 	}
 
-	// Non-jsonl (JSON file) - try to parse full JSON
-	if (!sessionJson) {
-		try {
-			sessionJson = JSON.parse(fileContent);
-		} catch {
-			return { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 };
-		}
+	// JSON format: plain .json files or non-delta .jsonl files
+	let sessionJson: any;
+	try {
+		sessionJson = JSON.parse(fileContent);
+	} catch {
+		return { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 };
 	}
 
 	const requests = Array.isArray(sessionJson.requests) ? sessionJson.requests : (Array.isArray(sessionJson.history) ? sessionJson.history : []);
