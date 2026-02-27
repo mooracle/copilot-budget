@@ -55,6 +55,22 @@ function mergeModelInteractions(
   }
 }
 
+function accumulateModel(
+  models: { [key: string]: { inputTokens: number; outputTokens: number; premiumRequests: number } },
+  key: string,
+  input: number,
+  output: number,
+  premium: number,
+): void {
+  if (models[key]) {
+    models[key].inputTokens += input;
+    models[key].outputTokens += output;
+    models[key].premiumRequests += premium;
+  } else {
+    models[key] = { inputTokens: input, outputTokens: output, premiumRequests: premium };
+  }
+}
+
 export class Tracker {
   private baseline: {
     tokens: number;
@@ -97,6 +113,39 @@ export class Tracker {
     };
   }
 
+  private processFileWithCache(
+    file: string,
+    parseFn: () => Omit<FileCache, 'mtime'> | null,
+    totals: { tokens: number; interactions: number; modelUsage: ModelUsage; modelInteractions: { [model: string]: number } },
+  ): void {
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      return;
+    }
+
+    const mtime = stat.mtimeMs;
+    const cached = this.fileCache.get(file);
+
+    if (cached && cached.mtime === mtime) {
+      totals.tokens += cached.tokens;
+      totals.interactions += cached.interactions;
+      mergeModelUsage(totals.modelUsage, cached.modelUsage);
+      mergeModelInteractions(totals.modelInteractions, cached.modelInteractions);
+      return;
+    }
+
+    const result = parseFn();
+    if (!result) return;
+
+    this.fileCache.set(file, { mtime, ...result });
+    totals.tokens += result.tokens;
+    totals.interactions += result.interactions;
+    mergeModelUsage(totals.modelUsage, result.modelUsage);
+    mergeModelInteractions(totals.modelInteractions, result.modelInteractions);
+  }
+
   private scanAll(): {
     tokens: number;
     interactions: number;
@@ -108,10 +157,12 @@ export class Tracker {
     log(`scanAll: discovered ${files.length} session file(s), ${vscdbFiles.length} vscdb file(s)`);
 
     const currentFiles = new Set([...files, ...vscdbFiles]);
-    let totalTokens = 0;
-    let totalInteractions = 0;
-    const mergedModels: ModelUsage = {};
-    const mergedModelInteractions: { [model: string]: number } = {};
+    const totals = {
+      tokens: 0,
+      interactions: 0,
+      modelUsage: {} as ModelUsage,
+      modelInteractions: {} as { [model: string]: number },
+    };
 
     // Evict cache entries for files that no longer exist
     for (const cached of this.fileCache.keys()) {
@@ -122,136 +173,76 @@ export class Tracker {
 
     // Process JSON/JSONL files
     for (const file of files) {
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(file);
-      } catch {
-        continue;
-      }
+      this.processFileWithCache(file, () => {
+        let content: string;
+        try {
+          content = fs.readFileSync(file, 'utf-8');
+        } catch {
+          return null;
+        }
 
-      const mtime = stat.mtimeMs;
-      const cached = this.fileCache.get(file);
-
-      if (cached && cached.mtime === mtime) {
-        totalTokens += cached.tokens;
-        totalInteractions += cached.interactions;
-        mergeModelUsage(mergedModels, cached.modelUsage);
-        mergeModelInteractions(mergedModelInteractions, cached.modelInteractions);
-        continue;
-      }
-
-      let content: string;
-      try {
-        content = fs.readFileSync(file, 'utf-8');
-      } catch {
-        continue;
-      }
-
-      let result;
-      try {
-        result = parseSessionFileContent(
-          file,
-          content,
-          estimateTokensFromText,
-        );
-      } catch {
-        log(`scanAll: failed to parse session file: ${file}`);
-        continue;
-      }
-
-      this.fileCache.set(file, {
-        mtime,
-        tokens: result.tokens,
-        interactions: result.interactions,
-        modelUsage: result.modelUsage,
-        modelInteractions: result.modelInteractions,
-      });
-
-      totalTokens += result.tokens;
-      totalInteractions += result.interactions;
-      mergeModelUsage(mergedModels, result.modelUsage);
-      mergeModelInteractions(mergedModelInteractions, result.modelInteractions);
+        try {
+          const result = parseSessionFileContent(file, content, estimateTokensFromText);
+          return {
+            tokens: result.tokens,
+            interactions: result.interactions,
+            modelUsage: result.modelUsage,
+            modelInteractions: result.modelInteractions,
+          };
+        } catch {
+          log(`scanAll: failed to parse session file: ${file}`);
+          return null;
+        }
+      }, totals);
     }
 
     // Process vscdb files
     for (const vscdbFile of vscdbFiles) {
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(vscdbFile);
-      } catch {
-        continue;
-      }
+      this.processFileWithCache(vscdbFile, () => {
+        const jsonStrings = readSessionsFromVscdb(vscdbFile);
+        let fileTokens = 0;
+        let fileInteractions = 0;
+        const fileModelUsage: ModelUsage = {};
+        const fileModelInteractions: { [model: string]: number } = {};
 
-      const mtime = stat.mtimeMs;
-      const cached = this.fileCache.get(vscdbFile);
-
-      if (cached && cached.mtime === mtime) {
-        totalTokens += cached.tokens;
-        totalInteractions += cached.interactions;
-        mergeModelUsage(mergedModels, cached.modelUsage);
-        mergeModelInteractions(mergedModelInteractions, cached.modelInteractions);
-        continue;
-      }
-
-      const jsonStrings = readSessionsFromVscdb(vscdbFile);
-      let fileTokens = 0;
-      let fileInteractions = 0;
-      const fileModelUsage: ModelUsage = {};
-      const fileModelInteractions: { [model: string]: number } = {};
-
-      for (const jsonStr of jsonStrings) {
-        let sessions: unknown[];
-        try {
-          const parsed = JSON.parse(jsonStr);
-          sessions = Array.isArray(parsed) ? parsed : [parsed];
-        } catch {
-          continue;
-        }
-
-        for (const session of sessions) {
-          if (typeof session !== 'object' || session === null) {
-            continue;
-          }
-          const sessionContent = JSON.stringify(session);
-          let result;
+        for (const jsonStr of jsonStrings) {
+          let sessions: unknown[];
           try {
-            result = parseSessionFileContent(
-              vscdbFile,
-              sessionContent,
-              estimateTokensFromText,
-            );
+            const parsed = JSON.parse(jsonStr);
+            sessions = Array.isArray(parsed) ? parsed : [parsed];
           } catch {
             continue;
           }
-          fileTokens += result.tokens;
-          fileInteractions += result.interactions;
-          mergeModelUsage(fileModelUsage, result.modelUsage);
-          mergeModelInteractions(fileModelInteractions, result.modelInteractions);
+
+          for (const session of sessions) {
+            if (typeof session !== 'object' || session === null) {
+              continue;
+            }
+            const sessionContent = JSON.stringify(session);
+            try {
+              const result = parseSessionFileContent(vscdbFile, sessionContent, estimateTokensFromText);
+              fileTokens += result.tokens;
+              fileInteractions += result.interactions;
+              mergeModelUsage(fileModelUsage, result.modelUsage);
+              mergeModelInteractions(fileModelInteractions, result.modelInteractions);
+            } catch {
+              continue;
+            }
+          }
         }
-      }
 
-      this.fileCache.set(vscdbFile, {
-        mtime,
-        tokens: fileTokens,
-        interactions: fileInteractions,
-        modelUsage: fileModelUsage,
-        modelInteractions: fileModelInteractions,
-      });
-
-      totalTokens += fileTokens;
-      totalInteractions += fileInteractions;
-      mergeModelUsage(mergedModels, fileModelUsage);
-      mergeModelInteractions(mergedModelInteractions, fileModelInteractions);
+        return {
+          tokens: fileTokens,
+          interactions: fileInteractions,
+          modelUsage: fileModelUsage,
+          modelInteractions: fileModelInteractions,
+        };
+      }, totals);
     }
 
-    log(`scanAll: total ${totalTokens} tokens, ${totalInteractions} interactions`);
+    log(`scanAll: total ${totals.tokens} tokens, ${totals.interactions} interactions`);
 
-    return {
-      tokens: totalTokens,
-      interactions: totalInteractions,
-      modelUsage: mergedModels,
-      modelInteractions: mergedModelInteractions,
-    };
+    return totals;
   }
 
   private computeStats(current: {
@@ -285,18 +276,7 @@ export class Tracker {
       const deltaOutput = Math.max(0, usage.outputTokens - base.outputTokens);
       const modelPremium = (deltaModelInteractions[model] || 0) * getPremiumMultiplier(model);
       if (deltaInput > 0 || deltaOutput > 0 || modelPremium > 0) {
-        const key = sanitizeModelName(model);
-        if (deltaModels[key]) {
-          deltaModels[key].inputTokens += deltaInput;
-          deltaModels[key].outputTokens += deltaOutput;
-          deltaModels[key].premiumRequests += modelPremium;
-        } else {
-          deltaModels[key] = {
-            inputTokens: deltaInput,
-            outputTokens: deltaOutput,
-            premiumRequests: modelPremium,
-          };
-        }
+        accumulateModel(deltaModels, sanitizeModelName(model), deltaInput, deltaOutput, modelPremium);
       }
     }
 
@@ -304,28 +284,14 @@ export class Tracker {
     for (const [model, delta] of Object.entries(deltaModelInteractions)) {
       const key = sanitizeModelName(model);
       if (!deltaModels[key] && delta > 0) {
-        deltaModels[key] = {
-          inputTokens: 0,
-          outputTokens: 0,
-          premiumRequests: delta * getPremiumMultiplier(model),
-        };
+        accumulateModel(deltaModels, key, 0, 0, delta * getPremiumMultiplier(model));
       }
     }
 
     // Merge previousStats (restored from prior session) into delta
     if (this.previousStats) {
       for (const [model, prev] of Object.entries(this.previousStats.models)) {
-        if (deltaModels[model]) {
-          deltaModels[model].inputTokens += prev.inputTokens;
-          deltaModels[model].outputTokens += prev.outputTokens;
-          deltaModels[model].premiumRequests += prev.premiumRequests;
-        } else {
-          deltaModels[model] = {
-            inputTokens: prev.inputTokens,
-            outputTokens: prev.outputTokens,
-            premiumRequests: prev.premiumRequests,
-          };
-        }
+        accumulateModel(deltaModels, model, prev.inputTokens, prev.outputTokens, prev.premiumRequests);
       }
     }
 
@@ -362,6 +328,12 @@ export class Tracker {
     this.lastStats = this.computeStats(snapshot);
   }
 
+  private notifyListeners(stats: TrackingStats): void {
+    for (const listener of [...this.listeners]) {
+      listener(stats);
+    }
+  }
+
   update(): void {
     const current = this.scanAll();
     const stats = this.computeStats(current);
@@ -374,9 +346,7 @@ export class Tracker {
       stats.estimatedCost !== this.lastStats.estimatedCost
     ) {
       this.lastStats = stats;
-      for (const listener of [...this.listeners]) {
-        listener(stats);
-      }
+      this.notifyListeners(stats);
     }
   }
 
@@ -399,9 +369,7 @@ export class Tracker {
     this.since = new Date().toISOString();
     const stats = this.computeStats(snapshot);
     this.lastStats = stats;
-    for (const listener of [...this.listeners]) {
-      listener(stats);
-    }
+    this.notifyListeners(stats);
   }
 
   getStats(): TrackingStats {
