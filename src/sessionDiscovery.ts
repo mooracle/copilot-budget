@@ -62,6 +62,22 @@ export function getVSCodeUserPaths(): string[] {
 }
 
 /**
+ * If `dirPath` exists, scan it for session files and log the count.
+ * Silently ignores missing or inaccessible paths.
+ */
+function scanPathSafe(dirPath: string, label: string, files: string[]): void {
+  try {
+    if (fs.existsSync(dirPath)) {
+      const before = files.length;
+      scanDirectory(dirPath, files);
+      log(`  ${label}: ${files.length - before} files`);
+    }
+  } catch {
+    // skip inaccessible paths
+  }
+}
+
+/**
  * Recursively scan a directory for .json / .jsonl session files,
  * excluding known non-session files.
  */
@@ -183,40 +199,14 @@ export function discoverSessionFiles(): string[] {
       // skip
     }
 
-    // 4. globalStorage/emptyWindowChatSessions/
-    const emptyWindow = path.join(userPath, 'globalStorage', 'emptyWindowChatSessions');
-    try {
-      if (fs.existsSync(emptyWindow)) {
-        const before = files.length;
-        scanDirectory(emptyWindow, files);
-        log(`  globalStorage/emptyWindowChatSessions: ${files.length - before} files`);
-      }
-    } catch {
-      // skip
-    }
-
-    // 5. globalStorage/github.copilot-chat/ (recursive scan)
-    const copilotChat = path.join(userPath, 'globalStorage', 'github.copilot-chat');
-    try {
-      if (fs.existsSync(copilotChat)) {
-        const before = files.length;
-        scanDirectory(copilotChat, files);
-        log(`  globalStorage/github.copilot-chat: ${files.length - before} files`);
-      }
-    } catch {
-      // skip
-    }
-
-    // 6. globalStorage/github.copilot/ (recursive scan)
-    const copilot = path.join(userPath, 'globalStorage', 'github.copilot');
-    try {
-      if (fs.existsSync(copilot)) {
-        const before = files.length;
-        scanDirectory(copilot, files);
-        log(`  globalStorage/github.copilot: ${files.length - before} files`);
-      }
-    } catch {
-      // skip
+    // 4-6. globalStorage subdirectories
+    const globalDirs = [
+      ['emptyWindowChatSessions', 'globalStorage/emptyWindowChatSessions'],
+      ['github.copilot-chat', 'globalStorage/github.copilot-chat'],
+      ['github.copilot', 'globalStorage/github.copilot'],
+    ] as const;
+    for (const [sub, label] of globalDirs) {
+      scanPathSafe(path.join(userPath, 'globalStorage', sub), label, files);
     }
   }
 
