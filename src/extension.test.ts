@@ -64,7 +64,7 @@ const mockDisposeLogger = disposeLogger as jest.MockedFunction<
   typeof disposeLogger
 >;
 const mockInitSqlite = initSqlite as jest.MockedFunction<typeof initSqlite>;
-const mockDisposeSqlite = disposeSqlite as jest.MockedFunction<
+const _mockDisposeSqlite = disposeSqlite as jest.MockedFunction<
   typeof disposeSqlite
 >;
 const mockDetectPlan = detectPlan as jest.MockedFunction<typeof detectPlan>;

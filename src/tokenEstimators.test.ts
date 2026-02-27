@@ -22,7 +22,7 @@ describe('tokenEstimators.json', () => {
   });
 
   it('should have numeric ratios between 0 and 1 for all models', () => {
-    for (const [model, ratio] of Object.entries(data.estimators)) {
+    for (const [_model, ratio] of Object.entries(data.estimators)) {
       expect(typeof ratio).toBe('number');
       expect(ratio).toBeGreaterThan(0);
       expect(ratio).toBeLessThan(1);
@@ -45,7 +45,7 @@ describe('tokenEstimators.json', () => {
     });
 
     it('should have numeric multipliers >= 0 for all models', () => {
-      for (const [model, multiplier] of Object.entries(data.premiumMultipliers)) {
+      for (const [_model, multiplier] of Object.entries(data.premiumMultipliers)) {
         expect(typeof multiplier).toBe('number');
         expect(multiplier).toBeGreaterThanOrEqual(0);
       }

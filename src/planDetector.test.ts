@@ -9,7 +9,6 @@ import {
   disposePlanDetector,
   DEFAULT_COST_PER_REQUEST,
   PLAN_COSTS,
-  PlanInfo,
 } from './planDetector';
 import { __configStore } from './__mocks__/vscode';
 

@@ -1,10 +1,10 @@
-import { Tracker, TrackingStats, RestoredStats } from './tracker';
+import { Tracker, TrackingStats } from './tracker';
 import * as fs from 'fs';
 import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
 import * as tokenEstimator from './tokenEstimator';
 import * as sqliteReader from './sqliteReader';
-import * as planDetector from './planDetector';
+import './planDetector';
 
 jest.mock('fs');
 jest.mock('./sessionDiscovery');

@@ -78,17 +78,26 @@
           "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
         },
         "copilot-budget.commitHook.trailers.premiumRequests": {
-          "type": ["string", "boolean"],
+          "type": [
+            "string",
+            "boolean"
+          ],
           "default": "Copilot-Premium-Requests",
           "markdownDescription": "Git trailer key for premium request count. Set to `false` to disable."
         },
         "copilot-budget.commitHook.trailers.estimatedCost": {
-          "type": ["string", "boolean"],
+          "type": [
+            "string",
+            "boolean"
+          ],
           "default": "Copilot-Est-Cost",
           "markdownDescription": "Git trailer key for estimated cost. Set to `false` to disable."
         },
         "copilot-budget.commitHook.trailers.model": {
-          "type": ["string", "boolean"],
+          "type": [
+            "string",
+            "boolean"
+          ],
           "default": false,
           "markdownDescription": "Git trailer key for per-model breakdown. Set to `false` to disable."
         },
@@ -119,18 +128,21 @@
   "scripts": {
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
-    "lint": "eslint src --ext ts",
+    "lint": "eslint src/",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
     "package": "npx @vscode/vsce package"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.20.0",
+    "eslint": "^10.0.2",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.56.1"
   },
   "dependencies": {
     "sql.js": "^1.14.0"

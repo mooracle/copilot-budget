@@ -66,7 +66,7 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 		}
 	}
 
-	let root: any = isObject(state) ? state : Object.create(null);
+	const root: any = isObject(state) ? state : Object.create(null);
 	let current: any = root;
 
 	const ensureChildContainer = (parent: any, key: string, nextSeg: string): any => {

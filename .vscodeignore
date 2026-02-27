@@ -16,4 +16,8 @@ coverage/**
 jest.config.js
 **/*.test.*
 .claude/**
+CLAUDE.md
+.github/**
+eslint.config.mjs
+.nvmrc
 assets/icon.svg

@@ -1,4 +1,4 @@
-import { parseSessionFileContent, ModelUsage } from './sessionParser';
+import { parseSessionFileContent } from './sessionParser';
 
 // Simple estimator: 1 token per 4 characters (ratio 0.25), ceil
 const mockEstimate = (text: string, _model?: string): number => Math.ceil(text.length * 0.25);

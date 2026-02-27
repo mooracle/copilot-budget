@@ -102,7 +102,7 @@ export class Uri {
   }
 
   static joinPath(base: Uri, ...segments: string[]): Uri {
-    let joined = [base.path, ...segments].join('/').replace(/\/+/g, '/');
+    const joined = [base.path, ...segments].join('/').replace(/\/+/g, '/');
     // Normalize '..' segments to match VS Code behavior
     const parts = joined.split('/');
     const stack: string[] = [];

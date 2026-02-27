@@ -70,7 +70,7 @@ async function makeExecutable(uri: vscode.Uri): Promise<void> {
         disposable = vscode.tasks.onDidEndTaskProcess((e: any) => {
           if (e.execution.task === task) {
             disposable?.dispose();
-            e.exitCode === 0 ? resolve() : reject(new Error(`chmod exit ${e.exitCode}`));
+            if (e.exitCode === 0) { resolve(); } else { reject(new Error(`chmod exit ${e.exitCode}`)); }
           }
         });
         vscode.tasks.executeTask(task).then(undefined, reject);

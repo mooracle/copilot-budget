@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
 import { writeTrackingFile, readTrackingFile } from './trackingFile';
-import { installHook, uninstallHook, isHookInstalled } from './commitHook';
+import { installHook, uninstallHook } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
 import { log, getOutputChannel, disposeLogger } from './logger';

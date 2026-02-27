@@ -8,7 +8,7 @@ jest.mock('fs', () => ({ chmodSync: jest.fn() }));
 jest.mock('./gitDir');
 jest.mock('./fsUtils');
 
-const mockFs = fs as jest.Mocked<typeof fs>;
+const _mockFs = fs as jest.Mocked<typeof fs>;
 
 const mockVscode = vscode as any;
 const mockResolveGitCommonDir = gitDir.resolveGitCommonDir as jest.MockedFunction<typeof gitDir.resolveGitCommonDir>;

@@ -324,21 +324,6 @@ describe('discoverSessionFiles', () => {
 });
 
 describe('discoverVscdbFiles', () => {
-  function dirent(name: string, isDir: boolean): fs.Dirent {
-    return {
-      name,
-      isDirectory: () => isDir,
-      isFile: () => !isDir,
-      isBlockDevice: () => false,
-      isCharacterDevice: () => false,
-      isFIFO: () => false,
-      isSocket: () => false,
-      isSymbolicLink: () => false,
-      path: '',
-      parentPath: '',
-    };
-  }
-
   it('finds state.vscdb in workspaceStorage directories', () => {
     const userPath = '/home/testuser/Library/Application Support/Code/User';
     const wsStorage = path.join(userPath, 'workspaceStorage');
