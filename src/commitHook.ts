@@ -103,20 +103,17 @@ export async function installHook(): Promise<boolean> {
   }
 
   // Check if a non-Copilot Budget hook already exists
-  let isRefresh = false;
   const existing = await readTextFile(hookUri);
   if (existing && existing.trim()) {
     log(`[commitHook] Existing hook found (${existing.length} bytes)`);
-    if (existing.includes(MARKER)) {
-      isRefresh = true;
-      log('[commitHook] Existing hook is ours, will refresh');
-    } else {
+    if (!existing.includes(MARKER)) {
       log('[commitHook] Existing hook is NOT ours, aborting');
       vscode.window.showWarningMessage(
         'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
       );
       return false;
     }
+    log('[commitHook] Existing hook is ours, will refresh');
   }
 
   try {
@@ -124,8 +121,8 @@ export async function installHook(): Promise<boolean> {
     await vscode.workspace.fs.createDirectory(hooksDirUri);
     await writeTextFile(hookUri, HOOK_SCRIPT);
     await makeExecutable(hookUri);
-    log(`[commitHook] Hook written successfully (refresh=${isRefresh})`);
-    if (!isRefresh) {
+    log(`[commitHook] Hook written successfully (refresh=${existing?.includes(MARKER)})`);
+    if (!existing?.includes(MARKER)) {
       vscode.window.showInformationMessage('Copilot Budget: Commit hook installed.');
     }
     return true;
