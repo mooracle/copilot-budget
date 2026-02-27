@@ -5,17 +5,18 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-02-26
+## [0.5.0] - 2026-02-27
 
 ### Added
 
-- Stats now persist across VS Code restarts — on activation, the extension reads the tracking file written during the previous session and merges prior premium requests, tokens, and interaction counts into the current session
-- New `readTrackingFile()` and `parseTrackingFileContent()` exports in `trackingFile.ts`
-- New `RestoredStats` type and `setPreviousStats()` method on `Tracker`
+- Stats now persist across VS Code restarts — on activation, the extension restores premium requests, tokens, and interaction counts from the previous session
+- Configurable commit trailers — three new settings (`commitHook.trailers.premiumRequests`, `estimatedCost`, `model`) let you rename or disable individual git trailers
+- Default trailer prefix changed from `AI-` to `Copilot-` (e.g. `Copilot-Premium-Requests`, `Copilot-Est-Cost`, `Copilot-Model`)
 
 ### Changed
 
 - "Reset Tracking" command now also clears restored previous-session stats
+- Internal codebase refactored for maintainability: shared utility module, extracted helpers across core modules, simplified control flow, and streamlined test suite
 
 ## [0.4.5] - 2026-02-25
 
