@@ -81,11 +81,14 @@ describe('config', () => {
       expect(config.model).toBe(false);
     });
 
-    it('strips newlines and equals signs from trailer keys', () => {
+    it('strips newlines, equals, slashes, and backslashes from trailer keys', () => {
       __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = 'Trailer\nInjection=bad';
-
       const config = getTrailerConfig();
       expect(config.premiumRequests).toBe('TrailerInjectionbad');
+
+      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = 'Copilot/Cost\\Value';
+      const config2 = getTrailerConfig();
+      expect(config2.premiumRequests).toBe('CopilotCostValue');
     });
 
     it('returns false for empty string trailer key', () => {

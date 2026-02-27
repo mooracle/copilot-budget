@@ -18,8 +18,8 @@ try {
   const data: EstimatorsData = JSON.parse(raw);
   estimators = data.estimators;
   premiumMultipliers = data.premiumMultipliers ?? {};
-} catch {
-  // Fallback: use defaults only
+} catch (err) {
+  console.warn(`[copilot-budget] Failed to load token estimators from ${dataPath}: ${err}`);
 }
 
 function findBestMatch<T>(record: Record<string, T>, model: string, fallback: T): T {

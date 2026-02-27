@@ -65,7 +65,6 @@ beforeEach(() => {
     (text: string) => Math.ceil(text.length * 0.25),
   );
   mockEstimator.getPremiumMultiplier.mockReturnValue(1);
-  (planDetector as any).DEFAULT_COST_PER_REQUEST = 0.04;
   // Default: sqlite not ready, no vscdb files
   mockSqliteReader.isSqliteReady.mockReturnValue(false);
   mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);

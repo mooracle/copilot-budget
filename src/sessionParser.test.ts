@@ -144,20 +144,6 @@ describe('sessionParser', () => {
       expect(result.modelUsage['gpt-4o'].outputTokens).toBe(4);
     });
 
-    it('uses getModelFromRequest callback when provided', () => {
-      const session = {
-        requests: [
-          {
-            message: { text: 'test' },
-            response: [{ value: 'resp' }],
-          },
-        ],
-      };
-      const getModel = () => 'custom-model';
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate, getModel);
-      expect(result.modelUsage['custom-model']).toBeDefined();
-    });
-
     it('strips copilot/ prefix from model names', () => {
       const session = {
         requests: [

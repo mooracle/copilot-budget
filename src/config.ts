@@ -29,7 +29,7 @@ export interface TrailerConfig {
 function sanitizeTrailerKey(value: unknown, fallback: string | false): string | false {
   if (value === false) return false;
   if (typeof value !== 'string') return fallback;
-  const sanitized = value.replace(/[\n\r=]/g, '');
+  const sanitized = value.replace(/[\n\r=/\\]/g, '');
   return sanitized || false;
 }
 

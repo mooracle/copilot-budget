@@ -196,7 +196,6 @@ export function parseSessionFileContent(
 	sessionFilePath: string,
 	fileContent: string,
 	estimateTokensFromText: (text: string, model?: string) => number,
-	getModelFromRequest?: (req: any) => string
 ) {
 	const modelUsage: ModelUsage = {};
 	const modelInteractions: { [model: string]: number } = {};
@@ -260,16 +259,10 @@ export function parseSessionFileContent(
 						continue;
 					}
 					// Per-request model (user can select different model for each request)
-					const requestModel = normalizeModelId(
+					const model = normalizeModelId(
 						(request as any).modelId ?? (request as any).selectedModel?.identifier ?? (request as any).model,
 						defaultModel
 					);
-
-					// Delta-based format is authoritative for per-request model selection.
-					// Only allow callback override if it returns a non-default, non-empty model.
-					const callbackModelRaw = getModelFromRequest ? getModelFromRequest(request as any) : undefined;
-					const callbackModel = normalizeModelId(callbackModelRaw, '');
-					const model = callbackModel && callbackModel !== defaultModel ? callbackModel : requestModel;
 
 					// Extract user message text and count interaction per model
 					const message = (request as any).message;
@@ -316,8 +309,7 @@ export function parseSessionFileContent(
 
 	const requests = Array.isArray(sessionJson.requests) ? sessionJson.requests : (Array.isArray(sessionJson.history) ? sessionJson.history : []);
 	for (const request of requests) {
-		const modelRaw = getModelFromRequest ? getModelFromRequest(request) : (request?.model || defaultModel);
-		const model = normalizeModelId(modelRaw, defaultModel);
+		const model = normalizeModelId(request?.model || defaultModel, defaultModel);
 		if (!modelUsage[model]) {modelUsage[model] = { inputTokens: 0, outputTokens: 0 };}
 
 		// Count interaction per model
@@ -330,15 +322,11 @@ export function parseSessionFileContent(
 		if (request?.message?.parts) {
 			for (const part of request.message.parts) {
 				if (typeof part?.text === 'string' && part.text) {
-					const t = estimateTokensFromText(part.text, model);
-					modelUsage[model].inputTokens += t;
-					totalInputTokens += t;
+					addTokens(model, part.text, 'inputTokens');
 				}
 			}
 		} else if (typeof request?.message?.text === 'string') {
-			const t = estimateTokensFromText(request.message.text, model);
-			modelUsage[model].inputTokens += t;
-			totalInputTokens += t;
+			addTokens(model, request.message.text, 'inputTokens');
 		}
 
 		const responses = Array.isArray(request?.response) ? request.response : (Array.isArray(request?.responses) ? request.responses : []);
@@ -351,15 +339,11 @@ export function parseSessionFileContent(
 				continue;
 			}
 			if (typeof responseItem?.value === 'string' && responseItem.value) {
-				const t = estimateTokensFromText(responseItem.value, model);
-				modelUsage[model].outputTokens += t;
-				totalOutputTokens += t;
+				addTokens(model, responseItem.value, 'outputTokens');
 			} else if (responseItem?.message?.parts) {
 				for (const p of responseItem.message.parts) {
 					if (typeof p?.text === 'string' && p.text) {
-						const t = estimateTokensFromText(p.text, model);
-						modelUsage[model].outputTokens += t;
-						totalOutputTokens += t;
+						addTokens(model, p.text, 'outputTokens');
 					}
 				}
 			}

@@ -37,10 +37,6 @@ const API_PLAN_MAP: Record<string, string> = {
   individual_pro_plus: 'pro+',
   business: 'business',
   enterprise: 'enterprise',
-  // Common variations
-  free: 'free',
-  pro: 'pro',
-  'pro+': 'pro+',
 };
 
 let currentPlan: PlanInfo = { ...DEFAULT_PLAN_INFO };
