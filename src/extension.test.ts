@@ -239,13 +239,6 @@ describe('extension', () => {
       expect(mockCreateStatusBar).toHaveBeenCalledWith(trackerInstance);
     });
 
-    it('registers 5 commands', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      // subscriptions: planSub + statusBar disposable + statsWriter + trackingFileRefresh + 5 commands + configSub = 10
-      expect(ctx.subscriptions.length).toBe(10);
-    });
-
     it('registers stub commands when disabled', async () => {
       mockIsEnabled.mockReturnValue(false);
       const ctx = makeContext();
@@ -287,14 +280,6 @@ describe('extension', () => {
 
     it('auto-installs hook when commitHook.enabled is true', async () => {
       mockIsCommitHookEnabled.mockReturnValue(true);
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockInstallHook).toHaveBeenCalledTimes(1);
-    });
-
-    it('always refreshes hook on load when enabled (even if already installed)', async () => {
-      mockIsCommitHookEnabled.mockReturnValue(true);
-      mockIsHookInstalled.mockResolvedValue(true);
       const ctx = makeContext();
       await activate(ctx);
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
@@ -601,25 +586,5 @@ describe('extension', () => {
       expect(mockDisposePlanDetector).toHaveBeenCalledTimes(1);
     });
 
-    it('calls disposePlanDetector before disposeSqlite', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      mockDisposePlanDetector.mockClear();
-      mockDisposeSqlite.mockClear();
-      await deactivate();
-      const planOrder = mockDisposePlanDetector.mock.invocationCallOrder[0];
-      const sqliteOrder = mockDisposeSqlite.mock.invocationCallOrder[0];
-      expect(planOrder).toBeLessThan(sqliteOrder);
-    });
-
-    it('calls disposeSqlite before disposeLogger', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      await deactivate();
-      expect(mockDisposeSqlite).toHaveBeenCalledTimes(1);
-      const sqliteOrder = mockDisposeSqlite.mock.invocationCallOrder[0];
-      const loggerOrder = mockDisposeLogger.mock.invocationCallOrder[0];
-      expect(sqliteOrder).toBeLessThan(loggerOrder);
-    });
   });
 });

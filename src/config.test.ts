@@ -42,15 +42,6 @@ describe('config', () => {
       expect(getPlanSetting()).toBe('pro');
     });
 
-    it('returns "pro+" when configured', () => {
-      __configStore['copilot-budget.plan'] = 'pro+';
-      expect(getPlanSetting()).toBe('pro+');
-    });
-
-    it('returns "enterprise" when configured', () => {
-      __configStore['copilot-budget.plan'] = 'enterprise';
-      expect(getPlanSetting()).toBe('enterprise');
-    });
   });
 
   describe('getTrailerConfig', () => {

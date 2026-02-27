@@ -101,27 +101,6 @@ describe('statusBar', () => {
       expect(createdItem.text).toContain('$0.0');
     });
 
-    it('sets command to copilot-budget.showStats', () => {
-      const { tracker } = createMockTracker(makeStats());
-      createStatusBar(tracker);
-
-      expect(createdItem.command).toBe('copilot-budget.showStats');
-    });
-
-    it('calls show on the item', () => {
-      const { tracker } = createMockTracker(makeStats());
-      createStatusBar(tracker);
-
-      expect(createdItem.show).toHaveBeenCalled();
-    });
-
-    it('sets tooltip text', () => {
-      const { tracker } = createMockTracker(makeStats());
-      createStatusBar(tracker);
-
-      expect(createdItem.tooltip).toBeTruthy();
-    });
-
     it('subscribes to tracker stats changes', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);

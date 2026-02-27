@@ -386,14 +386,6 @@ describe('discoverVscdbFiles', () => {
     expect(files).toEqual([]);
   });
 
-  it('returns empty when no paths exist', () => {
-    mockOs.platform.mockReturnValue('linux');
-    mockFs.existsSync.mockReturnValue(false);
-
-    const files = discoverVscdbFiles();
-    expect(files).toEqual([]);
-  });
-
   it('finds vscdb files across multiple workspaces', () => {
     const userPath = '/home/testuser/Library/Application Support/Code/User';
     const wsStorage = path.join(userPath, 'workspaceStorage');

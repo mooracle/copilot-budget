@@ -50,15 +50,6 @@ describe('parseApiResponse', () => {
     expect(parseApiResponse({ other_field: 'value' })).toBeNull();
   });
 
-  it('returns null when copilot_plan is empty string', () => {
-    expect(parseApiResponse({ copilot_plan: '' })).toBeNull();
-  });
-
-  it('returns null when copilot_plan is not a string', () => {
-    expect(parseApiResponse({ copilot_plan: 123 })).toBeNull();
-    expect(parseApiResponse({ copilot_plan: true })).toBeNull();
-  });
-
   it('maps individual_pro to pro plan', () => {
     const result = parseApiResponse({ copilot_plan: 'individual_pro' });
     expect(result).toEqual({

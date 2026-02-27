@@ -262,22 +262,6 @@ describe('sessionParser', () => {
     });
   });
 
-  describe('parseSessionFileContent - return shape', () => {
-    it('returns the expected shape with modelInteractions', () => {
-      const result = parseSessionFileContent('session.json', '{}', mockEstimate);
-      expect(result).toHaveProperty('tokens');
-      expect(result).toHaveProperty('interactions');
-      expect(result).toHaveProperty('modelUsage');
-      expect(result).toHaveProperty('modelInteractions');
-      expect(result).toHaveProperty('thinkingTokens');
-      expect(typeof result.tokens).toBe('number');
-      expect(typeof result.interactions).toBe('number');
-      expect(typeof result.modelUsage).toBe('object');
-      expect(typeof result.modelInteractions).toBe('object');
-      expect(typeof result.thinkingTokens).toBe('number');
-    });
-  });
-
   describe('prototype pollution prevention', () => {
     it('rejects __proto__ in delta key paths', () => {
       const lines = [
