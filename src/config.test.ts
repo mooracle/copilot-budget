@@ -22,13 +22,13 @@ describe('config', () => {
   });
 
   describe('isCommitHookEnabled', () => {
-    it('returns false by default', () => {
-      expect(isCommitHookEnabled()).toBe(false);
+    it('returns true by default', () => {
+      expect(isCommitHookEnabled()).toBe(true);
     });
 
-    it('returns true when overridden', () => {
-      __configStore['copilot-budget.commitHook.enabled'] = true;
-      expect(isCommitHookEnabled()).toBe(true);
+    it('returns false when overridden', () => {
+      __configStore['copilot-budget.commitHook.enabled'] = false;
+      expect(isCommitHookEnabled()).toBe(false);
     });
   });
 
@@ -79,6 +79,29 @@ describe('config', () => {
       const config = getTrailerConfig();
       expect(config.premiumRequests).toBe(false);
       expect(config.estimatedCost).toBe(false);
+    });
+
+    it('treats boolean true as default string value', () => {
+      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = true;
+      __configStore['copilot-budget.commitHook.trailers.model'] = true;
+
+      const config = getTrailerConfig();
+      expect(config.premiumRequests).toBe('Copilot-Premium-Requests');
+      expect(config.model).toBe(false);
+    });
+
+    it('strips newlines and equals signs from trailer keys', () => {
+      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = 'Trailer\nInjection=bad';
+
+      const config = getTrailerConfig();
+      expect(config.premiumRequests).toBe('TrailerInjectionbad');
+    });
+
+    it('returns false for empty string trailer key', () => {
+      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = '';
+
+      const config = getTrailerConfig();
+      expect(config.premiumRequests).toBe(false);
     });
   });
 

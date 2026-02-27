@@ -63,11 +63,11 @@ describe('trackingFile', () => {
       const [uri, content] = mockWriteTextFile.mock.calls[0];
       expect(uri.path).toMatch(/\.git\/copilot-budget$/);
 
-      expect(content).toContain('TOTAL_TOKENS=3100');
       expect(content).toContain('INTERACTIONS=15');
       expect(content).toContain('PREMIUM_REQUESTS=15.00');
-      expect(content).toContain('ESTIMATED_COST=0.60');
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
+      expect(content).not.toContain('TOTAL_TOKENS');
+      expect(content).not.toContain('ESTIMATED_COST');
       expect(content).toContain('MODEL gpt-4o 1500 800 10.00');
       expect(content).toContain('MODEL claude-sonnet-4 500 300 5.00');
     });
@@ -179,6 +179,33 @@ describe('trackingFile', () => {
       expect(content).not.toContain('TR_Copilot-');
     });
 
+    it('sanitizes model names in TR_ lines', async () => {
+      setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
+        premiumRequests: 'Copilot-Premium-Requests',
+        estimatedCost: 'Copilot-Est-Cost',
+        model: 'Copilot-Model',
+      });
+
+      const unsafeStats: TrackingStats = {
+        since: '2024-01-15T10:30:00Z',
+        lastUpdated: '2024-01-15T12:00:00Z',
+        models: {
+          'model$(cmd)': { inputTokens: 200, outputTokens: 100, premiumRequests: 1 },
+        },
+        totalTokens: 300,
+        interactions: 1,
+        premiumRequests: 1,
+        estimatedCost: 0.04,
+      };
+
+      await writeTrackingFile(unsafeStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).toContain('TR_Copilot-Model=model__cmd_ 200/100/1.00');
+      expect(content).not.toMatch(/\$\(cmd\)/);
+    });
+
     it('handles stats with no models', async () => {
       setupWorkspace('/project');
 
@@ -194,10 +221,8 @@ describe('trackingFile', () => {
 
       await writeTrackingFile(emptyStats);
       const content = mockWriteTextFile.mock.calls[0][1];
-      expect(content).toContain('TOTAL_TOKENS=0');
       expect(content).toContain('INTERACTIONS=0');
       expect(content).toContain('PREMIUM_REQUESTS=0.00');
-      expect(content).toContain('ESTIMATED_COST=0.00');
       expect(content).not.toContain('MODEL ');
     });
   });

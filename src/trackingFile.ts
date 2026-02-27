@@ -17,31 +17,27 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   if (!uri) return false;
 
   const lines: string[] = [
-    `TOTAL_TOKENS=${stats.totalTokens}`,
     `INTERACTIONS=${stats.interactions}`,
     `PREMIUM_REQUESTS=${stats.premiumRequests.toFixed(2)}`,
-    `ESTIMATED_COST=${stats.estimatedCost.toFixed(2)}`,
     `SINCE=${stats.since}`,
   ];
+
+  // Write TR_ lines for the commit hook
+  const trailers = getTrailerConfig();
 
   for (const [model, usage] of Object.entries(stats.models)) {
     const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, '_');
     lines.push(`MODEL ${safeModel} ${usage.inputTokens} ${usage.outputTokens} ${usage.premiumRequests.toFixed(2)}`);
+    if (trailers.model) {
+      lines.push(`TR_${trailers.model}=${safeModel} ${usage.inputTokens}/${usage.outputTokens}/${usage.premiumRequests.toFixed(2)}`);
+    }
   }
 
-  // Write TR_ lines for the commit hook
-  const trailers = getTrailerConfig();
   if (trailers.premiumRequests) {
     lines.push(`TR_${trailers.premiumRequests}=${stats.premiumRequests.toFixed(2)}`);
   }
   if (trailers.estimatedCost) {
     lines.push(`TR_${trailers.estimatedCost}=$${stats.estimatedCost.toFixed(2)}`);
-  }
-  if (trailers.model) {
-    for (const [model, usage] of Object.entries(stats.models)) {
-      const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, '_');
-      lines.push(`TR_${trailers.model}=${safeModel} ${usage.inputTokens}/${usage.outputTokens}/${usage.premiumRequests.toFixed(2)}`);
-    }
   }
 
   try {

@@ -292,6 +292,11 @@ describe('commitHook', () => {
       expect(writtenContent).not.toContain("grep '^MODEL ' \"$TRACKING_FILE\"");
     });
 
+    it('skips appending when no TR_ lines exist', () => {
+      expect(writtenContent).toContain("TR_LINES=$(grep '^TR_' \"$TRACKING_FILE\") || true");
+      expect(writtenContent).toContain("case \"$TR_LINES\" in '') : > \"$TRACKING_FILE\"; exit 0");
+    });
+
     it('skips when no premium requests', () => {
       expect(writtenContent).toContain("case \"$PREMIUM\" in ''|0|0.00) exit 0");
     });

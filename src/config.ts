@@ -11,7 +11,7 @@ export function isEnabled(): boolean {
 }
 
 export function isCommitHookEnabled(): boolean {
-  return cfg().get<boolean>('commitHook.enabled', false);
+  return cfg().get<boolean>('commitHook.enabled', true);
 }
 
 export type PlanSetting = 'auto' | 'free' | 'pro' | 'pro+' | 'business' | 'enterprise';
@@ -26,12 +26,19 @@ export interface TrailerConfig {
   model: string | false;
 }
 
+function sanitizeTrailerKey(value: unknown, fallback: string | false): string | false {
+  if (value === false) return false;
+  if (typeof value !== 'string') return fallback;
+  const sanitized = value.replace(/[\n\r=]/g, '');
+  return sanitized || false;
+}
+
 export function getTrailerConfig(): TrailerConfig {
   const c = cfg();
   return {
-    premiumRequests: c.get<string | false>('commitHook.trailers.premiumRequests', 'Copilot-Premium-Requests'),
-    estimatedCost: c.get<string | false>('commitHook.trailers.estimatedCost', 'Copilot-Est-Cost'),
-    model: c.get<string | false>('commitHook.trailers.model', false),
+    premiumRequests: sanitizeTrailerKey(c.get('commitHook.trailers.premiumRequests', 'Copilot-Premium-Requests'), 'Copilot-Premium-Requests'),
+    estimatedCost: sanitizeTrailerKey(c.get('commitHook.trailers.estimatedCost', 'Copilot-Est-Cost'), 'Copilot-Est-Cost'),
+    model: sanitizeTrailerKey(c.get('commitHook.trailers.model', false), false),
   };
 }
 

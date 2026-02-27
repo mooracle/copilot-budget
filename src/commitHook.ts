@@ -21,9 +21,12 @@ PREMIUM=$(grep '^PREMIUM_REQUESTS=' "$TRACKING_FILE" | cut -d= -f2)
 # Skip if no premium requests
 case "$PREMIUM" in ''|0|0.00) exit 0 ;; esac
 
+TR_LINES=$(grep '^TR_' "$TRACKING_FILE") || true
+case "$TR_LINES" in '') : > "$TRACKING_FILE"; exit 0 ;; esac
+
 {
 printf '\\n\\n'
-grep '^TR_' "$TRACKING_FILE" | sed 's/^TR_\\([^=]*\\)=/\\1: /'
+echo "$TR_LINES" | sed 's/^TR_\\([^=]*\\)=/\\1: /'
 } >> "$COMMIT_MSG_FILE" && : > "$TRACKING_FILE"
 `;
 
