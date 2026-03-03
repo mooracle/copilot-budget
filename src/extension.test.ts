@@ -90,6 +90,7 @@ let configChangedCallback: ((e: any) => void) | null;
 beforeEach(async () => {
   jest.clearAllMocks();
   for (const key of Object.keys(__commandCallbacks)) delete __commandCallbacks[key];
+  (vscode as any).workspace.workspaceFolders = undefined;
 
   statsChangedListeners = [];
   configChangedCallback = null;
@@ -278,11 +279,22 @@ describe('extension', () => {
       jest.useRealTimers();
     });
 
-    it('auto-installs hook when commitHook.enabled is true', async () => {
+    it('auto-installs hook when commitHook.enabled is true and workspace exists', async () => {
       mockIsCommitHookEnabled.mockReturnValue(true);
+      (vscode as any).workspace.workspaceFolders = [
+        { uri: vscode.Uri.file('/project'), name: 'test', index: 0 },
+      ];
       const ctx = makeContext();
       await activate(ctx);
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not auto-install hook when commitHook.enabled is true but no workspace', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(true);
+      (vscode as any).workspace.workspaceFolders = undefined;
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(mockInstallHook).not.toHaveBeenCalled();
     });
 
     it('does not auto-install hook when commitHook.enabled is false', async () => {

@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -74,7 +74,7 @@
         },
         "copilot-budget.commitHook.enabled": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
         },
         "copilot-budget.commitHook.trailers.premiumRequests": {

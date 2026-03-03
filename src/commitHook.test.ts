@@ -141,9 +141,7 @@ describe('commitHook', () => {
       const result = await installHook();
 
       expect(result).toBe(false);
-      expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
-        expect.stringContaining('No workspace folder'),
-      );
+      expect(mockVscode.window.showErrorMessage).not.toHaveBeenCalled();
     });
 
     it('installs hook in common git dir for worktrees', async () => {
@@ -220,9 +218,7 @@ describe('commitHook', () => {
       const result = await uninstallHook();
 
       expect(result).toBe(false);
-      expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
-        expect.stringContaining('No workspace folder'),
-      );
+      expect(mockVscode.window.showErrorMessage).not.toHaveBeenCalled();
     });
 
     it('returns false when delete fails', async () => {

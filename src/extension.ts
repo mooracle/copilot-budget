@@ -164,8 +164,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  // Auto-install/refresh hook if enabled in settings
-  if (isCommitHookEnabled()) {
+  // Auto-install/refresh hook if enabled in settings (only when a workspace is open)
+  if (isCommitHookEnabled() && vscode.workspace.workspaceFolders?.length) {
     installHook().catch(() => {});
   }
 

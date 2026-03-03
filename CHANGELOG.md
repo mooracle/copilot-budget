@@ -5,6 +5,17 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-03-03
+
+### Fixed
+
+- No longer shows "No workspace folder found" error popups when VS Code is opened without a project
+- Commit hook auto-install is skipped when no workspace is open
+
+### Changed
+
+- Commit hook auto-install is now disabled by default (`copilot-budget.commitHook.enabled` defaults to `false`)
+
 ## [0.5.1] - 2026-02-27
 
 ### Fixed

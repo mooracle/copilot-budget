@@ -99,7 +99,6 @@ export async function installHook(): Promise<boolean> {
   log(`[commitHook] installHook called, hookUri=${hookUri?.path}`);
   if (!hookUri) {
     log('[commitHook] No workspace folder found');
-    vscode.window.showErrorMessage('Copilot Budget: No workspace folder found.');
     return false;
   }
 
@@ -139,7 +138,7 @@ export async function uninstallHook(): Promise<boolean> {
   const hookUri = await getHookUri();
   log(`[commitHook] uninstallHook called, hookUri=${hookUri?.path}`);
   if (!hookUri) {
-    vscode.window.showErrorMessage('Copilot Budget: No workspace folder found.');
+    log('[commitHook] No workspace folder found');
     return false;
   }
 
