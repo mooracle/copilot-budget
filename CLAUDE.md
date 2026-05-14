@@ -16,7 +16,10 @@ npm test                 # Run all Jest tests
 npm test -- --watch      # Jest watch mode
 npm test -- <pattern>    # Run single test file (e.g. npm test -- tracker)
 npm run package          # Create .vsix via @vscode/vsce
+npm run update-rates     # Refresh data/models-and-pricing.yml from github/docs upstream
 ```
+
+The rate card (`data/models-and-pricing.yml`) is a byte-identical mirror of `github/docs:data/tables/copilot/models-and-pricing.yml`. When GitHub publishes new pricing, run `npm run update-rates` and commit the updated YAML alongside the diff so reviewers see the change directly.
 
 Debug: Press F5 in VS Code to launch Extension Development Host.
 

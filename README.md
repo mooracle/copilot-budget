@@ -181,6 +181,16 @@ Also works in remote environments (Codespaces, WSL, SSH Remote).
 - GitHub Copilot extension (provides the session files that Copilot Budget reads)
 - The extension bundles [sql.js](https://github.com/sql-js/sql.js) for reading SQLite-based session storage. No additional installation is required.
 
+## Contributing
+
+The per-model rate card lives at `data/models-and-pricing.yml` and is a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml). When GitHub publishes new pricing, refresh the local copy with:
+
+```bash
+npm run update-rates
+```
+
+Commit the updated YAML with your change so reviewers can see the diff directly.
+
 ## License
 
 [MIT](LICENSE)

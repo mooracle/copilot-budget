@@ -86,8 +86,8 @@ Patterns reused:
 
 The YAML upstream is the **single source of truth**. We mirror it byte-identical, parse + normalize at extension activation. No build-time JSON generation; no second derived artifact to drift.
 
-- [ ] add `js-yaml` to `dependencies` (~30 KB minified, bundled), `@types/js-yaml` to `devDependencies`
-- [ ] create `scripts/update-rates.sh`:
+- [x] add `js-yaml` to `dependencies` (~30 KB minified, bundled), `@types/js-yaml` to `devDependencies`
+- [x] create `scripts/update-rates.sh`:
   ```sh
   #!/usr/bin/env bash
   set -euo pipefail
@@ -96,11 +96,11 @@ The YAML upstream is the **single source of truth**. We mirror it byte-identical
   test -s data/models-and-pricing.yml
   echo "Updated data/models-and-pricing.yml ($(wc -c < data/models-and-pricing.yml) bytes)"
   ```
-- [ ] add `npm run update-rates` invoking the shell script. Document in README + CLAUDE.md that contributors run this when GitHub publishes new rates; commit the YAML alongside the diff so reviewers see the change directly.
-- [ ] (optional, decide during implementation) add a GitHub Action `update-rates.yml` running weekly: executes `npm run update-rates`, opens a PR if the YAML changed
-- [ ] run `npm run update-rates` once to materialize `data/models-and-pricing.yml`; copy the current snapshot into `src/__fixtures__/models-and-pricing.yml` for tests (so tests are hermetic and don't break when upstream changes)
-- [ ] update esbuild config in `package.json` to copy `data/models-and-pricing.yml` → `dist/models-and-pricing.yml` (alongside the WASM copy step that already exists)
-- [ ] create `src/tokenRates.ts` exporting:
+- [x] add `npm run update-rates` invoking the shell script. Document in README + CLAUDE.md that contributors run this when GitHub publishes new rates; commit the YAML alongside the diff so reviewers see the change directly.
+- [x] (optional, decide during implementation) add a GitHub Action `update-rates.yml` running weekly: executes `npm run update-rates`, opens a PR if the YAML changed — skipped; contributors run manually
+- [x] run `npm run update-rates` once to materialize `data/models-and-pricing.yml`; copy the current snapshot into `src/__fixtures__/models-and-pricing.yml` for tests (so tests are hermetic and don't break when upstream changes)
+- [x] update esbuild config in `package.json` to copy `data/models-and-pricing.yml` → `dist/models-and-pricing.yml` (alongside the WASM copy step that already exists) (in `esbuild.js`)
+- [x] create `src/tokenRates.ts` exporting:
   - `RateCard` type `{ input: number; cachedInput: number; output: number; cacheCreation?: number; provider: string; displayName: string }`
   - module-level lazy load: read `<extensionPath>/dist/models-and-pricing.yml` via `fs.readFileSync`, `yaml.load` into entry array, normalize each entry into a `Map<normalized_id, RateCard>`:
     - normalize model name → key: strip footnote markers (`[^N]`), trim, lowercase, replace runs of whitespace with `-`. Keep dots (`gpt-4.1`). Examples: `"GPT-4.1[^1]"` → `gpt-4.1`, `"Claude Sonnet 4.6"` → `claude-sonnet-4.6`, `"Gemini 3 Flash"` → `gemini-3-flash`
@@ -114,13 +114,13 @@ The YAML upstream is the **single source of truth**. We mirror it byte-identical
   - `computeCost(modelId, tokens: { input, output, cacheRead, cacheCreation }): number` — USD = `(input × rate.input + cacheRead × rate.cachedInput + cacheCreation × (rate.cacheCreation ?? rate.input) + output × rate.output) / 1_000_000`. Unknown model → `0`.
   - `getDisplayName(modelId): string` — rate card's `displayName` if known, else the normalized id
   - `getAllRates(): ReadonlyMap<string, RateCard>` — for status bar / diagnostics
-- [ ] write tests against `src/__fixtures__/models-and-pricing.yml` (hermetic; don't read the live `data/` file):
+- [x] write tests against `src/__fixtures__/models-and-pricing.yml` (hermetic; don't read the live `data/` file):
   - normalization unit tests: footnote strip, whitespace→hyphen, dot preserved (`gpt-4.1`, `claude-opus-4.6`), case folding. Full version-qualified names preserved end-to-end (we never collapse `claude-opus-4.6` to `claude-opus-4`).
   - schema robustness: an entry missing `input` doesn't crash the load, just gets skipped with a logged warning
   - `getRateCard`: exact match per provider; `copilot/` / `copilotcli/` / `claude-code/` prefix strip; **unknown returns null** (no family fallback — `claude-sonnet-5` not in rate card → null, no silent misprice)
   - `computeCost`: all token types; GPT-4.1 and GPT-5 mini are charged at their published per-token rates (the "included models" footnote is about plan allowance, not zero pricing — our extension can't see plan allowances so we report list AIC for everyone); unknown model returns 0; `cacheCreation` rate fallback to `input` for OpenAI/Gemini (no `cache_write` in YAML)
   - `getDisplayName`: returns YAML `displayName` for known, stripped id for unknown
-- [ ] run `npm run lint && npm test` — must pass before Task 2
+- [x] run `npm run lint && npm test` — must pass before Task 2
 
 ### Task 2: Rewrite `sessionParser.ts` to use server tokens + cache split (atomic with Task 3 — single working state)
 
