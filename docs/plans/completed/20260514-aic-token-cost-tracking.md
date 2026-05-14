@@ -263,16 +263,16 @@ Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the 
 - Modify: `CHANGELOG.md`
 - Modify: `package.json` (version bump)
 
-- [ ] update `CLAUDE.md`:
+- [x] update `CLAUDE.md`:
   - replace `tracker.ts` description: remove premium-request language, describe USD/AIC aggregation + heuristic
   - replace `tokenEstimator.ts` entry with `tokenRates.ts` description
   - drop `planDetector.ts` entry
   - update `config.ts` to describe three new trailers
   - update `trackingFile.ts` schema description
-- [ ] update `README.md`: feature list (drop premium-requests, describe USD cost + optional AIC trailers + per-model breakdown), settings table, screenshot if needed
-- [ ] update `CHANGELOG.md` with `## 0.6.0` entry — clean break from premium-request model
-- [ ] bump `package.json` version `0.5.3` → `0.6.0` (breaking change)
-- [ ] move plan: `mkdir -p docs/plans/completed && git mv docs/plans/20260514-aic-token-cost-tracking.md docs/plans/completed/`
+- [x] update `README.md`: feature list (drop premium-requests, describe USD cost + optional AIC trailers + per-model breakdown), settings table, screenshot if needed
+- [x] update `CHANGELOG.md` with `## 0.6.0` entry — clean break from premium-request model
+- [x] bump `package.json` version `0.5.3` → `0.6.0` (breaking change)
+- [x] move plan: `mkdir -p docs/plans/completed && git mv docs/plans/20260514-aic-token-cost-tracking.md docs/plans/completed/`
 
 ## Technical Details
 
