@@ -1,4 +1,8 @@
-import { createStatusBar, showStatsQuickPick } from './statusBar';
+import {
+  createStatusBar,
+  formatAicShort,
+  showStatsQuickPick,
+} from './statusBar';
 import { Tracker, TrackingStats } from './tracker';
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -96,47 +100,43 @@ describe('statusBar', () => {
       );
     });
 
-    it('sets initial text with USD cost and Est suffix', () => {
+    it('sets initial text with AIC integer', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('$(credit-card)');
-      expect(createdItem.text).toContain('$0.02');
-      expect(createdItem.text).toContain('Est');
+      expect(createdItem.text).toBe('$(credit-card) 2 AIC');
     });
 
-    it('shows $0.00 for empty stats', () => {
+    it('shows 0 AIC for empty stats', () => {
       const { tracker } = createMockTracker(
         makeStats({ totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('$0.00');
-      expect(createdItem.text).toContain('Est');
+      expect(createdItem.text).toBe('$(credit-card) 0 AIC');
     });
 
-    it('sets tooltip as a MarkdownString with total cost and AIC', () => {
+    it('sets tooltip as a MarkdownString with total AIC', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
       expect(createdItem.tooltip).toBeInstanceOf(vscode.MarkdownString);
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
       expect(value).toContain('Total:');
-      expect(value).toContain('$0.0173');
       expect(value).toContain('1.73 AIC');
+      expect(value).not.toContain('$');
     });
 
-    it('tooltip lists per-model rows with USD and AIC', () => {
+    it('tooltip lists per-model rows with AIC only', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
       expect(value).toContain('GPT-4.1');
-      expect(value).toContain('$0.0094');
       expect(value).toContain('0.94 AIC');
       expect(value).toContain('Claude Sonnet 4.6');
-      expect(value).toContain('$0.0079');
       expect(value).toContain('0.79 AIC');
+      expect(value).not.toContain('$');
     });
 
     it('tooltip includes the heuristic disclosure note', () => {
@@ -163,15 +163,14 @@ describe('statusBar', () => {
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('$0.00');
+      expect(createdItem.text).toBe('$(credit-card) 0 AIC');
 
       fireStatsChanged(makeStats({ totalAiCredits: 123.4, models: {} }));
 
-      expect(createdItem.text).toContain('$1.23');
-      expect(createdItem.text).toContain('Est');
+      expect(createdItem.text).toBe('$(credit-card) 124 AIC');
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
-      expect(value).toContain('$1.2340');
       expect(value).toContain('123.40 AIC');
+      expect(value).not.toContain('$1.23');
     });
 
     it('disposes item and subscription on dispose', () => {
@@ -197,7 +196,7 @@ describe('statusBar', () => {
   });
 
   describe('showStatsQuickPick', () => {
-    it('shows total USD and AIC in header', async () => {
+    it('shows total AIC in header', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
@@ -205,8 +204,9 @@ describe('statusBar', () => {
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
       const totalItem = items.find((i: any) => i.label?.includes('Total'));
       expect(totalItem).toBeDefined();
-      expect(totalItem.label).toContain('$0.0173');
-      expect(totalItem.description).toContain('1.73 AIC');
+      expect(totalItem.label).toContain('1.73 AIC');
+      expect(totalItem.label).not.toMatch(/\$\d/);
+      expect(totalItem.description).toBeUndefined();
     });
 
     it('shows tracking since timestamp', async () => {
@@ -220,7 +220,7 @@ describe('statusBar', () => {
       expect(sinceItem).toBeDefined();
     });
 
-    it('shows per-model USD and AIC, with all four token buckets in detail', async () => {
+    it('shows per-model AIC, with all four token buckets in detail', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
@@ -229,8 +229,8 @@ describe('statusBar', () => {
         i.label?.includes('Claude Sonnet 4.6'),
       );
       expect(claudeItem).toBeDefined();
-      expect(claudeItem.description).toContain('$0.0079');
-      expect(claudeItem.description).toContain('0.79 AIC');
+      expect(claudeItem.description).toBe('0.79 AIC');
+      expect(claudeItem.description).not.toContain('$');
       expect(claudeItem.detail).toContain('in:');
       expect(claudeItem.detail).toContain('cache_read:');
       expect(claudeItem.detail).toContain('cache_creation:');
@@ -277,7 +277,8 @@ describe('statusBar', () => {
       const modelItems = items.filter((i: any) => i.label?.includes('$(hubot)'));
       expect(modelItems).toHaveLength(0);
       const totalItem = items.find((i: any) => i.label?.includes('Total'));
-      expect(totalItem.label).toContain('$0.0000');
+      expect(totalItem.label).toContain('0.00 AIC');
+      expect(totalItem.label).not.toMatch(/\$\d/);
     });
 
     it('includes the heuristic disclosure note as an item', async () => {
@@ -300,5 +301,26 @@ describe('statusBar', () => {
       expect(options.title).toBe('Copilot Budget');
       expect(options.placeHolder).toBeTruthy();
     });
+  });
+
+  describe('formatAicShort', () => {
+    const cases: Array<[number, string]> = [
+      [0, '0 AIC'],
+      [1e-6, '1 AIC'],
+      [0.0001, '1 AIC'],
+      [0.4, '1 AIC'],
+      [0.5, '1 AIC'],
+      [1.0, '1 AIC'],
+      [14.5, '15 AIC'],
+      [15.0, '15 AIC'],
+      [-1, '0 AIC'],
+      [-0.0001, '0 AIC'],
+    ];
+
+    for (const [input, expected] of cases) {
+      it(`formats ${input} as ${expected}`, () => {
+        expect(formatAicShort(input)).toBe(expected);
+      });
+    }
   });
 });

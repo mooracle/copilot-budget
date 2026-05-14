@@ -11,16 +11,15 @@ function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
 }
 
-function formatUsdShort(n: number): string {
-  return `$${n.toFixed(2)}`;
-}
-
-function formatUsdLong(n: number): string {
-  return `$${n.toFixed(4)}`;
-}
-
 function formatAic(n: number): string {
   return `${n.toFixed(2)} AIC`;
+}
+
+export function formatAicShort(n: number): string {
+  if (!(n > 0)) {
+    return '0 AIC';
+  }
+  return `${Math.ceil(n)} AIC`;
 }
 
 function totalModelTokens(usage: ModelStats): number {
@@ -35,15 +34,13 @@ function totalModelTokens(usage: ModelStats): number {
 function buildTooltip(stats: TrackingStats): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
-  md.appendMarkdown(
-    `**Total:** ${formatUsdLong(stats.totalAiCredits / 100)} (${formatAic(stats.totalAiCredits)})\n\n`,
-  );
+  md.appendMarkdown(`**Total:** ${formatAic(stats.totalAiCredits)}\n\n`);
 
   const entries = Object.entries(stats.models);
   if (entries.length > 0) {
     for (const [model, usage] of entries) {
       md.appendMarkdown(
-        `- ${getDisplayName(model)}: ${formatUsdLong(usage.costAic / 100)} (${formatAic(usage.costAic)})\n`,
+        `- ${getDisplayName(model)}: ${formatAic(usage.costAic)}\n`,
       );
     }
     md.appendMarkdown('\n');
@@ -63,7 +60,7 @@ export function createStatusBar(
   item.command = 'copilot-budget.showStats';
 
   function updateText(stats: TrackingStats): void {
-    item.text = `$(credit-card) ${formatUsdShort(stats.totalAiCredits / 100)} Est`;
+    item.text = `$(credit-card) ${formatAicShort(stats.totalAiCredits)}`;
     item.tooltip = buildTooltip(stats);
   }
 
@@ -86,8 +83,7 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
   const items: vscode.QuickPickItem[] = [];
 
   items.push({
-    label: `$(credit-card) Total: ${formatUsdLong(stats.totalAiCredits / 100)}`,
-    description: formatAic(stats.totalAiCredits),
+    label: `$(credit-card) Total: ${formatAic(stats.totalAiCredits)}`,
   });
 
   items.push({
@@ -102,7 +98,7 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
       const totalTokens = totalModelTokens(usage);
       items.push({
         label: `$(hubot) ${getDisplayName(model)}`,
-        description: `${formatUsdLong(usage.costAic / 100)} (${formatAic(usage.costAic)})`,
+        description: formatAic(usage.costAic),
         detail:
           `Tokens: ${formatNumber(totalTokens)} ` +
           `(in: ${formatNumber(usage.inputTokens)} / ` +

@@ -150,19 +150,19 @@ This task touches every file that reads/writes the renamed fields, including tes
 - Modify: `src/statusBar.ts`
 - Modify: `src/statusBar.test.ts`
 
-- [ ] Delete `formatUsdShort` and `formatUsdLong` helpers.
-- [ ] Add `formatAicShort(n: number): string`: if `n <= 0` return `'0 AIC'`; else return `Math.ceil(n) + ' AIC'`.
-- [ ] In `updateText()` (line 67): change item text to `'$(credit-card) ' + formatAicShort(stats.totalAiCredits)`. No "Est" suffix.
-- [ ] In `buildTooltip()`: total row uses `formatAic(stats.totalAiCredits)` only (drop USD). Per-model rows show `getDisplayName(model) + ': ' + formatAic(usage.costAic)` only. Keep heuristic note.
-- [ ] In `showStatsQuickPick()`: total row label becomes `'$(credit-card) Total: ' + formatAic(stats.totalAiCredits)`; drop the USD `description`. Per-model rows: `description` becomes `formatAic(usage.costAic)` only. Per-model token-breakdown `detail` line preserved unchanged.
-- [ ] `src/statusBar.test.ts`: rewrite all 13 existing test cases to drop USD assertions:
+- [x] Delete `formatUsdShort` and `formatUsdLong` helpers.
+- [x] Add `formatAicShort(n: number): string`: if `n <= 0` return `'0 AIC'`; else return `Math.ceil(n) + ' AIC'`.
+- [x] In `updateText()` (line 67): change item text to `'$(credit-card) ' + formatAicShort(stats.totalAiCredits)`. No "Est" suffix.
+- [x] In `buildTooltip()`: total row uses `formatAic(stats.totalAiCredits)` only (drop USD). Per-model rows show `getDisplayName(model) + ': ' + formatAic(usage.costAic)` only. Keep heuristic note.
+- [x] In `showStatsQuickPick()`: total row label becomes `'$(credit-card) Total: ' + formatAic(stats.totalAiCredits)`; drop the USD `description`. Per-model rows: `description` becomes `formatAic(usage.costAic)` only. Per-model token-breakdown `detail` line preserved unchanged.
+- [x] `src/statusBar.test.ts`: rewrite all 13 existing test cases to drop USD assertions:
   - `'sets initial text with USD cost and Est suffix'` → rename to `'sets initial text with AIC integer'`, update expected text (e.g. `'$(credit-card) 1 AIC'` for the existing 1.73 AIC fixture).
   - Empty-state cases: expect `'$(credit-card) 0 AIC'`.
   - Tooltip assertions: replace `$0.0173 (1.73 AIC)` with `1.73 AIC`; per-model rows similarly.
   - Quick pick assertions: replace `$0.0173` + `1.73 AIC` description with `1.73 AIC` description; per-model rows similarly.
   - Fires-on-change test (line 161-176): expect `'123 AIC'` text, tooltip `123.40 AIC`.
-- [ ] Add table-driven test for `formatAicShort` covering `0` → `'0 AIC'`, `1e-6` → `'1 AIC'`, `0.0001` → `'1 AIC'`, `0.4` → `'1 AIC'`, `0.5` → `'1 AIC'`, `1.0` → `'1 AIC'`, `14.5` → `'15 AIC'`, `15.0` → `'15 AIC'`, negative → `'0 AIC'`.
-- [ ] run `npm test` — must pass before next task.
+- [x] Add table-driven test for `formatAicShort` covering `0` → `'0 AIC'`, `1e-6` → `'1 AIC'`, `0.0001` → `'1 AIC'`, `0.4` → `'1 AIC'`, `0.5` → `'1 AIC'`, `1.0` → `'1 AIC'`, `14.5` → `'15 AIC'`, `15.0` → `'15 AIC'`, negative → `'0 AIC'`.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 6: Drop USD line from diagnostics output
 
