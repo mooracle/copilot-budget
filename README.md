@@ -4,11 +4,11 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 
 ## Features
 
-- **Token-based cost tracking** — reads server-reported token counts from Copilot's session JSONL (input, output, cache_read, cache_creation) and computes USD cost against the published per-million-token rate card. Status bar shows estimated cost as `$X.XX Est`.
-- **AI Credits** — alongside USD, reports cost in AI Credits (1 AIC = $0.01). AIC is the plan-invariant metric — useful for cross-team or cross-plan attribution where USD discounts vary.
-- **Per-model breakdown** — see USD cost, AIC, and input / cache_read / cache_creation / output tokens grouped by model (GPT, Claude, Gemini, etc.) in the status bar tooltip and quick pick panel.
+- **Token-based cost tracking** — reads server-reported token counts from Copilot's session JSONL (input, output, cache_read, cache_creation) and computes cost in AI Credits against the published per-million-token rate card. Status bar shows estimated cost as `N AIC`.
+- **AI Credits** — cost is reported in AI Credits (1 AIC = $0.01). AIC is the plan-invariant metric — accurate across individual, Pro, Business, and Enterprise users regardless of negotiated USD discounts.
+- **Per-model breakdown** — see AIC cost and input / cache_read / cache_creation / output tokens grouped by model (GPT, Claude, Gemini, etc.) in the status bar tooltip and quick pick panel.
 - **Upstream rate card** — per-model rates are a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml), shipped with the extension.
-- **Commit hook integration** — automatically appends configurable git trailers (`Copilot-Est-Cost` and `Copilot-AI-Credits` on by default; per-model breakdown opt-in) to commit messages. Trailer keys can be renamed or individually disabled via settings.
+- **Commit hook integration** — automatically appends configurable git trailers (`Copilot-AI-Credits` on by default; `Copilot-Est-Cost` USD trailer and per-model breakdown are opt-in) to commit messages. Trailer keys can be renamed or individually disabled via settings.
 - **Persistent tracking** — stats accumulate across VS Code restarts. On deactivation the extension writes current stats to a tracking file; on activation it reads them back. Use the "Reset Tracking" command to start fresh.
 - **SQLite session support** — reads Copilot sessions from `state.vscdb` databases, catching sessions that only exist in SQLite after recent Copilot storage migrations.
 - **Worktree & submodule support** — correctly follows `.git` files in git worktrees, submodules, and devcontainers for both hook installation and tracking file placement.
@@ -18,14 +18,14 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 
 1. Install the extension from the VS Code Marketplace (search for **Copilot Budget**).
 2. The status bar item appears automatically showing your estimated cost.
-3. Click the status bar item to see a per-model breakdown of USD cost, AIC, and token counts.
+3. Click the status bar item to see a per-model breakdown of AIC cost and token counts.
 4. The commit hook is **not** installed automatically by default. To enable it, set `copilot-budget.commitHook.enabled` to `true` (see [Commit Hook Workflow](#commit-hook-workflow) below).
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `Copilot Budget: Show Token Stats` | Open a quick pick with total cost, AIC, and per-model breakdown |
+| `Copilot Budget: Show Token Stats` | Open a quick pick with total AIC cost and per-model breakdown |
 | `Copilot Budget: Reset Tracking` | Reset the counter to zero (re-baselines from current session files) |
 | `Copilot Budget: Install Commit Hook` | Install the `prepare-commit-msg` hook that appends AI budget info to commits |
 | `Copilot Budget: Uninstall Commit Hook` | Remove the Copilot Budget commit hook |
@@ -37,17 +37,17 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 |---|---|---|---|
 | `copilot-budget.enabled` | boolean | `true` | Enable or disable Copilot Budget token usage tracking |
 | `copilot-budget.commitHook.enabled` | boolean | `false` | Automatically install the `prepare-commit-msg` hook when the extension activates |
-| `copilot-budget.commitHook.trailers.estimatedCost` | string \| false | `"Copilot-Est-Cost"` | Git trailer key for estimated USD cost. Set to `false` to disable this trailer. |
+| `copilot-budget.commitHook.trailers.estimatedCost` | string \| false | `false` | Opt-in git trailer key for estimated USD cost in commit history. Disabled by default. Set to a string (e.g. `"Copilot-Est-Cost"`) to enable. |
 | `copilot-budget.commitHook.trailers.aiCredits` | string \| false | `"Copilot-AI-Credits"` | Git trailer key for total AI Credits (1 AIC = $0.01). Set to `false` to disable this trailer. |
 | `copilot-budget.commitHook.trailers.aiCreditsPerModel` | string \| false | `false` | Git trailer key for per-model AI Credits breakdown. Disabled by default. Set to a string (e.g. `"Copilot-AI-Credits-Models"`) to enable. |
 
 ### Cost Methodology
 
-USD cost is `(input × rate.input + cache_read × rate.cached_input + cache_creation × (rate.cache_creation ?? rate.input) + output × rate.output) / 1,000,000` per model, summed across models. AIC is `USD × 100`.
+AIC cost is `(input × rate.input + cache_read × rate.cached_input + cache_creation × (rate.cache_creation ?? rate.input) + output × rate.output) / 1,000,000` per model, summed across models. The upstream rate card publishes USD per million tokens; the extension converts those rates to AIC (× 100) once at load time, so all in-extension cost values are AIC. If the opt-in `Copilot-Est-Cost` trailer is enabled, the USD equivalent is computed from AIC ÷ 100 at trailer-write time.
 
-USD numbers are at list price — they are accurate for individual and Pro users but are an approximation for Business/Enterprise users on negotiated contracts. AIC is plan-invariant (a fixed function of tokens × per-token rate) and is the better metric for cross-team attribution.
+AIC is plan-invariant — accurate across individual, Pro, Business, and Enterprise plans. GitHub Copilot's post-2026-06-01 billing is denominated in AIC directly, so AIC matches what Copilot bills regardless of any negotiated USD pricing.
 
-When per-message cache split (`cacheReadTokens`) is not reported by Copilot, the extension applies a heuristic: turn 1 is treated as 0% cached, turn 2 onward as 75% cached. Real values may be higher or lower. The status bar label and tooltip mark cost as `Est`.
+When per-message cache split (`cacheReadTokens`) is not reported by Copilot, the extension applies a heuristic: turn 1 is treated as 0% cached, turn 2 onward as 75% cached. Real values may be higher or lower. The status bar tooltip notes that cost is estimated.
 
 ### Example `settings.json`
 
@@ -66,19 +66,19 @@ Enable the commit hook and the per-model AI Credits trailer:
 }
 ```
 
+Enable the opt-in USD trailer (off by default):
+
+```jsonc
+{
+  "copilot-budget.commitHook.trailers.estimatedCost": "Copilot-Est-Cost"
+}
+```
+
 Rename a trailer:
 
 ```jsonc
 {
-  "copilot-budget.commitHook.trailers.estimatedCost": "AI-Cost"
-}
-```
-
-Disable the estimated cost trailer (keep AI Credits):
-
-```jsonc
-{
-  "copilot-budget.commitHook.trailers.estimatedCost": false
+  "copilot-budget.commitHook.trailers.aiCredits": "AI-Credits"
 }
 ```
 
@@ -106,18 +106,17 @@ With default settings, a commit message looks like:
 ```
 feat: add user authentication
 
-Copilot-Est-Cost: $0.42
 Copilot-AI-Credits: 42.31
 ```
 
-With the optional per-model trailer enabled (`"copilot-budget.commitHook.trailers.aiCreditsPerModel": "Copilot-AI-Credits-Models"`):
+With the opt-in per-model trailer and the opt-in USD trailer both enabled:
 
 ```
 feat: add user authentication
 
-Copilot-Est-Cost: $0.42
 Copilot-AI-Credits: 42.31
 Copilot-AI-Credits-Models: Claude Sonnet 4.6=40.81,GPT-4.1=1.50
+Copilot-Est-Cost: $0.42
 ```
 
 The per-model trailer value is a comma-separated list of `<model>=<aic>` entries sorted by descending credits, using display names from the upstream rate card.
@@ -149,7 +148,7 @@ In git worktrees, the hook is installed in the **common git directory** (shared 
 2. **Parsing** — Each session file is parsed to extract per-request `result.metadata.{promptTokens, outputTokens, cacheReadTokens?, cacheCreationTokens?}`. When the cache split is absent the turn-based heuristic fills it in.
 3. **Baseline & Restore** — A token snapshot is taken at startup as a baseline so only new activity is counted. If a tracking file from a previous session exists (written on deactivation), those stats are restored and merged, providing continuity across VS Code restarts.
 4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.
-5. **Cost computation** — Per-model rates are loaded from the bundled `models-and-pricing.yml` (mirror of `github/docs` upstream). USD = tokens × rate; AIC = USD × 100.
+5. **Cost computation** — Per-model rates are loaded from the bundled `models-and-pricing.yml` (mirror of `github/docs` upstream). The rate card publishes USD per million tokens; rates are converted to AIC (× 100) once at load time, so all in-extension cost values are AIC.
 6. **Commit hook** — See [Commit Hook Workflow](#commit-hook-workflow) above for the full details.
 
 ## Supported Editors

@@ -192,22 +192,22 @@ This task touches every file that reads/writes the renamed fields, including tes
 - Modify: `CLAUDE.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] `README.md`: replace USD examples with AIC. Specifically:
+- [x] `README.md`: replace USD examples with AIC. Specifically:
   - Lines ~7, 8, 9, 21, 40, 46, 48 (intro / feature blurb): swap `$X.XX Est` → `N AIC`.
   - Line ~109 (default commit-message example block): show `Copilot-AI-Credits: 42.31` only. Remove the `Copilot-Est-Cost: $0.42` line from the default example.
   - Line ~118 (opt-in / per-model commit example): keep `Copilot-AI-Credits`, optionally show `Copilot-Est-Cost` as an enabled-via-settings example. Make clear it's opt-in.
   - Line ~152 (settings section): document `copilot-budget.commitHook.trailers.estimatedCost` as opt-in for users who want USD in commit history; default `false`.
-- [ ] `CLAUDE.md`: update module summaries for:
+- [x] `CLAUDE.md`: update module summaries for:
   - `tokenRates.ts`: USD→AIC conversion at load time, `computeCost()` returns AIC.
   - `tracker.ts`: drop `totalCostUsd` mention; `ModelStats.costAic` is the cost field.
   - `statusBar.ts`: `formatAicShort` ceil-rule, no `formatUsd*` helpers, AIC-only surfaces.
   - `trackingFile.ts`: schema uses `TOTAL_AI_CREDITS` + `_COST_AIC`; legacy `_COST_USD` keys silently ignored on parse.
   - `config.ts`: `estimatedCost` default is `false`; AIC trailer is the primary trailer.
-- [ ] `CHANGELOG.md`: amend the existing `## [0.6.0] - 2026-05-14` entry (do NOT add a new section — this work stays in the same unreleased train):
+- [x] `CHANGELOG.md`: amend the existing `## [0.6.0] - 2026-05-14` entry (do NOT add a new section — this work stays in the same unreleased train):
   - Under `### Changed`: "Status bar and tooltip now display AI Credits (AIC) only; USD removed from all in-extension surfaces."
   - Under `### Changed`: "`Copilot-Est-Cost` trailer default flipped from on to off; users who want USD in commit history must explicitly set `copilot-budget.commitHook.trailers.estimatedCost`."
   - If a `### Schema` or similar section exists: note that `TOTAL_COST_USD` and per-model `_COST_USD` keys are removed from the `copilot-budget` tracking file; legacy files are tolerated on parse.
-- [ ] Move this plan to `docs/plans/completed/`: `mkdir -p docs/plans/completed && mv docs/plans/20260514-aic-native-display.md docs/plans/completed/`.
+- [x] Move this plan to `docs/plans/completed/`: `mkdir -p docs/plans/completed && mv docs/plans/20260514-aic-native-display.md docs/plans/completed/`.
 
 ## Technical Details
 

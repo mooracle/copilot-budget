@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Switched from premium-request math to GitHub Copilot's usage-based billing model (effective 2026-06-01). Cost is now derived from server-reported `result.metadata.promptTokens` / `outputTokens` per model against the published per-million-token rate card mirrored from `github/docs:data/tables/copilot/models-and-pricing.yml`. When per-message cache split is missing, a 75%-cached-after-turn-1 heuristic is applied.
-- Tracking file (`<gitdir>/copilot-budget`) format replaced. New schema records `SINCE`, `INTERACTIONS`, `TOTAL_COST_USD`, `TOTAL_AI_CREDITS`, and per-model `MODEL_<name>_{INPUT,OUTPUT,CACHE_READ,CACHE_CREATION}_TOKENS` plus `_COST_USD` lines.
+- AI Credits (AIC; 1 AIC = $0.01) is now the sole cost unit in all in-extension surfaces. Status bar shows integer AIC (ceil-rounded, no "Est" suffix); tooltip, quick pick, and diagnostics output show AIC only. USD is removed from every user-facing surface.
+- Rate card USD → AIC conversion happens once at load time in `tokenRates.ts`; `computeCost()` returns AIC directly. The on-disk `data/models-and-pricing.yml` is unchanged (still a byte-identical mirror of upstream USD).
+- `Copilot-Est-Cost` USD trailer default flipped from on to off. Users who want USD in commit history must explicitly set `copilot-budget.commitHook.trailers.estimatedCost`. When enabled, the USD value is derived inline from AIC ÷ 100 at trailer-write time.
+- Tracking file (`<gitdir>/copilot-budget`) schema replaced. New schema records `SINCE`, `INTERACTIONS`, `TOTAL_AI_CREDITS`, and per-model `MODEL_<name>_{INPUT,OUTPUT,CACHE_READ,CACHE_CREATION}_TOKENS` plus `_COST_AIC` lines. `TOTAL_COST_USD` and per-model `_COST_USD` keys are removed; pre-flip 0.6.x dev-host tracking files are tolerated on parse (legacy USD keys are silently ignored and cost is re-derived from tokens on the next scan).
 
 ### Added
 
-- `Copilot-AI-Credits` git trailer (default-on) — the plan-invariant metric, computed as USD × 100.
+- `Copilot-AI-Credits` git trailer (default-on) — the plan-invariant metric, equal to the AIC cost computed from tokens × per-model rate.
 - `Copilot-AI-Credits-Models` git trailer (opt-in) — per-model AI Credits breakdown, sorted by descending credits, using display names from the upstream rate card.
 
 ### Removed
@@ -23,11 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-model `Copilot-Model` trailer.
 - `copilot-budget.plan` setting and GitHub Copilot plan auto-detection (no longer needed under usage-based billing).
 - Character-based token estimation (`tokenEstimators.json`); tokens are now read from the session JSONL metadata directly.
+- USD from status bar text, tooltip, quick pick, diagnostics output, and tracking file. USD survives only as the opt-in `Copilot-Est-Cost` trailer.
 
 ### Breaking
 
 - Upgrading from 0.5.x discards the previous tracking file. The counter starts fresh on first launch; pre-0.6 tracking data (premium requests, $0.04/request cost) is not convertible to AIC and is intentionally not migrated.
-- The `commitHook.trailers.premiumRequests` and `commitHook.trailers.model` settings are removed. The `commitHook.trailers.estimatedCost` setting and `Copilot-Est-Cost` trailer name are retained byte-identical for backwards compatibility with existing CI/scripts.
+- The `commitHook.trailers.premiumRequests` and `commitHook.trailers.model` settings are removed.
+- The `commitHook.trailers.estimatedCost` setting now defaults to `false`. Users relying on the `Copilot-Est-Cost` trailer in CI/scripts must explicitly enable it by setting the value to `"Copilot-Est-Cost"` (or any custom trailer name).
 
 ## [0.5.3] - 2026-03-03
 
