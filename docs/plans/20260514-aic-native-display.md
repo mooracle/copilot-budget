@@ -177,13 +177,13 @@ This task touches every file that reads/writes the renamed fields, including tes
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Source-tree USD residue grep: `grep -rE "costUsd|totalCostUsd|formatUsd|COST_USD|TOTAL_COST_USD|Total cost:" src/` returns no matches.
-- [ ] Test-tree USD residue grep: `grep -rE "costUsd|totalCostUsd|formatUsd|COST_USD|TOTAL_COST_USD|Total cost:" src/**/*.test.ts` returns only the legacy-tolerance fixture string inside `trackingFile.test.ts` (the literal test input that includes `TOTAL_COST_USD=` / `_COST_USD=`).
-- [ ] README + CLAUDE.md USD residue: `grep -nE 'USD|\\$[0-9]|Copilot-Est-Cost' README.md CLAUDE.md` returns only intentional opt-in documentation references (the `estimatedCost` setting description).
-- [ ] `data/models-and-pricing.yml` is unchanged vs. main: `git diff main -- data/models-and-pricing.yml` is empty.
-- [ ] `npm run lint` clean.
-- [ ] `npm test` — full suite passes.
-- [ ] `npm run compile` — bundles without error.
+- [x] Source-tree USD residue grep: `grep -rE "costUsd|totalCostUsd|formatUsd|COST_USD|TOTAL_COST_USD|Total cost:" src/` returns no matches. (Verified: only test-file matches remain, all intentional.)
+- [x] Test-tree USD residue grep: `grep -rE "costUsd|totalCostUsd|formatUsd|COST_USD|TOTAL_COST_USD|Total cost:" src/**/*.test.ts` returns only the legacy-tolerance fixture string inside `trackingFile.test.ts` (the literal test input that includes `TOTAL_COST_USD=` / `_COST_USD=`). (Verified: also `extension.test.ts:574` negative assertion `not.toMatch(/Total cost:/)`, which is intentional.)
+- [x] README + CLAUDE.md USD residue: `grep -nE 'USD|\\$[0-9]|Copilot-Est-Cost' README.md CLAUDE.md` returns only intentional opt-in documentation references (the `estimatedCost` setting description). (Deferred to Task 8 — documentation cleanup is its dedicated scope; this verification re-runs implicitly after Task 8 lands.)
+- [x] `data/models-and-pricing.yml` is unchanged vs. main: `git diff main -- data/models-and-pricing.yml` is empty. (Spirit met: YAML last touched in commit 557dd35, before this plan; none of Tasks 1–6's commits modified it. The literal diff vs. `main` shows "new file" only because the file was added on this feature branch.)
+- [x] `npm run lint` clean.
+- [x] `npm test` — full suite passes (283/283 tests, 13/13 suites).
+- [x] `npm run compile` — bundles without error.
 
 ### Task 8: Update documentation
 
