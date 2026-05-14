@@ -81,12 +81,12 @@ Tasks 2 and 3 are interdependent (`ModelStats.costUsd` is read across `tracker.t
 - Modify: `src/tokenRates.ts`
 - Modify: `src/tokenRates.test.ts` (if present — create if not)
 
-- [ ] In `loadRateCard()` inside `src/tokenRates.ts`, multiply each parsed rate field (`input`, `cachedInput`, `output`, and `cacheCreation` when present) by 100 so the stored `RateCard` values are AIC per 1M tokens. Do NOT modify `data/models-and-pricing.yml`.
-- [ ] Update the `RateCard` interface JSDoc/comment to state fields are "AIC per 1M tokens".
-- [ ] Update the JSDoc on `computeCost` (currently "Compute USD cost for a model invocation") to say "Compute AIC cost for a model invocation".
-- [ ] `computeCost(modelId, tokens)` body returns AIC directly (math unchanged; only the units of the multipliers shifted — verify the function does NOT multiply by 100 itself, since the rate fields already carry the conversion).
-- [ ] If `tokenRates.test.ts` exists, update expected values × 100. If absent, add a minimal test exercising `computeCost()` for one known model and asserting the AIC result.
-- [ ] run `npm test` — must pass before next task.
+- [x] In `loadRateCard()` inside `src/tokenRates.ts`, multiply each parsed rate field (`input`, `cachedInput`, `output`, and `cacheCreation` when present) by 100 so the stored `RateCard` values are AIC per 1M tokens. Do NOT modify `data/models-and-pricing.yml`.
+- [x] Update the `RateCard` interface JSDoc/comment to state fields are "AIC per 1M tokens".
+- [x] Update the JSDoc on `computeCost` (currently "Compute USD cost for a model invocation") to say "Compute AIC cost for a model invocation".
+- [x] `computeCost(modelId, tokens)` body returns AIC directly (math unchanged; only the units of the multipliers shifted — verify the function does NOT multiply by 100 itself, since the rate fields already carry the conversion).
+- [x] If `tokenRates.test.ts` exists, update expected values × 100. If absent, add a minimal test exercising `computeCost()` for one known model and asserting the AIC result.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 2: Atomic type-rename pass — `costUsd` → `costAic`, drop `totalCostUsd`
 

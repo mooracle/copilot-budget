@@ -4,6 +4,11 @@ import * as yaml from 'js-yaml';
 import { log } from './logger';
 import { errorMessage } from './utils';
 
+/**
+ * Per-model rate card. All numeric rate fields are AIC per 1M tokens
+ * (the raw rate-card YAML is USD per 1M tokens; `loadRateCard` converts
+ * to AIC at load time via the fixed 1 AIC = $0.01 identity).
+ */
 export interface RateCard {
   input: number;
   cachedInput: number;
@@ -12,6 +17,8 @@ export interface RateCard {
   provider: string;
   displayName: string;
 }
+
+const USD_TO_AIC = 100;
 
 export interface TokenCounts {
   input: number;
@@ -80,14 +87,14 @@ function buildRateMap(entries: YamlEntry[]): Map<string, RateCard> {
     const displayName = stripFootnotes(rawModel).trim();
     const key = normalizeModelId(rawModel);
     const card: RateCard = {
-      input,
-      cachedInput,
-      output,
+      input: input * USD_TO_AIC,
+      cachedInput: cachedInput * USD_TO_AIC,
+      output: output * USD_TO_AIC,
       provider,
       displayName,
     };
     if (cacheCreation !== null) {
-      card.cacheCreation = cacheCreation;
+      card.cacheCreation = cacheCreation * USD_TO_AIC;
     }
     map.set(key, card);
   }
@@ -171,9 +178,11 @@ export function getRateCard(modelId: string): RateCard | null {
 }
 
 /**
- * Compute USD cost for a model invocation. Unknown model → 0.
+ * Compute AIC cost for a model invocation. Unknown model → 0.
  * cacheCreation falls back to the input rate when the YAML lacks
- * `cache_write` (OpenAI/Gemini cache implicitly).
+ * `cache_write` (OpenAI/Gemini cache implicitly). Rate-card values
+ * are already AIC per 1M tokens (converted at load time), so this
+ * function emits AIC directly.
  */
 export function computeCost(modelId: string, tokens: TokenCounts): number {
   const card = getRateCard(modelId);
