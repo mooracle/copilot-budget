@@ -117,7 +117,7 @@ feat: add user authentication
 
 Copilot-Est-Cost: $0.42
 Copilot-AI-Credits: 42.31
-Copilot-AI-Credits-Models: claude-sonnet-4.6=40.81,gpt-4.1=1.50
+Copilot-AI-Credits-Models: Claude Sonnet 4.6=40.81,GPT-4.1=1.50
 ```
 
 The per-model trailer value is a comma-separated list of `<model>=<aic>` entries sorted by descending credits, using display names from the upstream rate card.

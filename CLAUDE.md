@@ -51,10 +51,9 @@ Tests live alongside source files as `*.test.ts`. The `vscode` module is mocked 
 
 ## Key Design Details
 
-- **One runtime dependency: `sql.js`** — WASM-based SQLite reader for `state.vscdb` files. No native modules; the WASM binary (`sql-wasm.wasm`) is copied to `dist/` by esbuild config.
+- **Runtime dependencies: `sql.js` + `js-yaml`** — `sql.js` is a WASM-based SQLite reader for `state.vscdb` files (no native modules; the WASM binary `sql-wasm.wasm` is copied to `dist/` by esbuild). `js-yaml` (~30 KB minified) parses the bundled rate card at activation.
 - **Workspace-side file I/O uses `vscode.workspace.fs`** — Modules that access workspace files (`gitDir.ts`, `trackingFile.ts`, `commitHook.ts`) use `vscode.workspace.fs` via `fsUtils.ts` wrappers, enabling transparent remote filesystem proxying in devcontainers, Codespaces, and SSH Remote. Only `commitHook.ts` retains a Node.js `fs` import for local `chmodSync`. Host-side modules (`sessionDiscovery.ts`, `sqliteReader.ts`) continue to use Node.js `fs` since they read from the host machine's filesystem.
 - **esbuild bundles** to a single `dist/extension.js` (CommonJS, Node 18 target, vscode external). The build also copies `sql-wasm.wasm` and `data/models-and-pricing.yml` to `dist/`.
-- **`js-yaml`** is the second runtime dependency (besides `sql.js`), used to parse the bundled rate card at activation. ~30 KB minified.
 - The commit hook is pure POSIX shell with no external dependencies.
 - Prototype pollution prevention is implemented in the JSONL delta parser.
 - The extension makes no network calls at runtime. All session data is read from local files; the rate card is shipped in the extension bundle and refreshed by contributors via `npm run update-rates`.

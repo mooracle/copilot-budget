@@ -55,7 +55,7 @@ async function makeExecutable(uri: vscode.Uri): Promise<void> {
   const task = new vscode.Task(
     { type: 'copilot-budget', task: 'chmod' }, vscode.TaskScope.Workspace,
     'chmod-hook', 'copilot-budget',
-    new vscode.ShellExecution('chmod', ['+x', uri.path]),
+    new vscode.ShellExecution('chmod', ['+x', uri.fsPath]),
   );
   task.presentationOptions = { reveal: vscode.TaskRevealKind.Silent };
   let disposable: vscode.Disposable | undefined;

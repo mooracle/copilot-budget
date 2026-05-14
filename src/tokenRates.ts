@@ -155,7 +155,7 @@ export function getRateCard(modelId: string): RateCard | null {
     return null;
   }
   const map = ensureLoaded();
-  const stripped = stripPrefix(modelId).toLowerCase();
+  const stripped = normalizeModelId(stripPrefix(modelId));
   const direct = map.get(stripped);
   if (direct) {
     return direct;
