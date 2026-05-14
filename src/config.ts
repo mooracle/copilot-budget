@@ -14,15 +14,13 @@ export function isCommitHookEnabled(): boolean {
   return cfg().get<boolean>('commitHook.enabled', true);
 }
 
-export type PlanSetting = 'auto' | 'free' | 'pro' | 'pro+' | 'business' | 'enterprise';
-
-export function getPlanSetting(): PlanSetting {
-  return cfg().get<PlanSetting>('plan', 'auto');
-}
-
 export interface TrailerConfig {
-  premiumRequests: string | false;
   estimatedCost: string | false;
+  aiCredits: string | false;
+  aiCreditsPerModel: string | false;
+  /** @deprecated retained as a compile-only shim (always `false` from `getTrailerConfig`) until Task 5 rewrites trackingFile.ts. Typed wide so legacy test fixtures still compile. */
+  premiumRequests: string | false;
+  /** @deprecated retained as a compile-only shim (always `false` from `getTrailerConfig`) until Task 5 rewrites trackingFile.ts. Typed wide so legacy test fixtures still compile. */
   model: string | false;
 }
 
@@ -36,9 +34,11 @@ function sanitizeTrailerKey(value: unknown, fallback: string | false): string | 
 export function getTrailerConfig(): TrailerConfig {
   const c = cfg();
   return {
-    premiumRequests: sanitizeTrailerKey(c.get('commitHook.trailers.premiumRequests', 'Copilot-Premium-Requests'), 'Copilot-Premium-Requests'),
     estimatedCost: sanitizeTrailerKey(c.get('commitHook.trailers.estimatedCost', 'Copilot-Est-Cost'), 'Copilot-Est-Cost'),
-    model: sanitizeTrailerKey(c.get('commitHook.trailers.model', false), false),
+    aiCredits: sanitizeTrailerKey(c.get('commitHook.trailers.aiCredits', 'Copilot-AI-Credits'), 'Copilot-AI-Credits'),
+    aiCreditsPerModel: sanitizeTrailerKey(c.get('commitHook.trailers.aiCreditsPerModel', false), false),
+    premiumRequests: false,
+    model: false,
   };
 }
 

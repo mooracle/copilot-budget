@@ -177,12 +177,12 @@ Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the 
 - Modify: `src/config.test.ts` (create if missing)
 - Modify: `package.json`
 
-- [ ] remove `PlanSetting` type + `getPlanSetting()` function
-- [ ] replace `TrailerConfig` with `{ estimatedCost: string | false; aiCredits: string | false; aiCreditsPerModel: string | false }`
-- [ ] update `getTrailerConfig()` to read `copilot-budget.commitHook.trailers.{estimatedCost,aiCredits,aiCreditsPerModel}` with defaults `"Copilot-Est-Cost"`, `"Copilot-AI-Credits"`, `false` (estimatedCost setting + trailer name kept identical to v0.5.3 for backwards compat; aiCredits default-on because it's the plan-invariant metric)
-- [ ] in `package.json` contributions: remove `copilot-budget.plan`, remove `commitHook.trailers.premiumRequests` and `commitHook.trailers.model`, **keep** `commitHook.trailers.estimatedCost` (same setting key, same default value `"Copilot-Est-Cost"`), add `commitHook.trailers.aiCredits` with default `"Copilot-AI-Credits"` and `commitHook.trailers.aiCreditsPerModel` with default `false`, both `type: ["string","boolean"]`
-- [ ] write tests for `getTrailerConfig` defaults, custom strings, false-to-disable, sanitization (the existing `sanitizeTrailerKey` stays)
-- [ ] run `npm test` — must pass before next task
+- [x] remove `PlanSetting` type + `getPlanSetting()` function *(planDetector.ts now reads `copilot-budget.plan` directly via a local helper since planDetector itself is deleted in Task 7)*
+- [x] replace `TrailerConfig` with `{ estimatedCost: string | false; aiCredits: string | false; aiCreditsPerModel: string | false }` *(legacy `premiumRequests`/`model` fields retained as deprecated `string | false` shims, always `false` at runtime, until Task 5 rewrites trackingFile.ts and its tests)*
+- [x] update `getTrailerConfig()` to read `copilot-budget.commitHook.trailers.{estimatedCost,aiCredits,aiCreditsPerModel}` with defaults `"Copilot-Est-Cost"`, `"Copilot-AI-Credits"`, `false` (estimatedCost setting + trailer name kept identical to v0.5.3 for backwards compat; aiCredits default-on because it's the plan-invariant metric)
+- [x] in `package.json` contributions: remove `copilot-budget.plan`, remove `commitHook.trailers.premiumRequests` and `commitHook.trailers.model`, **keep** `commitHook.trailers.estimatedCost` (same setting key, same default value `"Copilot-Est-Cost"`), add `commitHook.trailers.aiCredits` with default `"Copilot-AI-Credits"` and `commitHook.trailers.aiCreditsPerModel` with default `false`, both `type: ["string","boolean"]`
+- [x] write tests for `getTrailerConfig` defaults, custom strings, false-to-disable, sanitization (the existing `sanitizeTrailerKey` stays)
+- [x] run `npm test` — must pass before next task
 
 ### Task 5: Rewrite `trackingFile.ts` schema
 

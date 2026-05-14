@@ -64,6 +64,8 @@ beforeEach(() => {
     premiumRequests: 'Copilot-Premium-Requests',
     estimatedCost: 'Copilot-Est-Cost',
     model: false,
+    aiCredits: false,
+    aiCreditsPerModel: false,
   });
 });
 
@@ -176,6 +178,8 @@ describe('trackingFile', () => {
         premiumRequests: 'Copilot-Premium-Requests',
         estimatedCost: 'Copilot-Est-Cost',
         model: 'Copilot-Model',
+        aiCredits: false,
+        aiCreditsPerModel: false,
       });
 
       await writeTrackingFile(sampleStats);
@@ -193,6 +197,8 @@ describe('trackingFile', () => {
         premiumRequests: false,
         estimatedCost: false,
         model: false,
+        aiCredits: false,
+        aiCreditsPerModel: false,
       });
 
       await writeTrackingFile(sampleStats);
@@ -207,6 +213,8 @@ describe('trackingFile', () => {
         premiumRequests: 'AI-Requests',
         estimatedCost: 'AI-Cost',
         model: false,
+        aiCredits: false,
+        aiCreditsPerModel: false,
       });
 
       await writeTrackingFile(sampleStats);
@@ -224,6 +232,8 @@ describe('trackingFile', () => {
         premiumRequests: 'Copilot-Premium-Requests',
         estimatedCost: 'Copilot-Est-Cost',
         model: 'Copilot-Model',
+        aiCredits: false,
+        aiCreditsPerModel: false,
       });
 
       const unsafeStats: TrackingStats = {

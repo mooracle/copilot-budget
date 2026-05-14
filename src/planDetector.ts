@@ -1,6 +1,12 @@
 import * as vscode from 'vscode';
 import { log } from './logger';
-import { getPlanSetting } from './config';
+
+// Plan-setting config was removed from config.ts in v0.6 alongside the AIC refactor;
+// planDetector itself is scheduled for deletion in Task 7. Until then, read the
+// (now-undocumented) `copilot-budget.plan` setting directly so existing tests keep
+// passing without resurrecting `getPlanSetting`/`PlanSetting` in config.ts.
+const getPlanSetting = (): string =>
+  vscode.workspace.getConfiguration('copilot-budget').get<string>('plan', 'auto');
 
 export interface PlanInfo {
   planName: string;
