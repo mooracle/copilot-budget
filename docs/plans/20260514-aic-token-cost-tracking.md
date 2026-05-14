@@ -239,17 +239,17 @@ Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the 
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented:
-  - no premium-request math remains
-  - tokens read from `result.metadata` (verified via test fixture covering both presence and absence of cache fields)
-  - heuristic produces sane numbers for turn 1 vs turn 2+
-  - three trailer configs work independently
-  - tracking file round-trips
-  - status bar shows USD
-- [ ] run full test suite: `npm test`
-- [ ] run lint: `npm run lint`
-- [ ] run build: `npm run compile`
-- [ ] manual smoke in Extension Development Host (F5):
+- [x] verify all requirements from Overview are implemented:
+  - no premium-request math remains (grep for `premiumRequest|getPremiumMultiplier|PLAN_COSTS|estimateTokensFromText|PlanInfo|PlanSetting|planDetector|tokenEstimator` across `src/` returns nothing)
+  - tokens read from `result.metadata` (`sessionParser.ts:228-240` reads promptTokens/outputTokens/cacheReadTokens/cacheCreationTokens; covered by `sessionParser.test.ts`)
+  - heuristic produces sane numbers for turn 1 vs turn 2+ (`sessionParser.ts:234` — turn 1 = 0%, turn 2+ = 75%; covered by tests)
+  - three trailer configs work independently (`config.ts:18-20,33-35` — estimatedCost / aiCredits / aiCreditsPerModel; covered by `config.test.ts`)
+  - tracking file round-trips (`trackingFile.test.ts` round-trip test passes)
+  - status bar shows USD (`statusBar.ts:67` — `$X.XX Est` format)
+- [x] run full test suite: `npm test` — 253 passed, 13 suites
+- [x] run lint: `npm run lint` — clean
+- [x] run build: `npm run compile` — esbuild succeeded, dist/extension.js + sql-wasm.wasm + models-and-pricing.yml emitted
+- [x] manual smoke in Extension Development Host (F5): skipped — not automatable from this environment. Smoke checklist preserved in plan for Post-Completion verification:
   - Open a workspace with an active Copilot Chat session
   - Verify status bar shows `$X.XX Est`
   - Verify tooltip shows per-model breakdown
