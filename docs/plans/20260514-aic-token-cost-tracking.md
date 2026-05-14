@@ -190,21 +190,21 @@ Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the 
 - Modify: `src/trackingFile.ts`
 - Modify: `src/trackingFile.test.ts`
 
-- [ ] new write schema (in order): `SINCE=<iso>`, `INTERACTIONS=<n>`, `TOTAL_COST_USD=<x.xxxx>`, `TOTAL_AI_CREDITS=<x.xx>`, then for each model: `MODEL_<sanitized>_INPUT_TOKENS=<n>`, `_OUTPUT_TOKENS=<n>`, `_CACHE_READ_TOKENS=<n>`, `_CACHE_CREATION_TOKENS=<n>`, `_COST_USD=<x.xxxx>`
-- [ ] generate `TR_*` lines from trailer config:
+- [x] new write schema (in order): `SINCE=<iso>`, `INTERACTIONS=<n>`, `TOTAL_COST_USD=<x.xxxx>`, `TOTAL_AI_CREDITS=<x.xx>`, then for each model: `MODEL_<sanitized>_INPUT_TOKENS=<n>`, `_OUTPUT_TOKENS=<n>`, `_CACHE_READ_TOKENS=<n>`, `_CACHE_CREATION_TOKENS=<n>`, `_COST_USD=<x.xxxx>`
+- [x] generate `TR_*` lines from trailer config:
   - `TR_<estimatedCost>=$<x.xx>` if enabled — **includes the `$` prefix** matching the v0.5.3 output format byte-for-byte
   - `TR_<aiCredits>=<x.xx>` if enabled (credits, 2 dp, no prefix)
   - `TR_<aiCreditsPerModel>=<model1>=<credits1>,<model2>=<credits2>...` if enabled — model names come from `getDisplayName(id)` (the rate card's original `displayName`, e.g. `Claude Sonnet 4.6`); sorted by descending credits; commas separating entries; 2 dp credits. The `MODEL_<sanitized>_*` tracking keys still go through `sanitizeModelName` (POSIX hook grep needs identifier-safe keys), but the human-facing trailer uses the registry display name
-- [ ] `parseTrackingFileContent`: parse the new keys into `RestoredStats`; ignore unknown lines silently; require `SINCE` **and** at least one new-format key (e.g. `TOTAL_COST_USD=` or `TOTAL_AI_CREDITS=`) to consider the file valid. **Legacy v0.5.x files (which only carry `PREMIUM_REQUESTS=` and `MODEL <n> <i> <o> <p>` rows) return `null`** — the tracker treats them as no prior data and starts from scratch. PR and AIC are not convertible metrics; carrying any v0.5.x value into v0.6 would just be noise
-- [ ] write tests:
+- [x] `parseTrackingFileContent`: parse the new keys into `RestoredStats`; ignore unknown lines silently; require `SINCE` **and** at least one new-format key (e.g. `TOTAL_COST_USD=` or `TOTAL_AI_CREDITS=`) to consider the file valid. **Legacy v0.5.x files (which only carry `PREMIUM_REQUESTS=` and `MODEL <n> <i> <o> <p>` rows) return `null`** — the tracker treats them as no prior data and starts from scratch. PR and AIC are not convertible metrics; carrying any v0.5.x value into v0.6 would just be noise
+- [x] write tests:
   - round-trip (write then parse)
   - missing optional trailers
   - only some models
   - malformed lines ignored
   - MODEL_* with all four token fields
   - **legacy v0.5.x file**: input with `PREMIUM_REQUESTS=8.00`, `MODEL claude_sonnet_4_6 ... ... ...` rows → parser returns `null` (no restore)
-- [ ] CHANGELOG entry under 0.6.0: explicit "**Breaking**: upgrading from 0.5.x discards the previous tracking file. Counter starts fresh on first launch."
-- [ ] run `npm test` — must pass before next task
+- [x] CHANGELOG entry under 0.6.0: explicit "**Breaking**: upgrading from 0.5.x discards the previous tracking file. Counter starts fresh on first launch."
+- [x] run `npm test` — must pass before next task
 
 ### Task 6: Update `statusBar.ts` for USD display
 

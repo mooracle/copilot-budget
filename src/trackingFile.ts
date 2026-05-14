@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { TrackingStats, RestoredStats } from './tracker';
+import { TrackingStats, ModelStats, RestoredStats } from './tracker';
 import { resolveGitDir } from './gitDir';
 import { readTextFile, writeTextFile } from './fsUtils';
 import { getTrailerConfig } from './config';
 import { sanitizeModelName } from './utils';
+import { getDisplayName } from './tokenRates';
 
 async function getTrackingFileUri(): Promise<vscode.Uri | null> {
   const folders = vscode.workspace.workspaceFolders;
@@ -18,27 +19,36 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   if (!uri) return false;
 
   const lines: string[] = [
-    `INTERACTIONS=${stats.interactions}`,
-    `PREMIUM_REQUESTS=${stats.premiumRequests.toFixed(2)}`,
     `SINCE=${stats.since}`,
+    `INTERACTIONS=${stats.interactions}`,
+    `TOTAL_COST_USD=${stats.totalCostUsd.toFixed(4)}`,
+    `TOTAL_AI_CREDITS=${stats.totalAiCredits.toFixed(2)}`,
   ];
 
-  // Write TR_ lines for the commit hook
-  const trailers = getTrailerConfig();
-
   for (const [model, usage] of Object.entries(stats.models)) {
-    const safeModel = sanitizeModelName(model);
-    lines.push(`MODEL ${safeModel} ${usage.inputTokens} ${usage.outputTokens} ${usage.premiumRequests.toFixed(2)}`);
-    if (trailers.model) {
-      lines.push(`TR_${trailers.model}=${safeModel} ${usage.inputTokens}/${usage.outputTokens}/${usage.premiumRequests.toFixed(2)}`);
-    }
+    const safe = sanitizeModelName(model);
+    lines.push(`MODEL_${safe}_INPUT_TOKENS=${usage.inputTokens}`);
+    lines.push(`MODEL_${safe}_OUTPUT_TOKENS=${usage.outputTokens}`);
+    lines.push(`MODEL_${safe}_CACHE_READ_TOKENS=${usage.cacheReadTokens}`);
+    lines.push(`MODEL_${safe}_CACHE_CREATION_TOKENS=${usage.cacheCreationTokens}`);
+    lines.push(`MODEL_${safe}_COST_USD=${usage.costUsd.toFixed(4)}`);
   }
 
-  if (trailers.premiumRequests) {
-    lines.push(`TR_${trailers.premiumRequests}=${stats.premiumRequests.toFixed(2)}`);
-  }
+  const trailers = getTrailerConfig();
   if (trailers.estimatedCost) {
-    lines.push(`TR_${trailers.estimatedCost}=$${stats.estimatedCost.toFixed(2)}`);
+    lines.push(`TR_${trailers.estimatedCost}=$${stats.totalCostUsd.toFixed(2)}`);
+  }
+  if (trailers.aiCredits) {
+    lines.push(`TR_${trailers.aiCredits}=${stats.totalAiCredits.toFixed(2)}`);
+  }
+  if (trailers.aiCreditsPerModel) {
+    const entries = Object.entries(stats.models)
+      .map(([id, usage]) => ({ name: getDisplayName(id), credits: usage.costUsd * 100 }))
+      .sort((a, b) => b.credits - a.credits);
+    if (entries.length > 0) {
+      const value = entries.map((e) => `${e.name}=${e.credits.toFixed(2)}`).join(',');
+      lines.push(`TR_${trailers.aiCreditsPerModel}=${value}`);
+    }
   }
 
   try {
@@ -49,48 +59,80 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   }
 }
 
+const MODEL_KEY_PATTERN =
+  /^MODEL_(.+)_(INPUT_TOKENS|OUTPUT_TOKENS|CACHE_READ_TOKENS|CACHE_CREATION_TOKENS|COST_USD)$/;
+
+function emptyRestoredModel(): ModelStats {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    costUsd: 0,
+    premiumRequests: 0,
+  };
+}
+
 export function parseTrackingFileContent(content: string): RestoredStats | null {
   if (!content.trim()) return null;
 
   const lines = content.split('\n');
   let since: string | undefined;
   let interactions = 0;
+  let hasNewFormatKey = false;
   const models: RestoredStats['models'] = {};
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed || trimmed.startsWith('TR_')) continue;
 
-    if (trimmed.startsWith('SINCE=')) {
-      const val = trimmed.slice('SINCE='.length);
-      if (!isNaN(Date.parse(val))) {
-        since = val;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx <= 0) continue;
+    const key = trimmed.slice(0, eqIdx);
+    const value = trimmed.slice(eqIdx + 1);
+
+    if (key === 'SINCE') {
+      if (!isNaN(Date.parse(value))) {
+        since = value;
       }
-    } else if (trimmed.startsWith('INTERACTIONS=')) {
-      const val = parseInt(trimmed.slice('INTERACTIONS='.length), 10);
-      if (!isNaN(val)) interactions = val;
-    } else if (trimmed.startsWith('MODEL ')) {
-      const parts = trimmed.split(' ');
-      if (parts.length >= 5) {
-        const name = parts[1];
-        const inputTokens = parseInt(parts[2], 10);
-        const outputTokens = parseInt(parts[3], 10);
-        const premiumRequests = parseFloat(parts[4]);
-        if (!isNaN(inputTokens) && !isNaN(outputTokens) && !isNaN(premiumRequests)) {
-          models[name] = {
-            inputTokens,
-            outputTokens,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-            costUsd: 0,
-            premiumRequests,
-          };
-        }
+      continue;
+    }
+    if (key === 'INTERACTIONS') {
+      const n = parseInt(value, 10);
+      if (!isNaN(n)) interactions = n;
+      continue;
+    }
+    if (key === 'TOTAL_COST_USD' || key === 'TOTAL_AI_CREDITS') {
+      hasNewFormatKey = true;
+      continue;
+    }
+
+    const match = key.match(MODEL_KEY_PATTERN);
+    if (!match) continue;
+
+    hasNewFormatKey = true;
+    const modelName = match[1];
+    const field = match[2];
+    let entry = models[modelName];
+    if (!entry) {
+      entry = emptyRestoredModel();
+      models[modelName] = entry;
+    }
+    if (field === 'COST_USD') {
+      const v = parseFloat(value);
+      if (!isNaN(v)) entry.costUsd = v;
+    } else {
+      const v = parseInt(value, 10);
+      if (!isNaN(v)) {
+        if (field === 'INPUT_TOKENS') entry.inputTokens = v;
+        else if (field === 'OUTPUT_TOKENS') entry.outputTokens = v;
+        else if (field === 'CACHE_READ_TOKENS') entry.cacheReadTokens = v;
+        else if (field === 'CACHE_CREATION_TOKENS') entry.cacheCreationTokens = v;
       }
     }
   }
 
-  if (!since) return null;
+  if (!since || !hasNewFormatKey) return null;
 
   return { since, interactions, models };
 }

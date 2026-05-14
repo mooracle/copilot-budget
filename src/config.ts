@@ -18,10 +18,6 @@ export interface TrailerConfig {
   estimatedCost: string | false;
   aiCredits: string | false;
   aiCreditsPerModel: string | false;
-  /** @deprecated retained as a compile-only shim (always `false` from `getTrailerConfig`) until Task 5 rewrites trackingFile.ts. Typed wide so legacy test fixtures still compile. */
-  premiumRequests: string | false;
-  /** @deprecated retained as a compile-only shim (always `false` from `getTrailerConfig`) until Task 5 rewrites trackingFile.ts. Typed wide so legacy test fixtures still compile. */
-  model: string | false;
 }
 
 function sanitizeTrailerKey(value: unknown, fallback: string | false): string | false {
@@ -37,8 +33,6 @@ export function getTrailerConfig(): TrailerConfig {
     estimatedCost: sanitizeTrailerKey(c.get('commitHook.trailers.estimatedCost', 'Copilot-Est-Cost'), 'Copilot-Est-Cost'),
     aiCredits: sanitizeTrailerKey(c.get('commitHook.trailers.aiCredits', 'Copilot-AI-Credits'), 'Copilot-AI-Credits'),
     aiCreditsPerModel: sanitizeTrailerKey(c.get('commitHook.trailers.aiCreditsPerModel', false), false),
-    premiumRequests: false,
-    model: false,
   };
 }
 

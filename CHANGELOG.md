@@ -5,6 +5,30 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - Unreleased
+
+### Changed
+
+- Switched from premium-request math to GitHub Copilot's usage-based billing model (effective 2026-06-01). Cost is now derived from server-reported `result.metadata.promptTokens` / `outputTokens` per model against the published per-million-token rate card mirrored from `github/docs:data/tables/copilot/models-and-pricing.yml`. When per-message cache split is missing, a 75%-cached-after-turn-1 heuristic is applied.
+- Tracking file (`<gitdir>/copilot-budget`) format replaced. New schema records `SINCE`, `INTERACTIONS`, `TOTAL_COST_USD`, `TOTAL_AI_CREDITS`, and per-model `MODEL_<name>_{INPUT,OUTPUT,CACHE_READ,CACHE_CREATION}_TOKENS` plus `_COST_USD` lines.
+
+### Added
+
+- `Copilot-AI-Credits` git trailer (default-on) — the plan-invariant metric, computed as USD × 100.
+- `Copilot-AI-Credits-Models` git trailer (opt-in) — per-model AI Credits breakdown, sorted by descending credits, using display names from the upstream rate card.
+
+### Removed
+
+- Premium-request tracking and `Copilot-Premium-Requests` trailer (no compatibility shim).
+- Per-model `Copilot-Model` trailer.
+- `copilot-budget.plan` setting and GitHub Copilot plan auto-detection (no longer needed under usage-based billing).
+- Character-based token estimation (`tokenEstimators.json`); tokens are now read from the session JSONL metadata directly.
+
+### Breaking
+
+- Upgrading from 0.5.x discards the previous tracking file. The counter starts fresh on first launch; pre-0.6 tracking data (premium requests, $0.04/request cost) is not convertible to AIC and is intentionally not migrated.
+- The `commitHook.trailers.premiumRequests` and `commitHook.trailers.model` settings are removed. The `commitHook.trailers.estimatedCost` setting and `Copilot-Est-Cost` trailer name are retained byte-identical for backwards compatibility with existing CI/scripts.
+
 ## [0.5.3] - 2026-03-03
 
 ### Fixed

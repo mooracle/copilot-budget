@@ -4,16 +4,19 @@ import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
 import * as fsUtils from './fsUtils';
 import * as config from './config';
+import * as tokenRates from './tokenRates';
 
 jest.mock('./gitDir');
 jest.mock('./fsUtils');
 jest.mock('./config');
+jest.mock('./tokenRates');
 
 const mockVscode = vscode as any;
 const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
 const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
 const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
 const mockGetTrailerConfig = config.getTrailerConfig as jest.MockedFunction<typeof config.getTrailerConfig>;
+const mockGetDisplayName = tokenRates.getDisplayName as jest.MockedFunction<typeof tokenRates.getDisplayName>;
 
 function setupWorkspace(rootPath: string, gitDirPath?: string) {
   const rootUri = vscode.Uri.file(rootPath);
@@ -32,46 +35,49 @@ const sampleStats: TrackingStats = {
   since: '2024-01-15T10:30:00Z',
   lastUpdated: '2024-01-15T12:00:00Z',
   models: {
-    'gpt-4o': {
+    'gpt-4.1': {
       inputTokens: 1500,
       outputTokens: 800,
-      cacheReadTokens: 0,
+      cacheReadTokens: 200,
       cacheCreationTokens: 0,
-      costUsd: 0,
-      premiumRequests: 10,
+      costUsd: 0.0734,
+      premiumRequests: 0,
     },
-    'claude-sonnet-4': {
+    'claude-sonnet-4.6': {
       inputTokens: 500,
       outputTokens: 300,
-      cacheReadTokens: 0,
-      cacheCreationTokens: 0,
-      costUsd: 0,
-      premiumRequests: 5,
+      cacheReadTokens: 1200,
+      cacheCreationTokens: 100,
+      costUsd: 0.3497,
+      premiumRequests: 0,
     },
   },
-  totalTokens: 3100,
+  totalTokens: 4600,
   interactions: 15,
-  premiumRequests: 15,
-  estimatedCost: 0.60,
-  totalCostUsd: 0,
-  totalAiCredits: 0,
+  totalCostUsd: 0.4231,
+  totalAiCredits: 42.31,
+  premiumRequests: 0,
+  estimatedCost: 0,
 };
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockWriteTextFile.mockResolvedValue(undefined);
   mockGetTrailerConfig.mockReturnValue({
-    premiumRequests: 'Copilot-Premium-Requests',
     estimatedCost: 'Copilot-Est-Cost',
-    model: false,
-    aiCredits: false,
+    aiCredits: 'Copilot-AI-Credits',
     aiCreditsPerModel: false,
+  });
+  mockGetDisplayName.mockImplementation((id: string) => {
+    if (id === 'claude-sonnet-4.6') return 'Claude Sonnet 4.6';
+    if (id === 'gpt-4.1') return 'GPT-4.1';
+    return id;
   });
 });
 
 describe('trackingFile', () => {
   describe('writeTrackingFile', () => {
-    it('writes stats in key=value format', async () => {
+    it('writes stats in new v0.6 key=value schema', async () => {
       setupWorkspace('/project');
 
       const result = await writeTrackingFile(sampleStats);
@@ -81,13 +87,26 @@ describe('trackingFile', () => {
       const [uri, content] = mockWriteTextFile.mock.calls[0];
       expect(uri.path).toMatch(/\.git\/copilot-budget$/);
 
-      expect(content).toContain('INTERACTIONS=15');
-      expect(content).toContain('PREMIUM_REQUESTS=15.00');
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
-      expect(content).not.toContain('TOTAL_TOKENS');
+      expect(content).toContain('INTERACTIONS=15');
+      expect(content).toContain('TOTAL_COST_USD=0.4231');
+      expect(content).toContain('TOTAL_AI_CREDITS=42.31');
+
+      expect(content).toContain('MODEL_gpt-4.1_INPUT_TOKENS=1500');
+      expect(content).toContain('MODEL_gpt-4.1_OUTPUT_TOKENS=800');
+      expect(content).toContain('MODEL_gpt-4.1_CACHE_READ_TOKENS=200');
+      expect(content).toContain('MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0');
+      expect(content).toContain('MODEL_gpt-4.1_COST_USD=0.0734');
+
+      expect(content).toContain('MODEL_claude-sonnet-4.6_INPUT_TOKENS=500');
+      expect(content).toContain('MODEL_claude-sonnet-4.6_OUTPUT_TOKENS=300');
+      expect(content).toContain('MODEL_claude-sonnet-4.6_CACHE_READ_TOKENS=1200');
+      expect(content).toContain('MODEL_claude-sonnet-4.6_CACHE_CREATION_TOKENS=100');
+      expect(content).toContain('MODEL_claude-sonnet-4.6_COST_USD=0.3497');
+
+      expect(content).not.toContain('PREMIUM_REQUESTS');
       expect(content).not.toContain('ESTIMATED_COST');
-      expect(content).toContain('MODEL gpt-4o 1500 800 10.00');
-      expect(content).toContain('MODEL claude-sonnet-4 500 300 5.00');
+      expect(content).not.toContain('TOTAL_TOKENS=');
     });
 
     it('returns false when no workspace folder', async () => {
@@ -113,7 +132,7 @@ describe('trackingFile', () => {
       expect(result).toBe(true);
       const [uri, content] = mockWriteTextFile.mock.calls[0];
       expect(uri.path).toMatch(/\/repo\/\.git\/worktrees\/feature\/copilot-budget$/);
-      expect(content).toContain('PREMIUM_REQUESTS=15.00');
+      expect(content).toContain('TOTAL_COST_USD=0.4231');
     });
 
     it('returns false when write fails', async () => {
@@ -123,7 +142,7 @@ describe('trackingFile', () => {
       expect(await writeTrackingFile(sampleStats)).toBe(false);
     });
 
-    it('sanitizes model names with unsafe characters', async () => {
+    it('sanitizes model names with unsafe characters in MODEL_ keys', async () => {
       setupWorkspace('/project');
 
       const unsafeStats: TrackingStats = {
@@ -135,68 +154,109 @@ describe('trackingFile', () => {
             outputTokens: 50,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
-            costUsd: 0,
-            premiumRequests: 1,
+            costUsd: 0.01,
+            premiumRequests: 0,
           },
           'model$(cmd)': {
             inputTokens: 200,
             outputTokens: 100,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
-            costUsd: 0,
-            premiumRequests: 1,
-          },
-          'model`id`': {
-            inputTokens: 300,
-            outputTokens: 150,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-            costUsd: 0,
-            premiumRequests: 1,
+            costUsd: 0.02,
+            premiumRequests: 0,
           },
         },
-        totalTokens: 900,
-        interactions: 3,
-        premiumRequests: 3,
-        estimatedCost: 0.12,
-        totalCostUsd: 0,
-        totalAiCredits: 0,
+        totalTokens: 450,
+        interactions: 2,
+        totalCostUsd: 0.03,
+        totalAiCredits: 3.0,
+        premiumRequests: 0,
+        estimatedCost: 0,
       };
 
       await writeTrackingFile(unsafeStats);
       const content = mockWriteTextFile.mock.calls[0][1];
-      expect(content).toContain('MODEL model_with_spaces 100 50 1.00');
-      expect(content).toContain('MODEL model__cmd_ 200 100 1.00');
-      expect(content).toContain('MODEL model_id_ 300 150 1.00');
+      expect(content).toContain('MODEL_model_with_spaces_INPUT_TOKENS=100');
+      expect(content).toContain('MODEL_model__cmd__INPUT_TOKENS=200');
       expect(content).not.toMatch(/\$\(cmd\)/);
-      expect(content).not.toMatch(/`id`/);
     });
 
-    it('writes TR_ lines with configured trailer names', async () => {
+    it('writes default TR_ trailers (estimatedCost + aiCredits) with correct formatting', async () => {
+      setupWorkspace('/project');
+      await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).toContain('TR_Copilot-Est-Cost=$0.42');
+      expect(content).toContain('TR_Copilot-AI-Credits=42.31');
+      expect(content).not.toContain('TR_Copilot-AI-Credits-Models');
+    });
+
+    it('estimatedCost TR_ value uses $ prefix (byte-identical to v0.5.3)', async () => {
+      setupWorkspace('/project');
+      await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-Est-Cost='));
+      expect(line).toBe('TR_Copilot-Est-Cost=$0.42');
+    });
+
+    it('aiCredits TR_ value has no $ prefix and 2 decimals', async () => {
+      setupWorkspace('/project');
+      await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-AI-Credits='));
+      expect(line).toBe('TR_Copilot-AI-Credits=42.31');
+    });
+
+    it('writes aiCreditsPerModel TR_ line using display names, sorted descending', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
-        premiumRequests: 'Copilot-Premium-Requests',
         estimatedCost: 'Copilot-Est-Cost',
-        model: 'Copilot-Model',
-        aiCredits: false,
-        aiCreditsPerModel: false,
+        aiCredits: 'Copilot-AI-Credits',
+        aiCreditsPerModel: 'Copilot-AI-Credits-Models',
       });
 
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      expect(content).toContain('TR_Copilot-Premium-Requests=15.00');
-      expect(content).toContain('TR_Copilot-Est-Cost=$0.60');
-      expect(content).toContain('TR_Copilot-Model=gpt-4o 1500/800/10.00');
-      expect(content).toContain('TR_Copilot-Model=claude-sonnet-4 500/300/5.00');
+      // Claude Sonnet 4.6 has 0.3497 cost = 34.97 credits, GPT-4.1 has 0.0734 = 7.34 credits.
+      // Sorted descending by credits.
+      expect(content).toContain(
+        'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
+      );
     });
 
-    it('omits TR_ lines when trailer set to false', async () => {
+    it('omits aiCreditsPerModel TR_ line when no models tracked', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
-        premiumRequests: false,
+        estimatedCost: 'Copilot-Est-Cost',
+        aiCredits: 'Copilot-AI-Credits',
+        aiCreditsPerModel: 'Copilot-AI-Credits-Models',
+      });
+
+      const emptyStats: TrackingStats = {
+        since: '2024-01-15T10:30:00Z',
+        lastUpdated: '2024-01-15T10:30:00Z',
+        models: {},
+        totalTokens: 0,
+        interactions: 0,
+        totalCostUsd: 0,
+        totalAiCredits: 0,
+        premiumRequests: 0,
+        estimatedCost: 0,
+      };
+
+      await writeTrackingFile(emptyStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).not.toContain('TR_Copilot-AI-Credits-Models');
+    });
+
+    it('omits all TR_ lines when every trailer is false', async () => {
+      setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
         estimatedCost: false,
-        model: false,
         aiCredits: false,
         aiCreditsPerModel: false,
       });
@@ -207,61 +267,21 @@ describe('trackingFile', () => {
       expect(content).not.toContain('TR_');
     });
 
-    it('writes TR_ lines with custom trailer names', async () => {
+    it('honors custom trailer names', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
-        premiumRequests: 'AI-Requests',
         estimatedCost: 'AI-Cost',
-        model: false,
-        aiCredits: false,
-        aiCreditsPerModel: false,
+        aiCredits: 'AI-Credits',
+        aiCreditsPerModel: 'AI-Credits-Per-Model',
       });
 
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      expect(content).toContain('TR_AI-Requests=15.00');
-      expect(content).toContain('TR_AI-Cost=$0.60');
-      expect(content).not.toContain('TR_AI-Model');
-      expect(content).not.toContain('TR_Copilot-');
-    });
-
-    it('sanitizes model names in TR_ lines', async () => {
-      setupWorkspace('/project');
-      mockGetTrailerConfig.mockReturnValue({
-        premiumRequests: 'Copilot-Premium-Requests',
-        estimatedCost: 'Copilot-Est-Cost',
-        model: 'Copilot-Model',
-        aiCredits: false,
-        aiCreditsPerModel: false,
-      });
-
-      const unsafeStats: TrackingStats = {
-        since: '2024-01-15T10:30:00Z',
-        lastUpdated: '2024-01-15T12:00:00Z',
-        models: {
-          'model$(cmd)': {
-            inputTokens: 200,
-            outputTokens: 100,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-            costUsd: 0,
-            premiumRequests: 1,
-          },
-        },
-        totalTokens: 300,
-        interactions: 1,
-        premiumRequests: 1,
-        estimatedCost: 0.04,
-        totalCostUsd: 0,
-        totalAiCredits: 0,
-      };
-
-      await writeTrackingFile(unsafeStats);
-      const content = mockWriteTextFile.mock.calls[0][1];
-
-      expect(content).toContain('TR_Copilot-Model=model__cmd_ 200/100/1.00');
-      expect(content).not.toMatch(/\$\(cmd\)/);
+      expect(content).toContain('TR_AI-Cost=$0.42');
+      expect(content).toContain('TR_AI-Credits=42.31');
+      expect(content).toMatch(/TR_AI-Credits-Per-Model=/);
+      expect(content).not.toContain('Copilot-');
     });
 
     it('handles stats with no models', async () => {
@@ -273,30 +293,40 @@ describe('trackingFile', () => {
         models: {},
         totalTokens: 0,
         interactions: 0,
-        premiumRequests: 0,
-        estimatedCost: 0,
         totalCostUsd: 0,
         totalAiCredits: 0,
+        premiumRequests: 0,
+        estimatedCost: 0,
       };
 
       await writeTrackingFile(emptyStats);
       const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
       expect(content).toContain('INTERACTIONS=0');
-      expect(content).toContain('PREMIUM_REQUESTS=0.00');
-      expect(content).not.toContain('MODEL ');
+      expect(content).toContain('TOTAL_COST_USD=0.0000');
+      expect(content).toContain('TOTAL_AI_CREDITS=0.00');
+      expect(content).not.toMatch(/^MODEL_/m);
     });
   });
 
   describe('parseTrackingFileContent', () => {
-    it('parses a valid tracking file', () => {
+    it('parses a valid v0.6 tracking file', () => {
       const content = [
-        'TOTAL_TOKENS=3100',
-        'INTERACTIONS=15',
-        'PREMIUM_REQUESTS=15.00',
-        'ESTIMATED_COST=0.60',
         'SINCE=2024-01-15T10:30:00Z',
-        'MODEL gpt-4o 1500 800 10.00',
-        'MODEL claude-sonnet-4 500 300 5.00',
+        'INTERACTIONS=15',
+        'TOTAL_COST_USD=0.4231',
+        'TOTAL_AI_CREDITS=42.31',
+        'MODEL_gpt-4.1_INPUT_TOKENS=1500',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.0734',
+        'MODEL_claude-sonnet-4.6_INPUT_TOKENS=500',
+        'MODEL_claude-sonnet-4.6_OUTPUT_TOKENS=300',
+        'MODEL_claude-sonnet-4.6_CACHE_READ_TOKENS=1200',
+        'MODEL_claude-sonnet-4.6_CACHE_CREATION_TOKENS=100',
+        'MODEL_claude-sonnet-4.6_COST_USD=0.3497',
         '',
       ].join('\n');
 
@@ -305,21 +335,21 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe('2024-01-15T10:30:00Z');
       expect(result!.interactions).toBe(15);
-      expect(result!.models['gpt-4o']).toEqual({
+      expect(result!.models['gpt-4.1']).toEqual({
         inputTokens: 1500,
         outputTokens: 800,
-        cacheReadTokens: 0,
+        cacheReadTokens: 200,
         cacheCreationTokens: 0,
-        costUsd: 0,
-        premiumRequests: 10,
+        costUsd: 0.0734,
+        premiumRequests: 0,
       });
-      expect(result!.models['claude-sonnet-4']).toEqual({
+      expect(result!.models['claude-sonnet-4.6']).toEqual({
         inputTokens: 500,
         outputTokens: 300,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-        costUsd: 0,
-        premiumRequests: 5,
+        cacheReadTokens: 1200,
+        cacheCreationTokens: 100,
+        costUsd: 0.3497,
+        premiumRequests: 0,
       });
     });
 
@@ -331,18 +361,52 @@ describe('trackingFile', () => {
 
     it('returns null when SINCE is missing', () => {
       const content = [
-        'TOTAL_TOKENS=100',
         'INTERACTIONS=1',
-        'MODEL gpt-4o 50 50 1.00',
+        'TOTAL_COST_USD=0.10',
+        'MODEL_gpt-4.1_INPUT_TOKENS=50',
       ].join('\n');
 
       expect(parseTrackingFileContent(content)).toBeNull();
     });
 
-    it('handles file with no MODEL lines', () => {
+    it('returns null when SINCE is not a valid date', () => {
+      const content = [
+        'SINCE=not-a-date',
+        'TOTAL_COST_USD=0.10',
+        'MODEL_gpt-4.1_INPUT_TOKENS=100',
+      ].join('\n');
+
+      expect(parseTrackingFileContent(content)).toBeNull();
+    });
+
+    it('returns null when no new-format key is present (legacy v0.5.x file)', () => {
+      const legacyContent = [
+        'TOTAL_TOKENS=3100',
+        'INTERACTIONS=8',
+        'PREMIUM_REQUESTS=8.00',
+        'ESTIMATED_COST=0.32',
+        'SINCE=2024-01-15T10:30:00Z',
+        'MODEL claude_sonnet_4_6 1500 800 5.00',
+        'MODEL gpt_4o 500 300 3.00',
+        'TR_Copilot-Premium-Requests=8.00',
+        'TR_Copilot-Est-Cost=$0.32',
+        '',
+      ].join('\n');
+
+      expect(parseTrackingFileContent(legacyContent)).toBeNull();
+    });
+
+    it('returns null with SINCE only and no other new-format keys', () => {
+      expect(parseTrackingFileContent('SINCE=2024-01-15T10:30:00Z\n')).toBeNull();
+      expect(parseTrackingFileContent('SINCE=2024-01-15T10:30:00Z\nINTERACTIONS=5\n')).toBeNull();
+    });
+
+    it('accepts a file with SINCE + TOTAL_COST_USD and no MODEL_ lines', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=0',
+        'TOTAL_COST_USD=0.0000',
+        'TOTAL_AI_CREDITS=0.00',
       ].join('\n');
 
       const result = parseTrackingFileContent(content);
@@ -352,55 +416,85 @@ describe('trackingFile', () => {
       expect(result!.models).toEqual({});
     });
 
-    it('skips MODEL lines with invalid numbers', () => {
+    it('accepts a file with SINCE + MODEL_ lines but no TOTAL_ aggregates', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
-        'INTERACTIONS=5',
-        'MODEL good-model 100 200 3.00',
-        'MODEL bad-model abc def ghi',
-        'MODEL short-model 100',
+        'INTERACTIONS=2',
+        'MODEL_gpt-4.1_INPUT_TOKENS=100',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=50',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.01',
       ].join('\n');
 
       const result = parseTrackingFileContent(content);
       expect(result).not.toBeNull();
-      expect(Object.keys(result!.models)).toEqual(['good-model']);
+      expect(result!.models['gpt-4.1'].costUsd).toBe(0.01);
     });
 
-    it('returns null when SINCE is not a valid date', () => {
-      const content = [
-        'SINCE=not-a-date',
-        'INTERACTIONS=5',
-        'MODEL gpt-4o 100 200 3.00',
-      ].join('\n');
-
-      expect(parseTrackingFileContent(content)).toBeNull();
-    });
-
-    it('ignores TR_ lines (used by commit hook)', () => {
+    it('ignores TR_ lines', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=5',
-        'MODEL gpt-4o 100 200 3.00',
-        'TR_Copilot-Premium-Requests=3.00',
+        'TOTAL_COST_USD=0.12',
+        'TOTAL_AI_CREDITS=12.00',
+        'MODEL_gpt-4.1_INPUT_TOKENS=100',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=200',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.12',
         'TR_Copilot-Est-Cost=$0.12',
+        'TR_Copilot-AI-Credits=12.00',
         '',
       ].join('\n');
 
       const result = parseTrackingFileContent(content);
       expect(result).not.toBeNull();
-      expect(result!.since).toBe('2024-01-15T10:30:00Z');
       expect(result!.interactions).toBe(5);
-      expect(result!.models['gpt-4o']).toEqual({
-        inputTokens: 100,
-        outputTokens: 200,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-        costUsd: 0,
-        premiumRequests: 3,
-      });
+      expect(Object.keys(result!.models)).toEqual(['gpt-4.1']);
     });
 
-    it('roundtrips with writeTrackingFile output', async () => {
+    it('ignores unknown lines silently', () => {
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=3',
+        'TOTAL_COST_USD=0.10',
+        'TOTAL_AI_CREDITS=10.00',
+        'COMPLETELY_UNKNOWN=foo',
+        'random text with no equals',
+        '=missing-key',
+        'MODEL_gpt-4.1_INPUT_TOKENS=100',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=50',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.10',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+      expect(result).not.toBeNull();
+      expect(result!.models['gpt-4.1'].inputTokens).toBe(100);
+    });
+
+    it('skips MODEL_ lines with non-numeric values', () => {
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=1',
+        'TOTAL_COST_USD=0.05',
+        'MODEL_gpt-4.1_INPUT_TOKENS=100',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=not-a-number',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.05',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+      expect(result).not.toBeNull();
+      expect(result!.models['gpt-4.1'].inputTokens).toBe(100);
+      expect(result!.models['gpt-4.1'].outputTokens).toBe(0);
+      expect(result!.models['gpt-4.1'].costUsd).toBe(0.05);
+    });
+
+    it('roundtrips with writeTrackingFile output (models field preserved)', async () => {
       setupWorkspace('/project');
       await writeTrackingFile(sampleStats);
       const written = mockWriteTextFile.mock.calls[0][1];
@@ -409,18 +503,24 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe(sampleStats.since);
       expect(result!.interactions).toBe(sampleStats.interactions);
-      expect(result!.models['gpt-4o']).toEqual(sampleStats.models['gpt-4o']);
-      expect(result!.models['claude-sonnet-4']).toEqual(sampleStats.models['claude-sonnet-4']);
+      expect(result!.models['gpt-4.1']).toEqual(sampleStats.models['gpt-4.1']);
+      expect(result!.models['claude-sonnet-4.6']).toEqual(sampleStats.models['claude-sonnet-4.6']);
     });
   });
 
   describe('readTrackingFile', () => {
-    it('reads and parses the tracking file', async () => {
+    it('reads and parses a v0.6 tracking file', async () => {
       setupWorkspace('/project');
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=5',
-        'MODEL gpt-4o 100 200 3.00',
+        'TOTAL_COST_USD=0.10',
+        'TOTAL_AI_CREDITS=10.00',
+        'MODEL_gpt-4.1_INPUT_TOKENS=100',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=200',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.10',
         '',
       ].join('\n');
       mockReadTextFile.mockResolvedValue(content);
@@ -430,13 +530,13 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe('2024-01-15T10:30:00Z');
       expect(result!.interactions).toBe(5);
-      expect(result!.models['gpt-4o']).toEqual({
+      expect(result!.models['gpt-4.1']).toEqual({
         inputTokens: 100,
         outputTokens: 200,
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
-        costUsd: 0,
-        premiumRequests: 3,
+        costUsd: 0.10,
+        premiumRequests: 0,
       });
     });
 
@@ -459,9 +559,18 @@ describe('trackingFile', () => {
       expect(await readTrackingFile()).toBeNull();
     });
 
-    it('returns null for corrupt file missing SINCE', async () => {
+    it('returns null for legacy v0.5.x tracking file (no new-format key)', async () => {
       setupWorkspace('/project');
-      mockReadTextFile.mockResolvedValue('INTERACTIONS=5\nMODEL gpt-4o 100 200 3.00\n');
+      mockReadTextFile.mockResolvedValue(
+        [
+          'TOTAL_TOKENS=3100',
+          'INTERACTIONS=8',
+          'PREMIUM_REQUESTS=8.00',
+          'SINCE=2024-01-15T10:30:00Z',
+          'MODEL claude_sonnet_4_6 1500 800 5.00',
+          '',
+        ].join('\n'),
+      );
 
       expect(await readTrackingFile()).toBeNull();
     });
