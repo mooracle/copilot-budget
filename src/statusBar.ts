@@ -36,15 +36,14 @@ function buildTooltip(stats: TrackingStats): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
   md.appendMarkdown(
-    `**Total:** ${formatUsdLong(stats.totalCostUsd)} (${formatAic(stats.totalAiCredits)})\n\n`,
+    `**Total:** ${formatUsdLong(stats.totalAiCredits / 100)} (${formatAic(stats.totalAiCredits)})\n\n`,
   );
 
   const entries = Object.entries(stats.models);
   if (entries.length > 0) {
     for (const [model, usage] of entries) {
-      const aic = usage.costUsd * 100;
       md.appendMarkdown(
-        `- ${getDisplayName(model)}: ${formatUsdLong(usage.costUsd)} (${formatAic(aic)})\n`,
+        `- ${getDisplayName(model)}: ${formatUsdLong(usage.costAic / 100)} (${formatAic(usage.costAic)})\n`,
       );
     }
     md.appendMarkdown('\n');
@@ -64,7 +63,7 @@ export function createStatusBar(
   item.command = 'copilot-budget.showStats';
 
   function updateText(stats: TrackingStats): void {
-    item.text = `$(credit-card) ${formatUsdShort(stats.totalCostUsd)} Est`;
+    item.text = `$(credit-card) ${formatUsdShort(stats.totalAiCredits / 100)} Est`;
     item.tooltip = buildTooltip(stats);
   }
 
@@ -87,7 +86,7 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
   const items: vscode.QuickPickItem[] = [];
 
   items.push({
-    label: `$(credit-card) Total: ${formatUsdLong(stats.totalCostUsd)}`,
+    label: `$(credit-card) Total: ${formatUsdLong(stats.totalAiCredits / 100)}`,
     description: formatAic(stats.totalAiCredits),
   });
 
@@ -100,11 +99,10 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
   if (models.length > 0) {
     items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
     for (const [model, usage] of models) {
-      const aic = usage.costUsd * 100;
       const totalTokens = totalModelTokens(usage);
       items.push({
         label: `$(hubot) ${getDisplayName(model)}`,
-        description: `${formatUsdLong(usage.costUsd)} (${formatAic(aic)})`,
+        description: `${formatUsdLong(usage.costAic / 100)} (${formatAic(usage.costAic)})`,
         detail:
           `Tokens: ${formatNumber(totalTokens)} ` +
           `(in: ${formatNumber(usage.inputTokens)} / ` +

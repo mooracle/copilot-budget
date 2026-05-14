@@ -99,7 +99,7 @@ beforeEach(() => {
   mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);
   mockDiscovery.discoverVscdbFiles.mockReturnValue([]);
   mockTokenRates.computeCost.mockImplementation((modelId, tokens) =>
-    fixtureCost(modelId, tokens),
+    fixtureCost(modelId, tokens) * 100,
   );
 });
 
@@ -113,7 +113,6 @@ describe('Tracker — initial state', () => {
     const stats = tracker.getStats();
     expect(stats.totalTokens).toBe(0);
     expect(stats.interactions).toBe(0);
-    expect(stats.totalCostUsd).toBe(0);
     expect(stats.totalAiCredits).toBe(0);
     expect(stats.models).toEqual({});
     expect(stats.since).toBeDefined();
@@ -149,7 +148,7 @@ describe('Tracker — baseline computation', () => {
     const stats = tracker.getStats();
 
     expect(stats.totalTokens).toBe(0);
-    expect(stats.totalCostUsd).toBe(0);
+    expect(stats.totalAiCredits).toBe(0);
     expect(stats.interactions).toBe(0);
     expect(stats.models).toEqual({});
     tracker.dispose();
@@ -228,8 +227,7 @@ describe('Tracker — delta computation', () => {
       cacheRead: 600,
       cacheCreation: 40,
     });
-    expect(stats.models['claude-sonnet-4.6'].costUsd).toBeCloseTo(expectedCost, 10);
-    expect(stats.totalCostUsd).toBeCloseTo(expectedCost, 10);
+    expect(stats.models['claude-sonnet-4.6'].costAic).toBeCloseTo(expectedCost * 100, 8);
     expect(stats.totalAiCredits).toBeCloseTo(expectedCost * 100, 8);
     tracker.dispose();
   });
@@ -259,7 +257,7 @@ describe('Tracker — delta computation', () => {
     tracker.dispose();
   });
 
-  it('fires listener when totalCostUsd changes', () => {
+  it('fires listener when totalAiCredits changes', () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -298,7 +296,7 @@ describe('Tracker — delta computation', () => {
     tracker.update();
     expect(listener).toHaveBeenCalledTimes(1);
     const stats: TrackingStats = listener.mock.calls[0][0];
-    expect(stats.totalCostUsd).toBeCloseTo(2.0, 6);
+    expect(stats.totalAiCredits).toBeCloseTo(200, 6);
     tracker.dispose();
   });
 });
@@ -338,7 +336,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
       },
     ]);
     tracker.update();
-    expect(tracker.getStats().models['gpt-4.1'].costUsd).toBeCloseTo(2.0, 6);
+    expect(tracker.getStats().models['gpt-4.1'].costAic).toBeCloseTo(200, 6);
     tracker.dispose();
   });
 
@@ -373,8 +371,8 @@ describe('Tracker — published-rate billing for "included" models', () => {
       },
     ]);
     tracker.update();
-    expect(tracker.getStats().models['gpt-5-mini'].costUsd).toBeCloseTo(
-      0.25 + 2.0,
+    expect(tracker.getStats().models['gpt-5-mini'].costAic).toBeCloseTo(
+      (0.25 + 2.0) * 100,
       6,
     );
     tracker.dispose();
@@ -433,9 +431,9 @@ describe('Tracker — mixed-model session', () => {
       cacheRead: 0,
       cacheCreation: 0,
     });
-    expect(stats.models['claude-sonnet-4.6'].costUsd).toBeCloseTo(expectedClaude, 8);
-    expect(stats.models['gpt-4.1'].costUsd).toBeCloseTo(expectedGpt, 8);
-    expect(stats.totalCostUsd).toBeCloseTo(expectedClaude + expectedGpt, 8);
+    expect(stats.models['claude-sonnet-4.6'].costAic).toBeCloseTo(expectedClaude * 100, 8);
+    expect(stats.models['gpt-4.1'].costAic).toBeCloseTo(expectedGpt * 100, 8);
+    expect(stats.totalAiCredits).toBeCloseTo((expectedClaude + expectedGpt) * 100, 8);
     tracker.dispose();
   });
 });
@@ -499,7 +497,7 @@ describe('Tracker — restored stats merge', () => {
           outputTokens: 50,
           cacheReadTokens: 200,
           cacheCreationTokens: 10,
-          costUsd: 0.005,
+          costAic: 0.5,
         },
       },
     });
@@ -537,11 +535,11 @@ describe('Tracker — restored stats merge', () => {
     expect(stats.interactions).toBe(9); // 7 restored + 2 delta
     expect(stats.models['claude-sonnet-4.6'].inputTokens).toBe(150); // 100 + 50
     expect(stats.models['claude-sonnet-4.6'].cacheReadTokens).toBe(300);
-    expect(stats.models['claude-sonnet-4.6'].costUsd).toBeCloseTo(
-      0.005 + sessionDeltaCost,
-      9,
+    expect(stats.models['claude-sonnet-4.6'].costAic).toBeCloseTo(
+      0.5 + sessionDeltaCost * 100,
+      8,
     );
-    expect(stats.totalCostUsd).toBeCloseTo(0.005 + sessionDeltaCost, 9);
+    expect(stats.totalAiCredits).toBeCloseTo(0.5 + sessionDeltaCost * 100, 8);
     tracker.dispose();
   });
 
@@ -555,15 +553,15 @@ describe('Tracker — restored stats merge', () => {
         'gpt-4.1': {
           ...emptyTokens(),
           inputTokens: 1000,
-          costUsd: 0.002,
+          costAic: 0.2,
         } as ModelStats,
       },
     });
     tracker.initialize();
-    expect(tracker.getStats().totalCostUsd).toBeCloseTo(0.002, 6);
+    expect(tracker.getStats().totalAiCredits).toBeCloseTo(0.2, 6);
 
     tracker.reset();
-    expect(tracker.getStats().totalCostUsd).toBe(0);
+    expect(tracker.getStats().totalAiCredits).toBe(0);
     expect(tracker.getStats().interactions).toBe(0);
     tracker.dispose();
   });
@@ -670,7 +668,7 @@ describe('Tracker — restored stats merge', () => {
     const stats = tracker.getStats();
     expect(stats.totalTokens).toBe(0);
     expect(stats.interactions).toBe(0);
-    expect(stats.totalCostUsd).toBe(0);
+    expect(stats.totalAiCredits).toBe(0);
     tracker.dispose();
   });
 
@@ -684,15 +682,15 @@ describe('Tracker — restored stats merge', () => {
         'gpt-4.1': {
           ...emptyTokens(),
           inputTokens: 1000,
-          costUsd: 0.002,
+          costAic: 0.2,
         } as ModelStats,
       },
     });
     tracker.initialize();
-    expect(tracker.getStats().totalCostUsd).toBeCloseTo(0.002, 6);
+    expect(tracker.getStats().totalAiCredits).toBeCloseTo(0.2, 6);
 
     tracker.consume();
-    expect(tracker.getStats().totalCostUsd).toBe(0);
+    expect(tracker.getStats().totalAiCredits).toBe(0);
     expect(tracker.getStats().interactions).toBe(0);
     tracker.dispose();
   });
@@ -895,7 +893,7 @@ describe('Tracker — vscdb integration', () => {
     tracker.update();
     const stats = tracker.getStats();
     expect(stats.totalTokens).toBe(250 - 100 + (120 - 50));
-    expect(stats.models['claude-sonnet-4.6'].costUsd).toBeGreaterThan(0);
+    expect(stats.models['claude-sonnet-4.6'].costAic).toBeGreaterThan(0);
     tracker.dispose();
   });
 });

@@ -46,19 +46,18 @@ const sampleStats: TrackingStats = {
       outputTokens: 800,
       cacheReadTokens: 200,
       cacheCreationTokens: 0,
-      costUsd: 0.0734,
+      costAic: 7.34,
     },
     'claude-sonnet-4.6': {
       inputTokens: 500,
       outputTokens: 300,
       cacheReadTokens: 1200,
       cacheCreationTokens: 100,
-      costUsd: 0.3497,
+      costAic: 34.97,
     },
   },
   totalTokens: 4600,
   interactions: 15,
-  totalCostUsd: 0.4231,
   totalAiCredits: 42.31,
 };
 
@@ -156,19 +155,18 @@ describe('trackingFile', () => {
             outputTokens: 50,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
-            costUsd: 0.01,
+            costAic: 1.0,
           },
           'model$(cmd)': {
             inputTokens: 200,
             outputTokens: 100,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
-            costUsd: 0.02,
+            costAic: 2.0,
           },
         },
         totalTokens: 450,
         interactions: 2,
-        totalCostUsd: 0.03,
         totalAiCredits: 3.0,
       };
 
@@ -239,7 +237,6 @@ describe('trackingFile', () => {
         models: {},
         totalTokens: 0,
         interactions: 0,
-        totalCostUsd: 0,
         totalAiCredits: 0,
       };
 
@@ -289,7 +286,6 @@ describe('trackingFile', () => {
         models: {},
         totalTokens: 0,
         interactions: 0,
-        totalCostUsd: 0,
         totalAiCredits: 0,
       };
 
@@ -303,7 +299,7 @@ describe('trackingFile', () => {
       expect(content).not.toMatch(/^MODEL_/m);
     });
 
-    it('omits TR_ trailer lines when totalCostUsd is zero', async () => {
+    it('omits TR_ trailer lines when totalAiCredits is zero', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -317,7 +313,6 @@ describe('trackingFile', () => {
         models: {},
         totalTokens: 0,
         interactions: 0,
-        totalCostUsd: 0,
         totalAiCredits: 0,
       };
 
@@ -353,20 +348,20 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe('2024-01-15T10:30:00Z');
       expect(result!.interactions).toBe(15);
-      expect(result!.models['gpt-4.1']).toEqual({
+      expect(result!.models['gpt-4.1']).toMatchObject({
         inputTokens: 1500,
         outputTokens: 800,
         cacheReadTokens: 200,
         cacheCreationTokens: 0,
-        costUsd: 0.0734,
       });
-      expect(result!.models['claude-sonnet-4.6']).toEqual({
+      expect(result!.models['gpt-4.1'].costAic).toBeCloseTo(7.34, 8);
+      expect(result!.models['claude-sonnet-4.6']).toMatchObject({
         inputTokens: 500,
         outputTokens: 300,
         cacheReadTokens: 1200,
         cacheCreationTokens: 100,
-        costUsd: 0.3497,
       });
+      expect(result!.models['claude-sonnet-4.6'].costAic).toBeCloseTo(34.97, 8);
     });
 
     it('returns null for empty content', () => {
@@ -445,7 +440,7 @@ describe('trackingFile', () => {
 
       const result = parseTrackingFileContent(content);
       expect(result).not.toBeNull();
-      expect(result!.models['gpt-4.1'].costUsd).toBe(0.01);
+      expect(result!.models['gpt-4.1'].costAic).toBe(1);
     });
 
     it('ignores TR_ lines', () => {
@@ -507,7 +502,7 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.models['gpt-4.1'].inputTokens).toBe(100);
       expect(result!.models['gpt-4.1'].outputTokens).toBe(0);
-      expect(result!.models['gpt-4.1'].costUsd).toBe(0.05);
+      expect(result!.models['gpt-4.1'].costAic).toBe(5);
     });
 
     it('roundtrips with writeTrackingFile output (models field preserved)', async () => {
@@ -519,8 +514,14 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe(sampleStats.since);
       expect(result!.interactions).toBe(sampleStats.interactions);
-      expect(result!.models['gpt-4.1']).toEqual(sampleStats.models['gpt-4.1']);
-      expect(result!.models['claude-sonnet-4.6']).toEqual(sampleStats.models['claude-sonnet-4.6']);
+      const { costAic: gptCost, ...gptRest } = result!.models['gpt-4.1'];
+      const { costAic: gptExpectedCost, ...gptExpectedRest } = sampleStats.models['gpt-4.1'];
+      expect(gptRest).toEqual(gptExpectedRest);
+      expect(gptCost).toBeCloseTo(gptExpectedCost, 8);
+      const { costAic: claudeCost, ...claudeRest } = result!.models['claude-sonnet-4.6'];
+      const { costAic: claudeExpectedCost, ...claudeExpectedRest } = sampleStats.models['claude-sonnet-4.6'];
+      expect(claudeRest).toEqual(claudeExpectedRest);
+      expect(claudeCost).toBeCloseTo(claudeExpectedCost, 8);
     });
 
     it('preserves sub-cent per-model costs through a write/parse round-trip', async () => {
@@ -538,12 +539,11 @@ describe('trackingFile', () => {
             outputTokens: 5,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
-            costUsd: 0.00002,
+            costAic: 0.002,
           },
         },
         totalTokens: 15,
         interactions: 1,
-        totalCostUsd: 0.00002,
         totalAiCredits: 0.002,
       };
 
@@ -552,7 +552,7 @@ describe('trackingFile', () => {
       const result = parseTrackingFileContent(written);
 
       expect(result).not.toBeNull();
-      expect(result!.models['gpt-4.1'].costUsd).toBeCloseTo(0.00002, 10);
+      expect(result!.models['gpt-4.1'].costAic).toBeCloseTo(0.002, 8);
     });
   });
 
@@ -584,7 +584,7 @@ describe('trackingFile', () => {
         outputTokens: 200,
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
-        costUsd: 0.10,
+        costAic: 10,
       });
     });
 

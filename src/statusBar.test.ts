@@ -20,19 +20,18 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
         outputTokens: 800,
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
-        costUsd: 0.0094,
+        costAic: 0.94,
       },
       'claude-sonnet-4.6': {
         inputTokens: 500,
         outputTokens: 300,
         cacheReadTokens: 1200,
         cacheCreationTokens: 0,
-        costUsd: 0.00786,
+        costAic: 0.786,
       },
     },
     totalTokens: 4300,
     interactions: 15,
-    totalCostUsd: 0.01726,
     totalAiCredits: 1.726,
     ...overrides,
   };
@@ -108,7 +107,7 @@ describe('statusBar', () => {
 
     it('shows $0.00 for empty stats', () => {
       const { tracker } = createMockTracker(
-        makeStats({ totalCostUsd: 0, totalAiCredits: 0, models: {} }),
+        makeStats({ totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
@@ -160,13 +159,13 @@ describe('statusBar', () => {
 
     it('updates text and tooltip when stats change', () => {
       const { tracker, fireStatsChanged } = createMockTracker(
-        makeStats({ totalCostUsd: 0, totalAiCredits: 0, models: {} }),
+        makeStats({ totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
       expect(createdItem.text).toContain('$0.00');
 
-      fireStatsChanged(makeStats({ totalCostUsd: 1.234, totalAiCredits: 123.4, models: {} }));
+      fireStatsChanged(makeStats({ totalAiCredits: 123.4, models: {} }));
 
       expect(createdItem.text).toContain('$1.23');
       expect(createdItem.text).toContain('Est');
@@ -269,7 +268,6 @@ describe('statusBar', () => {
           models: {},
           totalTokens: 0,
           interactions: 0,
-          totalCostUsd: 0,
           totalAiCredits: 0,
         }),
       );

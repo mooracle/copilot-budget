@@ -33,7 +33,7 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   const lines: string[] = [
     `SINCE=${stats.since}`,
     `INTERACTIONS=${stats.interactions}`,
-    `TOTAL_COST_USD=${stats.totalCostUsd.toFixed(4)}`,
+    `TOTAL_COST_USD=${(stats.totalAiCredits / 100).toFixed(4)}`,
     `TOTAL_AI_CREDITS=${stats.totalAiCredits.toFixed(2)}`,
   ];
 
@@ -47,23 +47,23 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
     // on restore, totals are rebuilt by summing these values, and 4-decimal
     // rounding would zero out tiny entries (e.g. a handful of input tokens
     // against a $2/M rate ≈ $0.00002).
-    lines.push(`MODEL_${safe}_COST_USD=${usage.costUsd.toFixed(8)}`);
+    lines.push(`MODEL_${safe}_COST_USD=${(usage.costAic / 100).toFixed(8)}`);
   }
 
   // Only emit TR_ lines when there is real cost to report. The hook is
   // presence-gated on TR_ lines, so writing zero-valued trailers would
   // append "Copilot-Est-Cost: $0.00" to every commit on idle sessions.
-  if (stats.totalCostUsd > 0) {
+  if (stats.totalAiCredits > 0) {
     const trailers = getTrailerConfig();
     if (trailers.estimatedCost) {
-      lines.push(`TR_${trailers.estimatedCost}=$${stats.totalCostUsd.toFixed(2)}`);
+      lines.push(`TR_${trailers.estimatedCost}=$${(stats.totalAiCredits / 100).toFixed(2)}`);
     }
     if (trailers.aiCredits) {
       lines.push(`TR_${trailers.aiCredits}=${stats.totalAiCredits.toFixed(2)}`);
     }
     if (trailers.aiCreditsPerModel) {
       const entries = Object.entries(stats.models)
-        .map(([id, usage]) => ({ name: getDisplayName(id), credits: usage.costUsd * 100 }))
+        .map(([id, usage]) => ({ name: getDisplayName(id), credits: usage.costAic }))
         .sort((a, b) => b.credits - a.credits);
       if (entries.length > 0) {
         const value = entries.map((e) => `${e.name}=${e.credits.toFixed(2)}`).join(',');
@@ -89,7 +89,7 @@ function emptyRestoredModel(): ModelStats {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
-    costUsd: 0,
+    costAic: 0,
   };
 }
 
@@ -140,7 +140,7 @@ export function parseTrackingFileContent(content: string): RestoredStats | null 
     }
     if (field === 'COST_USD') {
       const v = parseFloat(value);
-      if (!isNaN(v)) entry.costUsd = v;
+      if (!isNaN(v)) entry.costAic = v * 100;
     } else {
       const v = parseInt(value, 10);
       if (!isNaN(v)) {

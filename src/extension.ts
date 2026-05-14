@@ -186,7 +186,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ch.appendLine('Current stats:');
         ch.appendLine(`  Total tokens: ${stats.totalTokens}`);
         ch.appendLine(`  Interactions: ${stats.interactions}`);
-        ch.appendLine(`  Total cost: $${stats.totalCostUsd.toFixed(4)}`);
+        ch.appendLine(`  Total cost: $${(stats.totalAiCredits / 100).toFixed(4)}`);
         ch.appendLine(`  AI Credits: ${stats.totalAiCredits.toFixed(2)}`);
         ch.appendLine(`  Since: ${stats.since}`);
         ch.appendLine(`  Last updated: ${stats.lastUpdated}`);

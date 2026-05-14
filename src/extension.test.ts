@@ -90,12 +90,11 @@ const SAMPLE_STATS = {
       outputTokens: 200,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
-      costUsd: 0.01,
+      costAic: 1.0,
     },
   },
   totalTokens: 300,
   interactions: 5,
-  totalCostUsd: 0.01,
   totalAiCredits: 1.0,
 };
 
@@ -481,7 +480,7 @@ describe('extension', () => {
             outputTokens: 200,
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
-            costUsd: 0,
+            costAic: 0,
           },
         },
       };

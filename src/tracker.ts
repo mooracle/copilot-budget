@@ -10,7 +10,7 @@ export interface ModelStats {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
-  costUsd: number;
+  costAic: number;
 }
 
 export interface TrackingStats {
@@ -19,7 +19,6 @@ export interface TrackingStats {
   models: { [model: string]: ModelStats };
   totalTokens: number;
   interactions: number;
-  totalCostUsd: number;
   totalAiCredits: number;
 }
 
@@ -50,7 +49,7 @@ function emptyModelTokens() {
 function emptyModelStats(): ModelStats {
   return {
     ...emptyModelTokens(),
-    costUsd: 0,
+    costAic: 0,
   };
 }
 
@@ -91,7 +90,7 @@ function accumulateModelStats(
   entry.outputTokens += contrib.outputTokens;
   entry.cacheReadTokens += contrib.cacheReadTokens;
   entry.cacheCreationTokens += contrib.cacheCreationTokens;
-  entry.costUsd += contrib.costUsd;
+  entry.costAic += contrib.costAic;
 }
 
 type Snapshot = {
@@ -300,7 +299,7 @@ export class Tracker {
         continue;
       }
 
-      const costUsd = computeCost(model, {
+      const costAic = computeCost(model, {
         input: deltaInput,
         output: deltaOutput,
         cacheRead: deltaCacheRead,
@@ -312,7 +311,7 @@ export class Tracker {
         outputTokens: deltaOutput,
         cacheReadTokens: deltaCacheRead,
         cacheCreationTokens: deltaCacheCreation,
-        costUsd,
+        costAic,
       });
     }
 
@@ -323,11 +322,11 @@ export class Tracker {
     }
 
     let totalTokens = 0;
-    let totalCostUsd = 0;
+    let totalAiCredits = 0;
     for (const m of Object.values(deltaModels)) {
       totalTokens +=
         m.inputTokens + m.outputTokens + m.cacheReadTokens + m.cacheCreationTokens;
-      totalCostUsd += m.costUsd;
+      totalAiCredits += m.costAic;
     }
 
     const interactions =
@@ -340,8 +339,7 @@ export class Tracker {
       models: deltaModels,
       totalTokens,
       interactions,
-      totalCostUsd,
-      totalAiCredits: totalCostUsd * 100,
+      totalAiCredits,
     };
   }
 
@@ -370,7 +368,7 @@ export class Tracker {
       !this.lastStats ||
       stats.totalTokens !== this.lastStats.totalTokens ||
       stats.interactions !== this.lastStats.interactions ||
-      stats.totalCostUsd !== this.lastStats.totalCostUsd
+      stats.totalAiCredits !== this.lastStats.totalAiCredits
     ) {
       this.lastStats = stats;
       this.notifyListeners(stats);
@@ -427,7 +425,6 @@ export class Tracker {
         models: {},
         totalTokens: 0,
         interactions: 0,
-        totalCostUsd: 0,
         totalAiCredits: 0,
       };
     }
