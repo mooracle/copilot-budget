@@ -35,9 +35,16 @@ describe('config', () => {
   describe('getTrailerConfig', () => {
     it('returns defaults when no overrides set', () => {
       const config = getTrailerConfig();
-      expect(config.estimatedCost).toBe('Copilot-Est-Cost');
+      // estimatedCost is opt-in: AI Credits is the primary trailer.
+      expect(config.estimatedCost).toBe(false);
       expect(config.aiCredits).toBe('Copilot-AI-Credits');
       expect(config.aiCreditsPerModel).toBe(false);
+    });
+
+    it('returns the configured trailer key when estimatedCost is explicitly enabled', () => {
+      __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = 'Copilot-Est-Cost';
+      const config = getTrailerConfig();
+      expect(config.estimatedCost).toBe('Copilot-Est-Cost');
     });
 
     it('returns custom trailer names', () => {
@@ -60,13 +67,14 @@ describe('config', () => {
       expect(config.aiCredits).toBe(false);
     });
 
-    it('treats boolean true as default string value', () => {
+    it('treats boolean true as the default value (string for aiCredits, false for opt-in trailers)', () => {
       __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = true;
       __configStore['copilot-budget.commitHook.trailers.aiCredits'] = true;
       __configStore['copilot-budget.commitHook.trailers.aiCreditsPerModel'] = true;
 
       const config = getTrailerConfig();
-      expect(config.estimatedCost).toBe('Copilot-Est-Cost');
+      // estimatedCost default is false (opt-in), so boolean-true falls back to false
+      expect(config.estimatedCost).toBe(false);
       expect(config.aiCredits).toBe('Copilot-AI-Credits');
       // aiCreditsPerModel default is false, so boolean-true falls back to false
       expect(config.aiCreditsPerModel).toBe(false);

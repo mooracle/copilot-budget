@@ -73,8 +73,9 @@ const sampleStats: TrackingStats = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockWriteTextFile.mockResolvedValue(undefined);
+  // Defaults match getTrailerConfig() defaults: estimatedCost is opt-in (off).
   mockGetTrailerConfig.mockReturnValue({
-    estimatedCost: 'Copilot-Est-Cost',
+    estimatedCost: false,
     aiCredits: 'Copilot-AI-Credits',
     aiCreditsPerModel: false,
   });
@@ -187,22 +188,29 @@ describe('trackingFile', () => {
       expect(content).not.toMatch(/\$\(cmd\)/);
     });
 
-    it('writes default TR_ trailers (estimatedCost + aiCredits) with correct formatting', async () => {
+    it('writes only the aiCredits TR_ trailer under default config (estimatedCost is opt-in)', async () => {
       setupWorkspace('/project');
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      expect(content).toContain('TR_Copilot-Est-Cost=$0.42');
       expect(content).toContain('TR_Copilot-AI-Credits=42.31');
+      expect(content).not.toContain('TR_Copilot-Est-Cost');
       expect(content).not.toContain('TR_Copilot-AI-Credits-Models');
     });
 
-    it('estimatedCost TR_ value uses $ prefix (byte-identical to v0.5.3)', async () => {
+    it('emits Copilot-Est-Cost TR_ line with $ prefix only when estimatedCost is explicitly enabled', async () => {
       setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
+        estimatedCost: 'Copilot-Est-Cost',
+        aiCredits: 'Copilot-AI-Credits',
+        aiCreditsPerModel: false,
+      });
+
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
       const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-Est-Cost='));
+      // USD is derived inline as totalAiCredits / 100 at trailer-write time (42.31 → $0.42).
       expect(line).toBe('TR_Copilot-Est-Cost=$0.42');
     });
 

@@ -82,8 +82,8 @@
             "string",
             "boolean"
           ],
-          "default": "Copilot-Est-Cost",
-          "markdownDescription": "Git trailer key for estimated USD cost. Set to `false` to disable."
+          "default": false,
+          "markdownDescription": "Opt-in git trailer key for estimated USD cost (e.g. `\"Copilot-Est-Cost\"`). Disabled by default; enable for users who want USD in commit history. AI Credits is the primary unit."
         },
         "copilot-budget.commitHook.trailers.aiCredits": {
           "type": [

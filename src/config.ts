@@ -30,7 +30,7 @@ function sanitizeTrailerKey(value: unknown, fallback: string | false): string | 
 export function getTrailerConfig(): TrailerConfig {
   const c = cfg();
   return {
-    estimatedCost: sanitizeTrailerKey(c.get('commitHook.trailers.estimatedCost', 'Copilot-Est-Cost'), 'Copilot-Est-Cost'),
+    estimatedCost: sanitizeTrailerKey(c.get('commitHook.trailers.estimatedCost', false), false),
     aiCredits: sanitizeTrailerKey(c.get('commitHook.trailers.aiCredits', 'Copilot-AI-Credits'), 'Copilot-AI-Credits'),
     aiCreditsPerModel: sanitizeTrailerKey(c.get('commitHook.trailers.aiCreditsPerModel', false), false),
   };

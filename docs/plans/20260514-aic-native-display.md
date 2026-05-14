@@ -138,11 +138,11 @@ This task touches every file that reads/writes the renamed fields, including tes
 - Modify: `src/trackingFile.ts` (USD inline derivation site)
 - Modify: `src/trackingFile.test.ts`
 
-- [ ] `src/config.ts` line 33: change the `commitHook.trailers.estimatedCost` default from `'Copilot-Est-Cost'` to `false` in the `getTrailerConfig()` call. Leave `aiCredits` and `aiCreditsPerModel` defaults unchanged.
-- [ ] `package.json` `contributes.configuration`: change the default for `copilot-budget.commitHook.trailers.estimatedCost` to `false`. Update the setting's `description` to note it's an opt-in trailer for users who want USD in commit history.
-- [ ] `src/trackingFile.ts` trailer-emit block: when `trailers.estimatedCost` is enabled, compute `usd = stats.totalAiCredits / 100` inline and emit `TR_<name>=$<usd-with-2dp>`. Do NOT reintroduce a `costUsd` field anywhere. (After Task 2, this site already reads `totalAiCredits`; this task confirms the inline `/ 100` derivation is in place.)
-- [ ] `src/trackingFile.test.ts`: assert `Copilot-Est-Cost` line absent when config defaults active; assert it appears with the expected `$X.XX` value (computed from AIC ÷ 100) only when `estimatedCost` is explicitly set in the test config.
-- [ ] run `npm test` — must pass before next task.
+- [x] `src/config.ts` line 33: change the `commitHook.trailers.estimatedCost` default from `'Copilot-Est-Cost'` to `false` in the `getTrailerConfig()` call. Leave `aiCredits` and `aiCreditsPerModel` defaults unchanged.
+- [x] `package.json` `contributes.configuration`: change the default for `copilot-budget.commitHook.trailers.estimatedCost` to `false`. Update the setting's `description` to note it's an opt-in trailer for users who want USD in commit history.
+- [x] `src/trackingFile.ts` trailer-emit block: when `trailers.estimatedCost` is enabled, compute `usd = stats.totalAiCredits / 100` inline and emit `TR_<name>=$<usd-with-2dp>`. Do NOT reintroduce a `costUsd` field anywhere. (After Task 2, this site already reads `totalAiCredits`; this task confirms the inline `/ 100` derivation is in place.)
+- [x] `src/trackingFile.test.ts`: assert `Copilot-Est-Cost` line absent when config defaults active; assert it appears with the expected `$X.XX` value (computed from AIC ÷ 100) only when `estimatedCost` is explicitly set in the test config.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 5: Status bar / tooltip / quick pick — AIC only
 
