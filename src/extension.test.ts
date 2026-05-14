@@ -6,7 +6,6 @@ jest.mock('./config');
 jest.mock('./logger');
 jest.mock('./sessionDiscovery');
 jest.mock('./sqliteReader');
-jest.mock('./planDetector');
 
 import * as vscode from 'vscode';
 import { __commandCallbacks } from './__mocks__/vscode';
@@ -19,13 +18,6 @@ import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
 import { getOutputChannel, disposeLogger } from './logger';
 import { initSqlite, disposeSqlite } from './sqliteReader';
-import {
-  detectPlan,
-  getPlanInfo,
-  onPlanChanged,
-  startPeriodicRefresh,
-  disposePlanDetector,
-} from './planDetector';
 
 const MockTracker = Tracker as jest.MockedClass<typeof Tracker>;
 const mockCreateStatusBar = createStatusBar as jest.MockedFunction<
@@ -67,11 +59,6 @@ const mockInitSqlite = initSqlite as jest.MockedFunction<typeof initSqlite>;
 const _mockDisposeSqlite = disposeSqlite as jest.MockedFunction<
   typeof disposeSqlite
 >;
-const mockDetectPlan = detectPlan as jest.MockedFunction<typeof detectPlan>;
-const mockGetPlanInfo = getPlanInfo as jest.MockedFunction<typeof getPlanInfo>;
-const mockOnPlanChanged = onPlanChanged as jest.MockedFunction<typeof onPlanChanged>;
-const mockStartPeriodicRefresh = startPeriodicRefresh as jest.MockedFunction<typeof startPeriodicRefresh>;
-const mockDisposePlanDetector = disposePlanDetector as jest.MockedFunction<typeof disposePlanDetector>;
 
 function makeContext(): vscode.ExtensionContext {
   return {
@@ -87,6 +74,24 @@ let trackerInstance: any;
 let statsChangedListeners: Array<(stats: any) => void>;
 let configChangedCallback: ((e: any) => void) | null;
 
+const SAMPLE_STATS = {
+  since: '2024-01-01T00:00:00Z',
+  lastUpdated: '2024-01-01T01:00:00Z',
+  models: {
+    'gpt-4o': {
+      inputTokens: 100,
+      outputTokens: 200,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0.01,
+    },
+  },
+  totalTokens: 300,
+  interactions: 5,
+  totalCostUsd: 0.01,
+  totalAiCredits: 1.0,
+};
+
 beforeEach(async () => {
   jest.clearAllMocks();
   for (const key of Object.keys(__commandCallbacks)) delete __commandCallbacks[key];
@@ -101,17 +106,8 @@ beforeEach(async () => {
     reset: jest.fn(),
     update: jest.fn(),
     dispose: jest.fn(),
-    setPlanInfoProvider: jest.fn(),
     setPreviousStats: jest.fn(),
-    getStats: jest.fn().mockReturnValue({
-      since: '2024-01-01T00:00:00Z',
-      lastUpdated: '2024-01-01T01:00:00Z',
-      models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 1 } },
-      totalTokens: 300,
-      interactions: 5,
-      premiumRequests: 1,
-      estimatedCost: 0.04,
-    }),
+    getStats: jest.fn().mockReturnValue(SAMPLE_STATS),
     onStatsChanged: jest.fn((listener: any) => {
       statsChangedListeners.push(listener);
       return {
@@ -162,17 +158,6 @@ beforeEach(async () => {
     name: 'Copilot Budget',
   } as any);
   mockInitSqlite.mockResolvedValue(true);
-  mockDetectPlan.mockResolvedValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockGetPlanInfo.mockReturnValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockOnPlanChanged.mockImplementation(() => ({ dispose: jest.fn() }));
 
   // Reset module-level state by calling deactivate
   await deactivate();
@@ -193,17 +178,6 @@ beforeEach(async () => {
   mockReadTrackingFile.mockResolvedValue(null);
   mockIsHookInstalled.mockResolvedValue(false);
   mockInitSqlite.mockResolvedValue(true);
-  mockDetectPlan.mockResolvedValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockGetPlanInfo.mockReturnValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockOnPlanChanged.mockImplementation(() => ({ dispose: jest.fn() }));
   trackerInstance.onStatsChanged = jest.fn((listener: any) => {
     statsChangedListeners = [];
     statsChangedListeners.push(listener);
@@ -214,15 +188,7 @@ beforeEach(async () => {
       },
     };
   });
-  trackerInstance.getStats.mockReturnValue({
-    since: '2024-01-01T00:00:00Z',
-    lastUpdated: '2024-01-01T01:00:00Z',
-    models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 1 } },
-    totalTokens: 300,
-    interactions: 5,
-    premiumRequests: 1,
-    estimatedCost: 0.04,
-  });
+  trackerInstance.getStats.mockReturnValue(SAMPLE_STATS);
 });
 
 describe('extension', () => {
@@ -342,64 +308,6 @@ describe('extension', () => {
       expect(trackerInstance.start).toHaveBeenCalledTimes(1);
     });
 
-    it('calls detectPlan before tracker.start', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockDetectPlan).toHaveBeenCalledTimes(1);
-      const detectOrder = mockDetectPlan.mock.invocationCallOrder[0];
-      const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
-      expect(detectOrder).toBeLessThan(startOrder);
-    });
-
-    it('sets plan info provider on tracker', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(trackerInstance.setPlanInfoProvider).toHaveBeenCalledWith(mockGetPlanInfo);
-    });
-
-    it('starts periodic plan refresh', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockStartPeriodicRefresh).toHaveBeenCalledTimes(1);
-    });
-
-    it('subscribes to plan changes', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockOnPlanChanged).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls tracker.update when plan changes', async () => {
-      let planChangeListener: (() => void) | null = null;
-      mockOnPlanChanged.mockImplementation((listener: any) => {
-        planChangeListener = listener;
-        return { dispose: jest.fn() };
-      });
-
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(planChangeListener).not.toBeNull();
-
-      planChangeListener!();
-      expect(trackerInstance.update).toHaveBeenCalledTimes(1);
-    });
-
-    it('re-detects plan on config change', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      mockDetectPlan.mockClear();
-
-      configChangedCallback!({} as any);
-      expect(mockDetectPlan).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not call detectPlan when disabled', async () => {
-      mockIsEnabled.mockReturnValue(false);
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockDetectPlan).not.toHaveBeenCalled();
-    });
-
     it('restores previous stats from tracking file', async () => {
       const restored = {
         since: '2024-01-01T00:00:00Z',
@@ -411,7 +319,6 @@ describe('extension', () => {
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
             costUsd: 0,
-            premiumRequests: 5,
           },
         },
       };
@@ -434,16 +341,14 @@ describe('extension', () => {
       expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
     });
 
-    it('calls readTrackingFile after setPlanInfoProvider and before start', async () => {
+    it('calls readTrackingFile before tracker.start', async () => {
       mockReadTrackingFile.mockResolvedValue(null);
 
       const ctx = makeContext();
       await activate(ctx);
 
-      const providerOrder = trackerInstance.setPlanInfoProvider.mock.invocationCallOrder[0];
       const readOrder = mockReadTrackingFile.mock.invocationCallOrder[0];
       const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
-      expect(providerOrder).toBeLessThan(readOrder);
       expect(readOrder).toBeLessThan(startOrder);
     });
   });
@@ -493,7 +398,7 @@ describe('extension', () => {
       expect(mockChannel.show).toHaveBeenCalled();
     });
 
-    it('showDiagnostics command displays premium requests and estimated cost', async () => {
+    it('showDiagnostics command displays USD cost and AI credits', async () => {
       const ctx = makeContext();
       await activate(ctx);
 
@@ -503,16 +408,11 @@ describe('extension', () => {
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
         (c: any[]) => c[0],
       );
-      expect(appendCalls).toContain('  Premium requests: 1.00');
-      expect(appendCalls).toContain('  Estimated cost: $0.04');
+      expect(appendCalls).toContain('  Total cost: $0.0100');
+      expect(appendCalls).toContain('  AI Credits: 1.00');
     });
 
-    it('showDiagnostics command displays plan info', async () => {
-      mockGetPlanInfo.mockReturnValue({
-        planName: 'pro',
-        costPerRequest: 10 / 300,
-        source: 'api',
-      });
+    it('showDiagnostics does not display plan info', async () => {
       const ctx = makeContext();
       await activate(ctx);
 
@@ -522,10 +422,11 @@ describe('extension', () => {
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
         (c: any[]) => c[0],
       );
-      expect(appendCalls).toContain('Plan detection:');
-      expect(appendCalls).toContain('  Plan: pro');
-      expect(appendCalls).toContain(`  Cost per request: $${(10 / 300).toFixed(4)}`);
-      expect(appendCalls).toContain('  Source: api');
+      expect(appendCalls).not.toContain('Plan detection:');
+      for (const line of appendCalls) {
+        expect(line).not.toMatch(/Premium requests/);
+        expect(line).not.toMatch(/Estimated cost/);
+      }
     });
 
     it('showDiagnostics command displays vscdb file info', async () => {
@@ -598,14 +499,5 @@ describe('extension', () => {
       await deactivate();
       expect(mockDisposeLogger).toHaveBeenCalled();
     });
-
-    it('calls disposePlanDetector on deactivate', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      mockDisposePlanDetector.mockClear();
-      await deactivate();
-      expect(mockDisposePlanDetector).toHaveBeenCalledTimes(1);
-    });
-
   });
 });

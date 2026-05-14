@@ -5,15 +5,8 @@ import { writeTrackingFile, readTrackingFile } from './trackingFile';
 import { installHook, uninstallHook } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
-import { log, getOutputChannel, disposeLogger } from './logger';
+import { getOutputChannel, disposeLogger, log } from './logger';
 import { initSqlite, disposeSqlite } from './sqliteReader';
-import {
-  detectPlan,
-  getPlanInfo,
-  onPlanChanged,
-  startPeriodicRefresh,
-  disposePlanDetector,
-} from './planDetector';
 
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
@@ -46,11 +39,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log('SQLite support unavailable — vscdb files will be skipped');
   }
 
-  // Detect plan before starting tracker so cost calculations use the right rate
-  await detectPlan();
-
   tracker = new Tracker();
-  tracker.setPlanInfoProvider(getPlanInfo);
 
   // Restore stats from previous session (if tracking file exists)
   const restored = await readTrackingFile();
@@ -62,15 +51,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   tracker.start();
-
-  // Periodic plan refresh (re-detect every 15 min)
-  startPeriodicRefresh();
-
-  // Recompute stats when plan changes
-  const planSub = onPlanChanged(() => {
-    if (tracker) tracker.update();
-  });
-  context.subscriptions.push(planSub);
 
   statusBar = createStatusBar(tracker);
   context.subscriptions.push({ dispose: () => statusBar?.dispose() });
@@ -141,21 +121,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ch.appendLine(`  ${f}`);
       }
 
-      const planInfo = getPlanInfo();
-      ch.appendLine('');
-      ch.appendLine('Plan detection:');
-      ch.appendLine(`  Plan: ${planInfo.planName}`);
-      ch.appendLine(`  Cost per request: $${planInfo.costPerRequest.toFixed(4)}`);
-      ch.appendLine(`  Source: ${planInfo.source}`);
-
       if (tracker) {
         const stats = tracker.getStats();
         ch.appendLine('');
         ch.appendLine('Current stats:');
         ch.appendLine(`  Total tokens: ${stats.totalTokens}`);
         ch.appendLine(`  Interactions: ${stats.interactions}`);
-        ch.appendLine(`  Premium requests: ${stats.premiumRequests.toFixed(2)}`);
-        ch.appendLine(`  Estimated cost: $${stats.estimatedCost.toFixed(2)}`);
+        ch.appendLine(`  Total cost: $${stats.totalCostUsd.toFixed(4)}`);
+        ch.appendLine(`  AI Credits: ${stats.totalAiCredits.toFixed(2)}`);
         ch.appendLine(`  Since: ${stats.since}`);
         ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
       }
@@ -174,8 +147,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (isCommitHookEnabled()) {
       installHook().catch(() => {});
     }
-    // Re-detect plan when config changes (user may have changed copilot-budget.plan)
-    detectPlan().catch(() => {});
   });
   context.subscriptions.push(configSub);
 }
@@ -191,7 +162,6 @@ export async function deactivate(): Promise<void> {
     statusBar.dispose();
     statusBar = null;
   }
-  disposePlanDetector();
   disposeSqlite();
   disposeLogger();
 }

@@ -69,7 +69,6 @@ function emptyRestoredModel(): ModelStats {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     costUsd: 0,
-    premiumRequests: 0,
   };
 }
 

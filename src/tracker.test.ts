@@ -10,7 +10,6 @@ jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
 jest.mock('./sqliteReader');
 jest.mock('./tokenRates');
-jest.mock('./planDetector');
 jest.mock('./logger');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
@@ -501,7 +500,6 @@ describe('Tracker — restored stats merge', () => {
           cacheReadTokens: 200,
           cacheCreationTokens: 10,
           costUsd: 0.005,
-          premiumRequests: 0,
         },
       },
     });
@@ -558,7 +556,6 @@ describe('Tracker — restored stats merge', () => {
           ...emptyTokens(),
           inputTokens: 1000,
           costUsd: 0.002,
-          premiumRequests: 0,
         } as ModelStats,
       },
     });

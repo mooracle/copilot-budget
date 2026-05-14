@@ -21,7 +21,6 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
         costUsd: 0.0094,
-        premiumRequests: 0,
       },
       'claude-sonnet-4.6': {
         inputTokens: 500,
@@ -29,15 +28,12 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
         cacheReadTokens: 1200,
         cacheCreationTokens: 0,
         costUsd: 0.00786,
-        premiumRequests: 0,
       },
     },
     totalTokens: 4300,
     interactions: 15,
     totalCostUsd: 0.01726,
     totalAiCredits: 1.726,
-    premiumRequests: 0,
-    estimatedCost: 0,
     ...overrides,
   };
 }

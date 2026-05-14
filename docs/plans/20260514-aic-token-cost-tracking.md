@@ -229,13 +229,13 @@ Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the 
 - Modify: `src/commitHook.test.ts`
 - Modify: `package.json` (esbuild config to stop copying `tokenEstimators.json` to `dist/` if it does)
 
-- [ ] remove plan-detector imports + `detectPlan()` / `startPeriodicRefresh()` / `disposePlanDetector()` / `onPlanChanged` calls in `extension.ts`
-- [ ] remove `tracker.setPlanInfoProvider(...)` call in `extension.ts`
-- [ ] delete the six files above; verify `git grep -l 'tokenEstimator\|planDetector\|PlanInfo\|PLAN_COSTS\|getPremiumMultiplier\|estimateTokensFromText\|PlanSetting'` returns nothing
-- [ ] **rewrite `src/commitHook.ts` POSIX script generator**: the current script reads `PREMIUM_REQUESTS=<n>` and `exit 0` if missing or `0.00` — that's the gate that decides whether to append anything. With the new schema there is no `PREMIUM_REQUESTS` key, so the gate would always fire and **no trailers would ever be appended**. New gate: detect presence of **any** `TR_` line. If the tracking file has at least one `TR_<name>=<value>` line, append every such line as a `<name>: <value>` git trailer; otherwise skip. Reset/truncate the tracking file after appending, as today
-- [ ] update `src/commitHook.test.ts` for the new gate logic: tracking file with `TR_Copilot-Est-Cost=$0.26\nTR_Copilot-AI-Credits=26.18` → both trailers appended; tracking file with no `TR_` lines (or empty) → no trailers; legacy v0.5.x file with `PREMIUM_REQUESTS=...` but no `TR_` lines → no trailers (intentional — forces a re-tracking pass)
-- [ ] check `package.json` esbuild script — if it explicitly copies `data/tokenEstimators.json` into `dist/`, drop that line (Task 1 already added the `data/models-and-pricing.yml` copy step); if it copies the whole `data/` dir, no change needed
-- [ ] run `npm run lint && npm test` — must pass before next task
+- [x] remove plan-detector imports + `detectPlan()` / `startPeriodicRefresh()` / `disposePlanDetector()` / `onPlanChanged` calls in `extension.ts`
+- [x] remove `tracker.setPlanInfoProvider(...)` call in `extension.ts`
+- [x] delete the six files above; verify `git grep -l 'tokenEstimator\|planDetector\|PlanInfo\|PLAN_COSTS\|getPremiumMultiplier\|estimateTokensFromText\|PlanSetting'` returns nothing (only docs/plans + CLAUDE.md + CHANGELOG remain — handled in Task 9)
+- [x] **rewrite `src/commitHook.ts` POSIX script generator**: the current script reads `PREMIUM_REQUESTS=<n>` and `exit 0` if missing or `0.00` — that's the gate that decides whether to append anything. With the new schema there is no `PREMIUM_REQUESTS` key, so the gate would always fire and **no trailers would ever be appended**. New gate: detect presence of **any** `TR_` line. If the tracking file has at least one `TR_<name>=<value>` line, append every such line as a `<name>: <value>` git trailer; otherwise skip. Reset/truncate the tracking file after appending, as today
+- [x] update `src/commitHook.test.ts` for the new gate logic: tracking file with `TR_Copilot-Est-Cost=$0.26\nTR_Copilot-AI-Credits=26.18` → both trailers appended; tracking file with no `TR_` lines (or empty) → no trailers; legacy v0.5.x file with `PREMIUM_REQUESTS=...` but no `TR_` lines → no trailers (intentional — forces a re-tracking pass)
+- [x] check `package.json` esbuild script — if it explicitly copies `data/tokenEstimators.json` into `dist/`, drop that line (Task 1 already added the `data/models-and-pricing.yml` copy step); if it copies the whole `data/` dir, no change needed (esbuild.js never copied tokenEstimators.json; no change)
+- [x] run `npm run lint && npm test` — must pass before next task
 
 ### Task 8: Verify acceptance criteria
 

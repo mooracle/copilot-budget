@@ -3,7 +3,6 @@ import { discoverSessionFiles, discoverVscdbFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
 import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
 import { computeCost } from './tokenRates';
-import { PlanInfo, DEFAULT_COST_PER_REQUEST } from './planDetector';
 import { log } from './logger';
 
 export interface ModelStats {
@@ -12,8 +11,6 @@ export interface ModelStats {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   costUsd: number;
-  /** @deprecated retained as 0 for downstream compile-compat; removed in Task 5/6/7. */
-  premiumRequests: number;
 }
 
 export interface TrackingStats {
@@ -24,10 +21,6 @@ export interface TrackingStats {
   interactions: number;
   totalCostUsd: number;
   totalAiCredits: number;
-  /** @deprecated retained as 0 for downstream compile-compat; removed in Task 5/6/7. */
-  premiumRequests: number;
-  /** @deprecated retained as 0 for downstream compile-compat; removed in Task 5/6/7. */
-  estimatedCost: number;
 }
 
 export interface RestoredStats {
@@ -58,7 +51,6 @@ function emptyModelStats(): ModelStats {
   return {
     ...emptyModelTokens(),
     costUsd: 0,
-    premiumRequests: 0,
   };
 }
 
@@ -117,17 +109,6 @@ export class Tracker {
 
   constructor() {
     this.since = new Date().toISOString();
-  }
-
-  /**
-   * @deprecated Plan detection is being removed (premium-request pricing model
-   * deprecated 2026-06-01). Kept as a no-op for caller compile-compat until
-   * Task 7 deletes the planDetector module and call sites.
-   */
-  setPlanInfoProvider(_provider: () => PlanInfo): void {
-    // no-op
-    void _provider;
-    void DEFAULT_COST_PER_REQUEST;
   }
 
   setPreviousStats(restored: RestoredStats): void {
@@ -322,7 +303,6 @@ export class Tracker {
         cacheReadTokens: deltaCacheRead,
         cacheCreationTokens: deltaCacheCreation,
         costUsd,
-        premiumRequests: 0,
       });
     }
 
@@ -352,8 +332,6 @@ export class Tracker {
       interactions,
       totalCostUsd,
       totalAiCredits: totalCostUsd * 100,
-      premiumRequests: 0,
-      estimatedCost: 0,
     };
   }
 
@@ -419,8 +397,6 @@ export class Tracker {
         interactions: 0,
         totalCostUsd: 0,
         totalAiCredits: 0,
-        premiumRequests: 0,
-        estimatedCost: 0,
       };
     }
     return this.lastStats;

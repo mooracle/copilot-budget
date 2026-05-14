@@ -41,7 +41,6 @@ const sampleStats: TrackingStats = {
       cacheReadTokens: 200,
       cacheCreationTokens: 0,
       costUsd: 0.0734,
-      premiumRequests: 0,
     },
     'claude-sonnet-4.6': {
       inputTokens: 500,
@@ -49,15 +48,12 @@ const sampleStats: TrackingStats = {
       cacheReadTokens: 1200,
       cacheCreationTokens: 100,
       costUsd: 0.3497,
-      premiumRequests: 0,
     },
   },
   totalTokens: 4600,
   interactions: 15,
   totalCostUsd: 0.4231,
   totalAiCredits: 42.31,
-  premiumRequests: 0,
-  estimatedCost: 0,
 };
 
 beforeEach(() => {
@@ -155,7 +151,6 @@ describe('trackingFile', () => {
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
             costUsd: 0.01,
-            premiumRequests: 0,
           },
           'model$(cmd)': {
             inputTokens: 200,
@@ -163,15 +158,12 @@ describe('trackingFile', () => {
             cacheReadTokens: 0,
             cacheCreationTokens: 0,
             costUsd: 0.02,
-            premiumRequests: 0,
           },
         },
         totalTokens: 450,
         interactions: 2,
         totalCostUsd: 0.03,
         totalAiCredits: 3.0,
-        premiumRequests: 0,
-        estimatedCost: 0,
       };
 
       await writeTrackingFile(unsafeStats);
@@ -243,8 +235,6 @@ describe('trackingFile', () => {
         interactions: 0,
         totalCostUsd: 0,
         totalAiCredits: 0,
-        premiumRequests: 0,
-        estimatedCost: 0,
       };
 
       await writeTrackingFile(emptyStats);
@@ -295,8 +285,6 @@ describe('trackingFile', () => {
         interactions: 0,
         totalCostUsd: 0,
         totalAiCredits: 0,
-        premiumRequests: 0,
-        estimatedCost: 0,
       };
 
       await writeTrackingFile(emptyStats);
@@ -341,7 +329,6 @@ describe('trackingFile', () => {
         cacheReadTokens: 200,
         cacheCreationTokens: 0,
         costUsd: 0.0734,
-        premiumRequests: 0,
       });
       expect(result!.models['claude-sonnet-4.6']).toEqual({
         inputTokens: 500,
@@ -349,7 +336,6 @@ describe('trackingFile', () => {
         cacheReadTokens: 1200,
         cacheCreationTokens: 100,
         costUsd: 0.3497,
-        premiumRequests: 0,
       });
     });
 
@@ -536,7 +522,6 @@ describe('trackingFile', () => {
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
         costUsd: 0.10,
-        premiumRequests: 0,
       });
     });
 
