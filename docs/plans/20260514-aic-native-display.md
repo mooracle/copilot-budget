@@ -170,10 +170,10 @@ This task touches every file that reads/writes the renamed fields, including tes
 - Modify: `src/extension.ts`
 - Modify: `src/extension.test.ts`
 
-- [ ] In the `showDiagnostics` command body (around `src/extension.ts:189-190`), remove the `Total cost: $...` line. Keep the `AI Credits:` line.
-- [ ] `src/extension.test.ts:574`: update the assertion — replace the `expect(appendCalls).toContain('  Total cost: $0.0100')` with `expect(appendCalls).not.toContain('Total cost:')`. Keep the `AI Credits:` assertion.
-- [ ] If the test's title at the `it()` mentions "USD", rename to drop USD.
-- [ ] run `npm test` — must pass before next task.
+- [x] In the `showDiagnostics` command body (around `src/extension.ts:189-190`), remove the `Total cost: $...` line. Keep the `AI Credits:` line.
+- [x] `src/extension.test.ts:574`: update the assertion — replace the `expect(appendCalls).toContain('  Total cost: $0.0100')` with `expect(appendCalls).not.toContain('Total cost:')`. Keep the `AI Credits:` assertion.
+- [x] If the test's title at the `it()` mentions "USD", rename to drop USD.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 7: Verify acceptance criteria
 

@@ -560,7 +560,7 @@ describe('extension', () => {
       expect(mockChannel.show).toHaveBeenCalled();
     });
 
-    it('showDiagnostics command displays USD cost and AI credits', async () => {
+    it('showDiagnostics command displays AI credits without USD cost', async () => {
       const ctx = makeContext();
       await activate(ctx);
 
@@ -570,7 +570,9 @@ describe('extension', () => {
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
         (c: any[]) => c[0],
       );
-      expect(appendCalls).toContain('  Total cost: $0.0100');
+      for (const line of appendCalls) {
+        expect(line).not.toMatch(/Total cost:/);
+      }
       expect(appendCalls).toContain('  AI Credits: 1.00');
     });
 
