@@ -118,17 +118,17 @@ This task touches every file that reads/writes the renamed fields, including tes
 - Modify: `src/trackingFile.ts`
 - Modify: `src/trackingFile.test.ts`
 
-- [ ] `writeTrackingFile()`: remove the `TOTAL_COST_USD=` line (was line 36). Rename per-model `MODEL_<x>_COST_USD=` key to `MODEL_<x>_COST_AIC=` (was line 50). Keep `TOTAL_AI_CREDITS=` and `*_TOKENS` keys unchanged.
-- [ ] `parseTrackingFileContent()`:
+- [x] `writeTrackingFile()`: remove the `TOTAL_COST_USD=` line (was line 36). Rename per-model `MODEL_<x>_COST_USD=` key to `MODEL_<x>_COST_AIC=` (was line 50). Keep `TOTAL_AI_CREDITS=` and `*_TOKENS` keys unchanged.
+- [x] `parseTrackingFileContent()`:
   - Change `MODEL_KEY_PATTERN` regex (line 84) to accept `COST_AIC` instead of `COST_USD`. Files written with legacy `_COST_USD` keys no longer match the per-model regex — those lines fall through to the silent-ignore branch, which is the desired tolerance behavior.
   - Remove the `key === 'TOTAL_COST_USD'` arm of the conditional at line 125. The remaining `TOTAL_AI_CREDITS` arm stays.
   - Update the per-model field branch (was lines 141-143) to handle `COST_AIC` and write into `entry.costAic`.
   - Update the validity gate to require `SINCE` + `TOTAL_AI_CREDITS` only (drop any requirement on `TOTAL_COST_USD`).
-- [ ] `trackingFile.test.ts`:
+- [x] `trackingFile.test.ts`:
   - Update written-file assertions: no `TOTAL_COST_USD` line; per-model line uses `_COST_AIC` with appropriate AIC value (was USD × 100).
   - Add a legacy-tolerance parse test: feed a string containing `SINCE=...`, `TOTAL_AI_CREDITS=15.30`, `TOTAL_COST_USD=0.1530`, and per-model `_COST_USD` keys plus `_TOKENS` keys. Assert: restored `totalAiCredits === 15.30`, token counts restored correctly, restored per-model `costAic === 0` (no per-model cost restored since legacy keys are silently dropped).
   - Add a follow-up assertion to that legacy test: pass the restored stats through a tracker scan with a freshly parsed session JSONL and verify `totalAiCredits` ends at the freshly recomputed value (not 0, not the legacy value, and not double-counted).
-- [ ] run `npm test` — must pass before next task.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 4: Flip `estimatedCost` trailer to opt-in
 

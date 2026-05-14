@@ -4,17 +4,26 @@ import {
   readTrackingFile,
   isTrackingFileTruncated,
 } from './trackingFile';
-import { TrackingStats } from './tracker';
+import { Tracker, TrackingStats } from './tracker';
+import * as fs from 'fs';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
 import * as fsUtils from './fsUtils';
 import * as config from './config';
 import * as tokenRates from './tokenRates';
+import * as sessionDiscovery from './sessionDiscovery';
+import * as sessionParser from './sessionParser';
+import * as sqliteReader from './sqliteReader';
 
+jest.mock('fs');
 jest.mock('./gitDir');
 jest.mock('./fsUtils');
 jest.mock('./config');
 jest.mock('./tokenRates');
+jest.mock('./sessionDiscovery');
+jest.mock('./sessionParser');
+jest.mock('./sqliteReader');
+jest.mock('./logger');
 
 const mockVscode = vscode as any;
 const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
@@ -90,24 +99,25 @@ describe('trackingFile', () => {
 
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
       expect(content).toContain('INTERACTIONS=15');
-      expect(content).toContain('TOTAL_COST_USD=0.4231');
       expect(content).toContain('TOTAL_AI_CREDITS=42.31');
+      expect(content).not.toContain('TOTAL_COST_USD');
 
       expect(content).toContain('MODEL_gpt-4.1_INPUT_TOKENS=1500');
       expect(content).toContain('MODEL_gpt-4.1_OUTPUT_TOKENS=800');
       expect(content).toContain('MODEL_gpt-4.1_CACHE_READ_TOKENS=200');
       expect(content).toContain('MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0');
-      expect(content).toContain('MODEL_gpt-4.1_COST_USD=0.0734');
+      expect(content).toContain('MODEL_gpt-4.1_COST_AIC=7.34000000');
 
       expect(content).toContain('MODEL_claude-sonnet-4.6_INPUT_TOKENS=500');
       expect(content).toContain('MODEL_claude-sonnet-4.6_OUTPUT_TOKENS=300');
       expect(content).toContain('MODEL_claude-sonnet-4.6_CACHE_READ_TOKENS=1200');
       expect(content).toContain('MODEL_claude-sonnet-4.6_CACHE_CREATION_TOKENS=100');
-      expect(content).toContain('MODEL_claude-sonnet-4.6_COST_USD=0.3497');
+      expect(content).toContain('MODEL_claude-sonnet-4.6_COST_AIC=34.97000000');
 
       expect(content).not.toContain('PREMIUM_REQUESTS');
       expect(content).not.toContain('ESTIMATED_COST');
       expect(content).not.toContain('TOTAL_TOKENS=');
+      expect(content).not.toContain('_COST_USD');
     });
 
     it('returns false when no workspace folder', async () => {
@@ -133,7 +143,7 @@ describe('trackingFile', () => {
       expect(result).toBe(true);
       const [uri, content] = mockWriteTextFile.mock.calls[0];
       expect(uri.path).toMatch(/\/repo\/\.git\/worktrees\/feature\/copilot-budget$/);
-      expect(content).toContain('TOTAL_COST_USD=0.4231');
+      expect(content).toContain('TOTAL_AI_CREDITS=42.31');
     });
 
     it('returns false when write fails', async () => {
@@ -294,8 +304,8 @@ describe('trackingFile', () => {
 
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
       expect(content).toContain('INTERACTIONS=0');
-      expect(content).toContain('TOTAL_COST_USD=0.0000');
       expect(content).toContain('TOTAL_AI_CREDITS=0.00');
+      expect(content).not.toContain('TOTAL_COST_USD');
       expect(content).not.toMatch(/^MODEL_/m);
     });
 
@@ -328,18 +338,17 @@ describe('trackingFile', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=15',
-        'TOTAL_COST_USD=0.4231',
         'TOTAL_AI_CREDITS=42.31',
         'MODEL_gpt-4.1_INPUT_TOKENS=1500',
         'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
         'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
         'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_USD=0.0734',
+        'MODEL_gpt-4.1_COST_AIC=7.34',
         'MODEL_claude-sonnet-4.6_INPUT_TOKENS=500',
         'MODEL_claude-sonnet-4.6_OUTPUT_TOKENS=300',
         'MODEL_claude-sonnet-4.6_CACHE_READ_TOKENS=1200',
         'MODEL_claude-sonnet-4.6_CACHE_CREATION_TOKENS=100',
-        'MODEL_claude-sonnet-4.6_COST_USD=0.3497',
+        'MODEL_claude-sonnet-4.6_COST_AIC=34.97',
         '',
       ].join('\n');
 
@@ -373,7 +382,7 @@ describe('trackingFile', () => {
     it('returns null when SINCE is missing', () => {
       const content = [
         'INTERACTIONS=1',
-        'TOTAL_COST_USD=0.10',
+        'TOTAL_AI_CREDITS=10.00',
         'MODEL_gpt-4.1_INPUT_TOKENS=50',
       ].join('\n');
 
@@ -383,7 +392,7 @@ describe('trackingFile', () => {
     it('returns null when SINCE is not a valid date', () => {
       const content = [
         'SINCE=not-a-date',
-        'TOTAL_COST_USD=0.10',
+        'TOTAL_AI_CREDITS=10.00',
         'MODEL_gpt-4.1_INPUT_TOKENS=100',
       ].join('\n');
 
@@ -412,11 +421,10 @@ describe('trackingFile', () => {
       expect(parseTrackingFileContent('SINCE=2024-01-15T10:30:00Z\nINTERACTIONS=5\n')).toBeNull();
     });
 
-    it('accepts a file with SINCE + TOTAL_COST_USD and no MODEL_ lines', () => {
+    it('accepts a file with SINCE + TOTAL_AI_CREDITS and no MODEL_ lines', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=0',
-        'TOTAL_COST_USD=0.0000',
         'TOTAL_AI_CREDITS=0.00',
       ].join('\n');
 
@@ -435,7 +443,7 @@ describe('trackingFile', () => {
         'MODEL_gpt-4.1_OUTPUT_TOKENS=50',
         'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
         'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_USD=0.01',
+        'MODEL_gpt-4.1_COST_AIC=1.00',
       ].join('\n');
 
       const result = parseTrackingFileContent(content);
@@ -447,13 +455,12 @@ describe('trackingFile', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=5',
-        'TOTAL_COST_USD=0.12',
         'TOTAL_AI_CREDITS=12.00',
         'MODEL_gpt-4.1_INPUT_TOKENS=100',
         'MODEL_gpt-4.1_OUTPUT_TOKENS=200',
         'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
         'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_USD=0.12',
+        'MODEL_gpt-4.1_COST_AIC=12.00',
         'TR_Copilot-Est-Cost=$0.12',
         'TR_Copilot-AI-Credits=12.00',
         '',
@@ -469,7 +476,6 @@ describe('trackingFile', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=3',
-        'TOTAL_COST_USD=0.10',
         'TOTAL_AI_CREDITS=10.00',
         'COMPLETELY_UNKNOWN=foo',
         'random text with no equals',
@@ -478,7 +484,7 @@ describe('trackingFile', () => {
         'MODEL_gpt-4.1_OUTPUT_TOKENS=50',
         'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
         'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_USD=0.10',
+        'MODEL_gpt-4.1_COST_AIC=10.00',
       ].join('\n');
 
       const result = parseTrackingFileContent(content);
@@ -490,12 +496,12 @@ describe('trackingFile', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=1',
-        'TOTAL_COST_USD=0.05',
+        'TOTAL_AI_CREDITS=5.00',
         'MODEL_gpt-4.1_INPUT_TOKENS=100',
         'MODEL_gpt-4.1_OUTPUT_TOKENS=not-a-number',
         'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
         'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_USD=0.05',
+        'MODEL_gpt-4.1_COST_AIC=5.00',
       ].join('\n');
 
       const result = parseTrackingFileContent(content);
@@ -522,6 +528,39 @@ describe('trackingFile', () => {
       const { costAic: claudeExpectedCost, ...claudeExpectedRest } = sampleStats.models['claude-sonnet-4.6'];
       expect(claudeRest).toEqual(claudeExpectedRest);
       expect(claudeCost).toBeCloseTo(claudeExpectedCost, 8);
+    });
+
+    it('tolerates legacy 0.6.x file with TOTAL_COST_USD and per-model _COST_USD keys', () => {
+      // Dev-host tracking files written before this commit have legacy USD
+      // keys alongside TOTAL_AI_CREDITS + *_TOKENS. The new parser must
+      // silently drop the legacy keys without rejecting the file: tokens
+      // restore correctly, per-model costAic is 0 (lost), and the file is
+      // still recognised as new-format so we don't clobber it as legacy.
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=15',
+        'TOTAL_COST_USD=0.1530',
+        'TOTAL_AI_CREDITS=15.30',
+        'MODEL_gpt-4.1_INPUT_TOKENS=1500',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.1530',
+        '',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe('2024-01-15T10:30:00Z');
+      expect(result!.interactions).toBe(15);
+      expect(result!.models['gpt-4.1']).toEqual({
+        inputTokens: 1500,
+        outputTokens: 800,
+        cacheReadTokens: 200,
+        cacheCreationTokens: 0,
+        costAic: 0,
+      });
     });
 
     it('preserves sub-cent per-model costs through a write/parse round-trip', async () => {
@@ -562,13 +601,12 @@ describe('trackingFile', () => {
       const content = [
         'SINCE=2024-01-15T10:30:00Z',
         'INTERACTIONS=5',
-        'TOTAL_COST_USD=0.10',
         'TOTAL_AI_CREDITS=10.00',
         'MODEL_gpt-4.1_INPUT_TOKENS=100',
         'MODEL_gpt-4.1_OUTPUT_TOKENS=200',
         'MODEL_gpt-4.1_CACHE_READ_TOKENS=0',
         'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_USD=0.10',
+        'MODEL_gpt-4.1_COST_AIC=10.00',
         '',
       ].join('\n');
       mockReadTextFile.mockResolvedValue(content);
@@ -621,6 +659,72 @@ describe('trackingFile', () => {
       );
 
       expect(await readTrackingFile()).toEqual({ kind: 'legacy' });
+    });
+  });
+
+  describe('Tracker integration with legacy-parsed RestoredStats', () => {
+    it('recomputes totalAiCredits from fresh tokens, ignoring dropped legacy _COST_USD', () => {
+      // Legacy 0.6.x dev-host file: TOTAL_AI_CREDITS + tokens are preserved,
+      // but per-model _COST_USD keys are silently dropped on parse, so
+      // restored costAic is 0 per model. After a tracker scan picks up fresh
+      // session activity, totalAiCredits should match the freshly computed
+      // cost — not 0, not the legacy 15.30, not double-counted.
+      const legacyContent = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=15',
+        'TOTAL_COST_USD=0.1530',
+        'TOTAL_AI_CREDITS=15.30',
+        'MODEL_gpt-4.1_INPUT_TOKENS=1500',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_USD=0.1530',
+        '',
+      ].join('\n');
+
+      const restored = parseTrackingFileContent(legacyContent);
+      expect(restored).not.toBeNull();
+      expect(restored!.models['gpt-4.1'].costAic).toBe(0);
+
+      const FRESH_COST_AIC = 42.5;
+      (tokenRates.computeCost as jest.Mock).mockReturnValue(FRESH_COST_AIC);
+      (sqliteReader.isSqliteReady as jest.Mock).mockReturnValue(false);
+      (sqliteReader.readSessionsFromVscdb as jest.Mock).mockReturnValue([]);
+      (sessionDiscovery.discoverVscdbFiles as jest.Mock).mockReturnValue([]);
+      // initialize() snapshots an empty baseline so subsequent fresh activity
+      // shows up as a positive delta on update().
+      (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([]);
+
+      const tracker = new Tracker();
+      tracker.setPreviousStats(restored!);
+      tracker.initialize();
+
+      const FILE_PATH = '/tmp/session.json';
+      (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([FILE_PATH]);
+      (fs.statSync as jest.Mock).mockImplementation(
+        () => ({ mtimeMs: 1 }) as fs.Stats,
+      );
+      (fs.readFileSync as jest.Mock).mockReturnValue('{}');
+      (sessionParser.parseSessionFileContent as jest.Mock).mockReturnValue({
+        interactions: 5,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 2000,
+            outputTokens: 1000,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 5 },
+      });
+
+      tracker.update();
+      const stats = tracker.getStats();
+
+      expect(stats.totalAiCredits).toBeCloseTo(FRESH_COST_AIC, 6);
+      expect(stats.totalAiCredits).not.toBe(0);
+      expect(stats.totalAiCredits).not.toBeCloseTo(15.3, 2);
+      expect(stats.totalAiCredits).not.toBeCloseTo(FRESH_COST_AIC * 2, 6);
     });
   });
 

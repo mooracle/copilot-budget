@@ -33,7 +33,6 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   const lines: string[] = [
     `SINCE=${stats.since}`,
     `INTERACTIONS=${stats.interactions}`,
-    `TOTAL_COST_USD=${(stats.totalAiCredits / 100).toFixed(4)}`,
     `TOTAL_AI_CREDITS=${stats.totalAiCredits.toFixed(2)}`,
   ];
 
@@ -44,10 +43,10 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
     lines.push(`MODEL_${safe}_CACHE_READ_TOKENS=${usage.cacheReadTokens}`);
     lines.push(`MODEL_${safe}_CACHE_CREATION_TOKENS=${usage.cacheCreationTokens}`);
     // Higher precision than display so per-model costs round-trip exactly:
-    // on restore, totals are rebuilt by summing these values, and 4-decimal
-    // rounding would zero out tiny entries (e.g. a handful of input tokens
-    // against a $2/M rate ≈ $0.00002).
-    lines.push(`MODEL_${safe}_COST_USD=${(usage.costAic / 100).toFixed(8)}`);
+    // on restore, totals are rebuilt by summing these values, and lower
+    // precision would zero out tiny entries (e.g. a handful of input tokens
+    // against a 200 AIC/M rate ≈ 0.002 AIC).
+    lines.push(`MODEL_${safe}_COST_AIC=${usage.costAic.toFixed(8)}`);
   }
 
   // Only emit TR_ lines when there is real cost to report. The hook is
@@ -81,7 +80,7 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
 }
 
 const MODEL_KEY_PATTERN =
-  /^MODEL_(.+)_(INPUT_TOKENS|OUTPUT_TOKENS|CACHE_READ_TOKENS|CACHE_CREATION_TOKENS|COST_USD)$/;
+  /^MODEL_(.+)_(INPUT_TOKENS|OUTPUT_TOKENS|CACHE_READ_TOKENS|CACHE_CREATION_TOKENS|COST_AIC)$/;
 
 function emptyRestoredModel(): ModelStats {
   return {
@@ -122,7 +121,7 @@ export function parseTrackingFileContent(content: string): RestoredStats | null 
       if (!isNaN(n)) interactions = n;
       continue;
     }
-    if (key === 'TOTAL_COST_USD' || key === 'TOTAL_AI_CREDITS') {
+    if (key === 'TOTAL_AI_CREDITS') {
       hasNewFormatKey = true;
       continue;
     }
@@ -138,9 +137,9 @@ export function parseTrackingFileContent(content: string): RestoredStats | null 
       entry = emptyRestoredModel();
       models[modelName] = entry;
     }
-    if (field === 'COST_USD') {
+    if (field === 'COST_AIC') {
       const v = parseFloat(value);
-      if (!isNaN(v)) entry.costAic = v * 100;
+      if (!isNaN(v)) entry.costAic = v;
     } else {
       const v = parseInt(value, 10);
       if (!isNaN(v)) {
