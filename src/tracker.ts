@@ -94,12 +94,22 @@ function accumulateModelStats(
   entry.costUsd += contrib.costUsd;
 }
 
+type Snapshot = {
+  interactions: number;
+  modelUsage: ModelUsage;
+  modelInteractions: { [model: string]: number };
+};
+
 export class Tracker {
-  private baseline: {
-    interactions: number;
-    modelUsage: ModelUsage;
-    modelInteractions: { [model: string]: number };
-  } = { interactions: 0, modelUsage: {}, modelInteractions: {} };
+  private baseline: Snapshot = {
+    interactions: 0,
+    modelUsage: {},
+    modelInteractions: {},
+  };
+  // The scan that produced lastStats. consume() uses this as the new baseline
+  // so any activity not yet reflected in lastStats (and therefore not in the
+  // trailer the hook just consumed) is preserved as the next commit's delta.
+  private lastSnapshot: Snapshot | null = null;
   private fileCache = new Map<string, FileCache>();
   private since: string;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -338,6 +348,7 @@ export class Tracker {
   initialize(): void {
     const snapshot = this.scanAll();
     this.baseline = snapshot;
+    this.lastSnapshot = snapshot;
     log(
       `initialize: baseline set at ${snapshot.interactions} interactions across ${Object.keys(snapshot.modelUsage).length} model(s)`,
     );
@@ -353,6 +364,7 @@ export class Tracker {
   update(): void {
     const current = this.scanAll();
     const stats = this.computeStats(current);
+    this.lastSnapshot = current;
 
     if (
       !this.lastStats ||
@@ -381,8 +393,28 @@ export class Tracker {
     this.previousStats = null;
     const snapshot = this.scanAll();
     this.baseline = snapshot;
+    this.lastSnapshot = snapshot;
     this.since = new Date().toISOString();
     const stats = this.computeStats(snapshot);
+    this.lastStats = stats;
+    this.notifyListeners(stats);
+  }
+
+  // Hook-truncate handler. Unlike reset(), which zeros everything by
+  // rebaselining to the current scan, consume() rebases to the snapshot that
+  // produced the stats the hook just appended as trailers. Anything beyond
+  // that snapshot — pre-commit activity that hadn't been written yet, plus
+  // any post-commit Copilot usage that landed before we noticed the
+  // truncation — survives as the next commit's delta. Without this, a 5s
+  // detection window would silently absorb that activity into a fresh
+  // baseline and the next commit would underreport.
+  consume(): void {
+    this.previousStats = null;
+    this.baseline = this.lastSnapshot ?? this.scanAll();
+    this.since = new Date().toISOString();
+    const current = this.scanAll();
+    this.lastSnapshot = current;
+    const stats = this.computeStats(current);
     this.lastStats = stats;
     this.notifyListeners(stats);
   }
@@ -407,5 +439,6 @@ export class Tracker {
     this.listeners = [];
     this.fileCache.clear();
     this.previousStats = null;
+    this.lastSnapshot = null;
   }
 }

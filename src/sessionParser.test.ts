@@ -180,6 +180,37 @@ describe('parseSessionFileContent — JSON plain format', () => {
     });
   });
 
+  it('treats explicit cacheReadTokens=null as 0, not as missing data triggering the heuristic', () => {
+    // Two requests in one session — the heuristic would normally kick in on
+    // turn 2+. An explicit null says "no cache reads happened", so the input
+    // bucket must keep the full promptTokens instead of getting 75% diverted
+    // to cache_read.
+    const session = {
+      requests: [
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: null,
+        }),
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: null,
+        }),
+      ],
+    };
+    const result = parseSessionFileContent('session.json', JSON.stringify(session));
+    expect(result.interactions).toBe(2);
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 2000,
+      outputTokens: 200,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+  });
+
   it('skips pending requests (modelState.value !== 1) — no tokens, no interaction', () => {
     const session = {
       requests: [
@@ -327,6 +358,43 @@ describe('cache-split heuristic', () => {
       cacheReadTokens: 1500, // 0 + 1500
       cacheCreationTokens: 0,
     });
+  });
+
+  it('heuristic caps at the remaining prompt budget when cacheCreationTokens is reported alone', () => {
+    // Defensive: if upstream ever ships cacheCreationTokens without
+    // cacheReadTokens, the heuristic must not push the three buckets above
+    // promptTokens (would double-count tokens at higher rates).
+    const session = {
+      requests: [
+        // Turn 1
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 100,
+          outputTokens: 10,
+        }),
+        // Turn 2: cacheCreation reported, cacheRead absent. Without the cap,
+        // heuristic would set cacheRead = floor(1000 * 0.75) = 750 and the
+        // sum (750 + 800 + 0 input) = 1550 > promptTokens.
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheCreationTokens: 800,
+        }),
+      ],
+    };
+    const result = parseSessionFileContent('session.json', JSON.stringify(session));
+    const usage = result.modelUsage['claude-sonnet-4.6'];
+    // Turn 2: remaining = 1000 - 800 = 200; cacheRead = floor(200 * 0.75) = 150;
+    // input = 1000 - 150 - 800 = 50. Sum = 1000 (matches promptTokens).
+    expect(usage.cacheReadTokens).toBe(150); // 0 (turn 1) + 150 (turn 2)
+    expect(usage.cacheCreationTokens).toBe(800);
+    // Turn 1 input=100, Turn 2 input=50
+    expect(usage.inputTokens).toBe(150);
+    // No bucket overshoot vs sum of promptTokens across both turns (100 + 1000)
+    expect(
+      usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
+    ).toBeLessThanOrEqual(1100);
   });
 
   it('counts pending requests against turn index so heuristic still aligns with array position', () => {

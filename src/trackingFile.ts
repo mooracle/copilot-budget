@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { TrackingStats, ModelStats, RestoredStats } from './tracker';
 import { resolveGitDir } from './gitDir';
-import { readTextFile, writeTextFile } from './fsUtils';
+import { readTextFile, writeTextFile, stat } from './fsUtils';
 import { getTrailerConfig } from './config';
 import { sanitizeModelName } from './utils';
 import { getDisplayName } from './tokenRates';
@@ -12,6 +12,18 @@ async function getTrackingFileUri(): Promise<vscode.Uri | null> {
   const gitDir = await resolveGitDir(folders[0].uri);
   if (!gitDir) return null;
   return vscode.Uri.joinPath(gitDir, 'copilot-budget');
+}
+
+// The commit hook truncates the file to 0 bytes after appending trailers,
+// signalling "I consumed the accumulated cost". Detecting that lets the
+// extension reset the tracker so the next commit only attributes new usage
+// (per-commit attribution, per README). Distinguishing 0 bytes from missing
+// matters: a missing file is "no tracking yet"; a 0-byte file is "hook ran".
+export async function isTrackingFileTruncated(): Promise<boolean> {
+  const uri = await getTrackingFileUri();
+  if (!uri) return false;
+  const fileStat = await stat(uri);
+  return fileStat !== null && fileStat.size === 0;
 }
 
 export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> {
@@ -31,23 +43,32 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
     lines.push(`MODEL_${safe}_OUTPUT_TOKENS=${usage.outputTokens}`);
     lines.push(`MODEL_${safe}_CACHE_READ_TOKENS=${usage.cacheReadTokens}`);
     lines.push(`MODEL_${safe}_CACHE_CREATION_TOKENS=${usage.cacheCreationTokens}`);
-    lines.push(`MODEL_${safe}_COST_USD=${usage.costUsd.toFixed(4)}`);
+    // Higher precision than display so per-model costs round-trip exactly:
+    // on restore, totals are rebuilt by summing these values, and 4-decimal
+    // rounding would zero out tiny entries (e.g. a handful of input tokens
+    // against a $2/M rate ≈ $0.00002).
+    lines.push(`MODEL_${safe}_COST_USD=${usage.costUsd.toFixed(8)}`);
   }
 
-  const trailers = getTrailerConfig();
-  if (trailers.estimatedCost) {
-    lines.push(`TR_${trailers.estimatedCost}=$${stats.totalCostUsd.toFixed(2)}`);
-  }
-  if (trailers.aiCredits) {
-    lines.push(`TR_${trailers.aiCredits}=${stats.totalAiCredits.toFixed(2)}`);
-  }
-  if (trailers.aiCreditsPerModel) {
-    const entries = Object.entries(stats.models)
-      .map(([id, usage]) => ({ name: getDisplayName(id), credits: usage.costUsd * 100 }))
-      .sort((a, b) => b.credits - a.credits);
-    if (entries.length > 0) {
-      const value = entries.map((e) => `${e.name}=${e.credits.toFixed(2)}`).join(',');
-      lines.push(`TR_${trailers.aiCreditsPerModel}=${value}`);
+  // Only emit TR_ lines when there is real cost to report. The hook is
+  // presence-gated on TR_ lines, so writing zero-valued trailers would
+  // append "Copilot-Est-Cost: $0.00" to every commit on idle sessions.
+  if (stats.totalCostUsd > 0) {
+    const trailers = getTrailerConfig();
+    if (trailers.estimatedCost) {
+      lines.push(`TR_${trailers.estimatedCost}=$${stats.totalCostUsd.toFixed(2)}`);
+    }
+    if (trailers.aiCredits) {
+      lines.push(`TR_${trailers.aiCredits}=${stats.totalAiCredits.toFixed(2)}`);
+    }
+    if (trailers.aiCreditsPerModel) {
+      const entries = Object.entries(stats.models)
+        .map(([id, usage]) => ({ name: getDisplayName(id), credits: usage.costUsd * 100 }))
+        .sort((a, b) => b.credits - a.credits);
+      if (entries.length > 0) {
+        const value = entries.map((e) => `${e.name}=${e.credits.toFixed(2)}`).join(',');
+        lines.push(`TR_${trailers.aiCreditsPerModel}=${value}`);
+      }
     }
   }
 
@@ -136,12 +157,25 @@ export function parseTrackingFileContent(content: string): RestoredStats | null 
   return { since, interactions, models };
 }
 
-export async function readTrackingFile(): Promise<RestoredStats | null> {
+export type TrackingFileResult =
+  | { kind: 'restored'; stats: RestoredStats }
+  | { kind: 'legacy' }
+  | { kind: 'absent' };
+
+export async function readTrackingFile(): Promise<TrackingFileResult> {
   const uri = await getTrackingFileUri();
-  if (!uri) return null;
+  if (!uri) return { kind: 'absent' };
 
   const content = await readTextFile(uri);
-  if (!content) return null;
+  // readTextFile returns null for both ENOENT and transient I/O errors —
+  // we can't tell them apart, so treat as absent and don't overwrite.
+  if (content === null) return { kind: 'absent' };
+  if (!content.trim()) return { kind: 'absent' };
 
-  return parseTrackingFileContent(content);
+  const stats = parseTrackingFileContent(content);
+  if (stats) return { kind: 'restored', stats };
+
+  // File has content but didn't parse — almost certainly legacy v0.5.x.
+  // Caller should overwrite to clear stale TR_ lines.
+  return { kind: 'legacy' };
 }

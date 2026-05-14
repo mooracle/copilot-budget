@@ -1,7 +1,11 @@
 import * as vscode from 'vscode';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
-import { writeTrackingFile, readTrackingFile } from './trackingFile';
+import {
+  writeTrackingFile,
+  readTrackingFile,
+  isTrackingFileTruncated,
+} from './trackingFile';
 import { installHook, uninstallHook } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
@@ -11,6 +15,42 @@ import { initSqlite, disposeSqlite } from './sqliteReader';
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
   null;
+let commitResetCheck: Promise<boolean> | null = null;
+
+// Detect commit-hook truncation and rebase the tracker so the next commit
+// only reports activity that wasn't already in the consumed trailer.
+// `tracker.consume()` keeps post-commit (and pre-commit-but-unwritten)
+// activity as the next delta — a full reset would absorb it into the new
+// baseline and silently underreport. Returns true when a rebase happened so
+// callers can skip writing stale cumulative stats over the freshly written
+// post-rebase file.
+//
+// Concurrency: overlapping callers share the in-flight promise rather than
+// getting `false` immediately. Without this, a 5s-poll call entering while
+// a stats-change call was mid-await would resolve to `false` and proceed to
+// write a pre-consume snapshot that could race the post-consume write and
+// reintroduce already-consumed trailers.
+function checkCommitReset(): Promise<boolean> {
+  if (!tracker) return Promise.resolve(false);
+  if (commitResetCheck) return commitResetCheck;
+  // Kept as a non-async wrapper around an async IIFE so callers receive the
+  // inner promise directly without an extra wrapping hop — preserves the
+  // microtask depth that listener/poll callbacks rely on.
+  commitResetCheck = (async () => {
+    try {
+      if (!tracker || !(await isTrackingFileTruncated())) return false;
+      tracker.consume();
+      log('Tracking file truncated by commit hook — stats rebased to last snapshot');
+      if (tracker) {
+        await writeTrackingFile(tracker.getStats()).catch(() => {});
+      }
+      return true;
+    } finally {
+      commitResetCheck = null;
+    }
+  })();
+  return commitResetCheck;
+}
 
 const ALL_COMMANDS = [
   'copilot-budget.showStats',
@@ -42,31 +82,50 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   tracker = new Tracker();
 
   // Restore stats from previous session (if tracking file exists)
-  const restored = await readTrackingFile();
-  if (restored) {
-    tracker.setPreviousStats(restored);
+  const trackingFile = await readTrackingFile();
+  if (trackingFile.kind === 'restored') {
+    tracker.setPreviousStats(trackingFile.stats);
     log('Restored stats from previous session');
+  } else if (trackingFile.kind === 'legacy') {
+    log('Tracking file has legacy v0.5.x content, will overwrite');
   } else {
     log('No previous stats to restore');
   }
 
   tracker.start();
 
+  // Only overwrite when we positively identified legacy content — a missing
+  // file, empty file (hook truncation), or transient I/O read failure all
+  // map to 'absent' and must NOT be clobbered with zero stats.
+  if (trackingFile.kind === 'legacy') {
+    await writeTrackingFile(tracker.getStats()).catch(() => {});
+  }
+
   statusBar = createStatusBar(tracker);
   context.subscriptions.push({ dispose: () => statusBar?.dispose() });
 
-  // Write tracking file whenever stats change
+  // Write tracking file whenever stats change. Check for hook truncation
+  // first: if the hook just consumed accumulated trailers, the tracker must
+  // be reset so the next write doesn't re-emit stale TR_ lines.
   const statsWriter = tracker.onStatsChanged((stats) => {
-    writeTrackingFile(stats).catch(() => {});
+    checkCommitReset().then((wasReset) => {
+      if (!wasReset) writeTrackingFile(stats).catch(() => {});
+    }).catch(() => {});
   });
   context.subscriptions.push(statsWriter);
 
-  // Also re-write the tracking file on every poll, in case the commit hook
-  // truncated it. The onStatsChanged listener only fires when stats differ,
-  // so without this the file stays empty after a commit until new activity.
+  // Poll for hook-induced truncation on a short interval. Without this, a
+  // truncation between stats-change events would only be noticed on the next
+  // session-file change, leaving the in-memory tracker out of sync with the
+  // on-disk "consumed" signal. When no truncation is detected we still re-
+  // write current stats so external readers (status bar consumers, manual
+  // file inspection) see a fresh snapshot.
   const trackingFileRefresh = setInterval(() => {
-    if (tracker) writeTrackingFile(tracker.getStats()).catch(() => {});
-  }, 120_000);
+    if (!tracker) return;
+    checkCommitReset().then((wasReset) => {
+      if (tracker && !wasReset) writeTrackingFile(tracker.getStats()).catch(() => {});
+    }).catch(() => {});
+  }, 5_000);
   context.subscriptions.push({ dispose: () => clearInterval(trackingFileRefresh) });
 
   // Register commands
@@ -153,8 +212,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export async function deactivate(): Promise<void> {
   if (tracker) {
-    // Final write of current stats
-    await writeTrackingFile(tracker.getStats()).catch(() => {});
+    // Check for hook truncation before the final write so we don't restore
+    // stale cumulative stats over a freshly consumed file. Awaiting here
+    // also drains any in-flight check started from a listener or the poll.
+    const wasReset = await checkCommitReset().catch(() => false);
+    if (!wasReset) {
+      await writeTrackingFile(tracker.getStats()).catch(() => {});
+    }
     tracker.dispose();
     tracker = null;
   }
@@ -162,6 +226,7 @@ export async function deactivate(): Promise<void> {
     statusBar.dispose();
     statusBar = null;
   }
+  commitResetCheck = null;
   disposeSqlite();
   disposeLogger();
 }

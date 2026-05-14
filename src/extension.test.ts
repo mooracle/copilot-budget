@@ -12,7 +12,11 @@ import { __commandCallbacks } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
-import { writeTrackingFile, readTrackingFile } from './trackingFile';
+import {
+  writeTrackingFile,
+  readTrackingFile,
+  isTrackingFileTruncated,
+} from './trackingFile';
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
@@ -31,6 +35,9 @@ const mockWriteTrackingFile = writeTrackingFile as jest.MockedFunction<
 >;
 const mockReadTrackingFile = readTrackingFile as jest.MockedFunction<
   typeof readTrackingFile
+>;
+const mockIsTrackingFileTruncated = isTrackingFileTruncated as jest.MockedFunction<
+  typeof isTrackingFileTruncated
 >;
 const mockInstallHook = installHook as jest.MockedFunction<typeof installHook>;
 const mockUninstallHook = uninstallHook as jest.MockedFunction<
@@ -104,6 +111,7 @@ beforeEach(async () => {
     start: jest.fn(),
     stop: jest.fn(),
     reset: jest.fn(),
+    consume: jest.fn(),
     update: jest.fn(),
     dispose: jest.fn(),
     setPreviousStats: jest.fn(),
@@ -128,7 +136,8 @@ beforeEach(async () => {
   mockCreateStatusBar.mockReturnValue(mockStatusBarItem as any);
   mockShowStatsQuickPick.mockResolvedValue(undefined);
   mockWriteTrackingFile.mockResolvedValue(true);
-  mockReadTrackingFile.mockResolvedValue(null);
+  mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
+  mockIsTrackingFileTruncated.mockResolvedValue(false);
   mockInstallHook.mockResolvedValue(true);
   mockUninstallHook.mockResolvedValue(true);
   mockIsHookInstalled.mockResolvedValue(false);
@@ -175,7 +184,8 @@ beforeEach(async () => {
     return { dispose: jest.fn() };
   });
   mockWriteTrackingFile.mockResolvedValue(true);
-  mockReadTrackingFile.mockResolvedValue(null);
+  mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
+  mockIsTrackingFileTruncated.mockResolvedValue(false);
   mockIsHookInstalled.mockResolvedValue(false);
   mockInitSqlite.mockResolvedValue(true);
   trackerInstance.onStatsChanged = jest.fn((listener: any) => {
@@ -227,7 +237,41 @@ describe('extension', () => {
         interactions: 3,
       };
       statsChangedListeners[0](stats);
+      // checkCommitReset → then → writeTrackingFile; flush microtasks
+      await Promise.resolve();
+      await Promise.resolve();
       expect(mockWriteTrackingFile).toHaveBeenCalledWith(stats);
+    });
+
+    it('rebases tracker via consume() and skips stale write when stats change after hook truncation', async () => {
+      // After the hook truncates the file, the next stats-change must rebase
+      // the tracker (so the consumed cumulative cost is dropped from the
+      // baseline) and must NOT write the pre-rebase stats back over the
+      // freshly written post-rebase file — otherwise the next commit gets a
+      // duplicate trailer. consume() (not reset()) preserves any post-commit
+      // activity in the new delta instead of absorbing it into the baseline.
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+
+      const staleStats = {
+        since: '2024-01-01',
+        lastUpdated: '2024-01-01',
+        models: {},
+        totalTokens: 500,
+        interactions: 3,
+      };
+      statsChangedListeners[0](staleStats);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.reset).not.toHaveBeenCalled();
+      // checkCommitReset writes the fresh post-rebase stats once; the
+      // listener must NOT additionally write `staleStats`.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalledWith(staleStats);
     });
 
     it('periodically re-writes tracking file even when stats unchanged', async () => {
@@ -236,13 +280,132 @@ describe('extension', () => {
       await activate(ctx);
       mockWriteTrackingFile.mockClear();
 
-      // Advance past one 120s interval
-      jest.advanceTimersByTime(120_000);
+      // Advance past one 5s interval (the truncation-detect / refresh poll)
+      jest.advanceTimersByTime(5_000);
+      // Drain microtasks chained behind the timer's async callback
+      await Promise.resolve();
+      await Promise.resolve();
       expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
 
       // Clean up: dispose subscriptions to clear the interval
       for (const sub of ctx.subscriptions) sub.dispose();
       jest.useRealTimers();
+    });
+
+    it('rebases tracker via consume() on the 5s poll when truncation is detected', async () => {
+      jest.useFakeTimers();
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+      trackerInstance.consume.mockClear();
+      trackerInstance.reset.mockClear();
+
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.reset).not.toHaveBeenCalled();
+      // checkCommitReset writes the post-rebase stats; the timer's own write
+      // must be skipped (wasReset=true).
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(1);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('serializes overlapping truncation checks so a concurrent caller cannot write pre-consume stats', async () => {
+      // Race scenario: a stats-change listener starts checkCommitReset and
+      // suspends on isTrackingFileTruncated. While suspended, the 5s poll
+      // fires a second checkCommitReset. With a boolean guard, the second
+      // call would return false immediately and write `tracker.getStats()`
+      // (still pre-consume at that microtask point), racing the first call's
+      // post-consume write. The promise-cached check makes both callers
+      // share the same in-flight result so consume() runs exactly once and
+      // no pre-consume snapshot is written.
+      jest.useFakeTimers();
+      let resolveTruncated: (val: boolean) => void = () => {};
+      mockIsTrackingFileTruncated.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveTruncated = resolve;
+          }),
+      );
+
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+      trackerInstance.consume.mockClear();
+
+      // Fire the stats-change listener first — this kicks off checkCommitReset
+      // which suspends awaiting isTrackingFileTruncated.
+      const staleStats = {
+        since: '2024-01-01',
+        lastUpdated: '2024-01-01',
+        models: {},
+        totalTokens: 500,
+        interactions: 3,
+      };
+      statsChangedListeners[0](staleStats);
+      await Promise.resolve();
+
+      // Now advance the 5s timer while the first check is still suspended.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+
+      // Release the truncation check.
+      resolveTruncated(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // consume() must run exactly once across both overlapping checks.
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      // Neither overlapping caller may write its captured snapshot — both
+      // share the in-flight check's result (wasReset=true) and skip.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalledWith(staleStats);
+      // Only the single post-rebase write from inside checkCommitReset
+      // reaches the filesystem.
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(1);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('overwrites the tracking file on activation when it contains legacy v0.5.x content', async () => {
+      mockReadTrackingFile.mockResolvedValue({ kind: 'legacy' });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
+    });
+
+    it('does NOT overwrite the tracking file on activation when read returns absent (could be transient I/O error)', async () => {
+      mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      // The onStatsChanged listener may still fire later; the activation
+      // path itself must not synchronously write zeros.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+    });
+
+    it('does NOT overwrite the tracking file on activation when read succeeds with valid stats', async () => {
+      mockReadTrackingFile.mockResolvedValue({
+        kind: 'restored',
+        stats: {
+          since: '2024-01-01T00:00:00Z',
+          interactions: 5,
+          models: {},
+        },
+      });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
     });
 
     it('auto-installs hook when commitHook.enabled is true and workspace exists', async () => {
@@ -322,7 +485,7 @@ describe('extension', () => {
           },
         },
       };
-      mockReadTrackingFile.mockResolvedValue(restored);
+      mockReadTrackingFile.mockResolvedValue({ kind: 'restored', stats: restored });
 
       const ctx = makeContext();
       await activate(ctx);
@@ -331,8 +494,8 @@ describe('extension', () => {
       expect(trackerInstance.setPreviousStats).toHaveBeenCalledWith(restored);
     });
 
-    it('does not call setPreviousStats when readTrackingFile returns null', async () => {
-      mockReadTrackingFile.mockResolvedValue(null);
+    it('does not call setPreviousStats when readTrackingFile returns absent', async () => {
+      mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
 
       const ctx = makeContext();
       await activate(ctx);
@@ -342,7 +505,7 @@ describe('extension', () => {
     });
 
     it('calls readTrackingFile before tracker.start', async () => {
-      mockReadTrackingFile.mockResolvedValue(null);
+      mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
 
       const ctx = makeContext();
       await activate(ctx);

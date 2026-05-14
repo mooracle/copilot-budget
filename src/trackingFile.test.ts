@@ -1,4 +1,9 @@
-import { writeTrackingFile, parseTrackingFileContent, readTrackingFile } from './trackingFile';
+import {
+  writeTrackingFile,
+  parseTrackingFileContent,
+  readTrackingFile,
+  isTrackingFileTruncated,
+} from './trackingFile';
 import { TrackingStats } from './tracker';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
@@ -15,6 +20,7 @@ const mockVscode = vscode as any;
 const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
 const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
 const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
+const mockStat = fsUtils.stat as jest.MockedFunction<typeof fsUtils.stat>;
 const mockGetTrailerConfig = config.getTrailerConfig as jest.MockedFunction<typeof config.getTrailerConfig>;
 const mockGetDisplayName = tokenRates.getDisplayName as jest.MockedFunction<typeof tokenRates.getDisplayName>;
 
@@ -296,6 +302,30 @@ describe('trackingFile', () => {
       expect(content).toContain('TOTAL_AI_CREDITS=0.00');
       expect(content).not.toMatch(/^MODEL_/m);
     });
+
+    it('omits TR_ trailer lines when totalCostUsd is zero', async () => {
+      setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
+        estimatedCost: 'Copilot-Est-Cost',
+        aiCredits: 'Copilot-AI-Credits',
+        aiCreditsPerModel: 'Copilot-AI-Credits-Models',
+      });
+
+      const zeroStats: TrackingStats = {
+        since: '2024-01-15T10:30:00Z',
+        lastUpdated: '2024-01-15T10:30:00Z',
+        models: {},
+        totalTokens: 0,
+        interactions: 0,
+        totalCostUsd: 0,
+        totalAiCredits: 0,
+      };
+
+      await writeTrackingFile(zeroStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).not.toContain('TR_');
+    });
   });
 
   describe('parseTrackingFileContent', () => {
@@ -492,6 +522,38 @@ describe('trackingFile', () => {
       expect(result!.models['gpt-4.1']).toEqual(sampleStats.models['gpt-4.1']);
       expect(result!.models['claude-sonnet-4.6']).toEqual(sampleStats.models['claude-sonnet-4.6']);
     });
+
+    it('preserves sub-cent per-model costs through a write/parse round-trip', async () => {
+      // A handful of input tokens against a $2/M rate produces costs in the
+      // 1e-5 range. The legacy 4-decimal rounding zeroed these out; the
+      // higher per-model precision keeps them intact so totals don't drift
+      // after a restart.
+      setupWorkspace('/project');
+      const tinyStats: TrackingStats = {
+        since: '2024-01-15T10:30:00Z',
+        lastUpdated: '2024-01-15T10:30:00Z',
+        models: {
+          'gpt-4.1': {
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0.00002,
+          },
+        },
+        totalTokens: 15,
+        interactions: 1,
+        totalCostUsd: 0.00002,
+        totalAiCredits: 0.002,
+      };
+
+      await writeTrackingFile(tinyStats);
+      const written = mockWriteTextFile.mock.calls[0][1];
+      const result = parseTrackingFileContent(written);
+
+      expect(result).not.toBeNull();
+      expect(result!.models['gpt-4.1'].costUsd).toBeCloseTo(0.00002, 10);
+    });
   });
 
   describe('readTrackingFile', () => {
@@ -513,10 +575,11 @@ describe('trackingFile', () => {
 
       const result = await readTrackingFile();
 
-      expect(result).not.toBeNull();
-      expect(result!.since).toBe('2024-01-15T10:30:00Z');
-      expect(result!.interactions).toBe(5);
-      expect(result!.models['gpt-4.1']).toEqual({
+      expect(result.kind).toBe('restored');
+      if (result.kind !== 'restored') return;
+      expect(result.stats.since).toBe('2024-01-15T10:30:00Z');
+      expect(result.stats.interactions).toBe(5);
+      expect(result.stats.models['gpt-4.1']).toEqual({
         inputTokens: 100,
         outputTokens: 200,
         cacheReadTokens: 0,
@@ -525,26 +588,26 @@ describe('trackingFile', () => {
       });
     });
 
-    it('returns null when no workspace folder', async () => {
+    it('returns absent when no workspace folder', async () => {
       clearWorkspace();
-      expect(await readTrackingFile()).toBeNull();
+      expect(await readTrackingFile()).toEqual({ kind: 'absent' });
     });
 
-    it('returns null when readTextFile returns null', async () => {
+    it('returns absent on transient read failure (so a valid file is not clobbered)', async () => {
       setupWorkspace('/project');
       mockReadTextFile.mockResolvedValue(null);
 
-      expect(await readTrackingFile()).toBeNull();
+      expect(await readTrackingFile()).toEqual({ kind: 'absent' });
     });
 
-    it('returns null for empty file (truncated by commit hook)', async () => {
+    it('returns absent for empty file (truncated by commit hook)', async () => {
       setupWorkspace('/project');
       mockReadTextFile.mockResolvedValue('');
 
-      expect(await readTrackingFile()).toBeNull();
+      expect(await readTrackingFile()).toEqual({ kind: 'absent' });
     });
 
-    it('returns null for legacy v0.5.x tracking file (no new-format key)', async () => {
+    it('returns legacy for v0.5.x tracking file (caller should overwrite)', async () => {
       setupWorkspace('/project');
       mockReadTextFile.mockResolvedValue(
         [
@@ -557,7 +620,32 @@ describe('trackingFile', () => {
         ].join('\n'),
       );
 
-      expect(await readTrackingFile()).toBeNull();
+      expect(await readTrackingFile()).toEqual({ kind: 'legacy' });
+    });
+  });
+
+  describe('isTrackingFileTruncated', () => {
+    it('returns true when the file exists with 0 bytes (hook just consumed trailers)', async () => {
+      setupWorkspace('/project');
+      mockStat.mockResolvedValue({ size: 0, type: 1, ctime: 0, mtime: 0 } as any);
+      expect(await isTrackingFileTruncated()).toBe(true);
+    });
+
+    it('returns false when the file has content', async () => {
+      setupWorkspace('/project');
+      mockStat.mockResolvedValue({ size: 128, type: 1, ctime: 0, mtime: 0 } as any);
+      expect(await isTrackingFileTruncated()).toBe(false);
+    });
+
+    it('returns false when the file is missing (stat returns null)', async () => {
+      setupWorkspace('/project');
+      mockStat.mockResolvedValue(null);
+      expect(await isTrackingFileTruncated()).toBe(false);
+    });
+
+    it('returns false when there is no workspace', async () => {
+      clearWorkspace();
+      expect(await isTrackingFileTruncated()).toBe(false);
     });
   });
 });

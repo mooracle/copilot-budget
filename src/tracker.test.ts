@@ -567,6 +567,135 @@ describe('Tracker — restored stats merge', () => {
     expect(tracker.getStats().interactions).toBe(0);
     tracker.dispose();
   });
+
+  it('consume() preserves activity that landed since the last update', () => {
+    // Simulates the post-commit window: after update() captures S_update,
+    // the hook truncates the file. Before consume() runs, a new Copilot
+    // turn lands. A full reset would absorb that turn into the new baseline
+    // and silently drop it. consume() rebases to S_update so the new turn
+    // shows up as the next commit's delta.
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: {
+          interactions: 0,
+          modelUsage: {},
+          modelInteractions: {},
+        },
+      },
+    ]);
+    const tracker = new Tracker();
+    tracker.initialize();
+
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 2000,
+        content: '{}',
+        parseResult: {
+          interactions: 2,
+          modelUsage: {
+            'gpt-4.1': {
+              ...emptyTokens(),
+              inputTokens: 1000,
+              outputTokens: 500,
+            },
+          },
+          modelInteractions: { 'gpt-4.1': 2 },
+        },
+      },
+    ]);
+    tracker.update();
+    const consumedStats = tracker.getStats();
+    expect(consumedStats.interactions).toBe(2);
+    expect(consumedStats.models['gpt-4.1'].inputTokens).toBe(1000);
+
+    // New activity lands between the commit (consumed `consumedStats`) and
+    // the truncation-detection running consume().
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 3000,
+        content: '{}',
+        parseResult: {
+          interactions: 3,
+          modelUsage: {
+            'gpt-4.1': {
+              ...emptyTokens(),
+              inputTokens: 1300,
+              outputTokens: 600,
+            },
+          },
+          modelInteractions: { 'gpt-4.1': 3 },
+        },
+      },
+    ]);
+
+    tracker.consume();
+    const postConsume = tracker.getStats();
+    // The 300 input + 100 output that landed after the consumed update
+    // must survive into the next delta. A reset()-style rescan would zero
+    // it out.
+    expect(postConsume.interactions).toBe(1);
+    expect(postConsume.models['gpt-4.1'].inputTokens).toBe(300);
+    expect(postConsume.models['gpt-4.1'].outputTokens).toBe(100);
+    tracker.dispose();
+  });
+
+  it('consume() zeros stats when nothing happened after the last update', () => {
+    // The common case: hook fires, truncation poll detects it before any
+    // new Copilot activity. consume() should produce the same zero-stats
+    // state as reset() would.
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: {
+          interactions: 1,
+          modelUsage: {
+            'gpt-4.1': { ...emptyTokens(), inputTokens: 500 },
+          },
+          modelInteractions: { 'gpt-4.1': 1 },
+        },
+      },
+    ]);
+    const tracker = new Tracker();
+    tracker.initialize();
+    tracker.update();
+
+    tracker.consume();
+    const stats = tracker.getStats();
+    expect(stats.totalTokens).toBe(0);
+    expect(stats.interactions).toBe(0);
+    expect(stats.totalCostUsd).toBe(0);
+    tracker.dispose();
+  });
+
+  it('consume() clears previousStats so restored prior-session stats do not leak forward', () => {
+    setupEmptyDiscovery();
+    const tracker = new Tracker();
+    tracker.setPreviousStats({
+      since: '2026-04-01T00:00:00.000Z',
+      interactions: 5,
+      models: {
+        'gpt-4.1': {
+          ...emptyTokens(),
+          inputTokens: 1000,
+          costUsd: 0.002,
+        } as ModelStats,
+      },
+    });
+    tracker.initialize();
+    expect(tracker.getStats().totalCostUsd).toBeCloseTo(0.002, 6);
+
+    tracker.consume();
+    expect(tracker.getStats().totalCostUsd).toBe(0);
+    expect(tracker.getStats().interactions).toBe(0);
+    tracker.dispose();
+  });
 });
 
 describe('Tracker — mtime caching', () => {

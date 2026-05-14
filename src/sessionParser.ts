@@ -228,19 +228,26 @@ function extractRequestTokens(request: unknown, turnIndex: number): RequestToken
   const promptTokens = clampNonNegInt((metadata as any).promptTokens);
   const outputTokens = clampNonNegInt((metadata as any).outputTokens);
 
-  const rawCacheRead = (metadata as any).cacheReadTokens;
-  let cacheReadTokens: number;
-  if (rawCacheRead === undefined || rawCacheRead === null) {
-    cacheReadTokens = turnIndex >= 2 ? Math.floor(promptTokens * 0.75) : 0;
-  } else {
-    cacheReadTokens = clampNonNegInt(rawCacheRead);
-  }
-
   const rawCacheCreation = (metadata as any).cacheCreationTokens;
   const cacheCreationTokens =
     rawCacheCreation === undefined || rawCacheCreation === null
       ? 0
       : clampNonNegInt(rawCacheCreation);
+
+  const rawCacheRead = (metadata as any).cacheReadTokens;
+  let cacheReadTokens: number;
+  if (rawCacheRead === undefined) {
+    // Field absent entirely → fall back to the heuristic. Apply 75% over the
+    // remaining prompt budget after cache_creation, so the three buckets never
+    // sum above promptTokens when only one cache field is reported. An
+    // explicit `null` is treated as a serialized zero (clampNonNegInt below),
+    // not as missing data — otherwise we'd over-discount requests where the
+    // server reported "no cache reads happened".
+    const remaining = Math.max(0, promptTokens - cacheCreationTokens);
+    cacheReadTokens = turnIndex >= 2 ? Math.floor(remaining * 0.75) : 0;
+  } else {
+    cacheReadTokens = clampNonNegInt(rawCacheRead);
+  }
 
   const inputTokens = Math.max(
     0,
