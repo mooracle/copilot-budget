@@ -1,19 +1,12 @@
 import { createStatusBar, showStatsQuickPick } from './statusBar';
 import { Tracker, TrackingStats } from './tracker';
 import * as vscode from 'vscode';
-import { getPlanInfo } from './planDetector';
+import * as path from 'path';
+import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
-jest.mock('./planDetector', () => ({
-  getPlanInfo: jest.fn().mockReturnValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  }),
-}));
-jest.mock('fs');
 
 const mockWindow = vscode.window as any;
 
@@ -22,29 +15,29 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
     since: '2024-01-15T10:30:00Z',
     lastUpdated: '2024-01-15T12:00:00Z',
     models: {
-      'gpt-4o': {
+      'gpt-4.1': {
         inputTokens: 1500,
         outputTokens: 800,
         cacheReadTokens: 0,
         cacheCreationTokens: 0,
-        costUsd: 0,
-        premiumRequests: 10,
+        costUsd: 0.0094,
+        premiumRequests: 0,
       },
-      'claude-sonnet-4': {
+      'claude-sonnet-4.6': {
         inputTokens: 500,
         outputTokens: 300,
-        cacheReadTokens: 0,
+        cacheReadTokens: 1200,
         cacheCreationTokens: 0,
-        costUsd: 0,
-        premiumRequests: 5,
+        costUsd: 0.00786,
+        premiumRequests: 0,
       },
     },
-    totalTokens: 3100,
+    totalTokens: 4300,
     interactions: 15,
-    premiumRequests: 15,
-    estimatedCost: 0.60,
-    totalCostUsd: 0,
-    totalAiCredits: 0,
+    totalCostUsd: 0.01726,
+    totalAiCredits: 1.726,
+    premiumRequests: 0,
+    estimatedCost: 0,
     ...overrides,
   };
 }
@@ -71,6 +64,15 @@ function createMockTracker(stats: TrackingStats) {
   };
 }
 
+beforeAll(() => {
+  resetRateCardForTesting();
+  loadRateCard(path.join(__dirname, '__fixtures__', 'models-and-pricing.yml'));
+});
+
+afterAll(() => {
+  resetRateCardForTesting();
+});
+
 describe('statusBar', () => {
   let createdItem: any;
 
@@ -78,7 +80,7 @@ describe('statusBar', () => {
     jest.clearAllMocks();
     createdItem = {
       text: '',
-      tooltip: '',
+      tooltip: '' as any,
       command: '',
       show: jest.fn(),
       hide: jest.fn(),
@@ -89,7 +91,7 @@ describe('statusBar', () => {
   });
 
   describe('createStatusBar', () => {
-    it('creates a right-aligned status bar item', () => {
+    it('creates a right-aligned status bar item with priority 100', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -99,22 +101,58 @@ describe('statusBar', () => {
       );
     });
 
-    it('sets initial text with premium requests and cost', () => {
+    it('sets initial text with USD cost and Est suffix', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('15 PR');
-      expect(createdItem.text).toContain('$0.6');
+      expect(createdItem.text).toContain('$(credit-card)');
+      expect(createdItem.text).toContain('$0.02');
+      expect(createdItem.text).toContain('Est');
     });
 
-    it('shows zero for empty stats', () => {
+    it('shows $0.00 for empty stats', () => {
       const { tracker } = createMockTracker(
-        makeStats({ premiumRequests: 0, estimatedCost: 0, models: {} }),
+        makeStats({ totalCostUsd: 0, totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('0 PR');
-      expect(createdItem.text).toContain('$0.0');
+      expect(createdItem.text).toContain('$0.00');
+      expect(createdItem.text).toContain('Est');
+    });
+
+    it('sets tooltip as a MarkdownString with total cost and AIC', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      expect(createdItem.tooltip).toBeInstanceOf(vscode.MarkdownString);
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('Total:');
+      expect(value).toContain('$0.0173');
+      expect(value).toContain('1.73 AIC');
+    });
+
+    it('tooltip lists per-model rows with USD and AIC', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('GPT-4.1');
+      expect(value).toContain('$0.0094');
+      expect(value).toContain('0.94 AIC');
+      expect(value).toContain('Claude Sonnet 4.6');
+      expect(value).toContain('$0.0079');
+      expect(value).toContain('0.79 AIC');
+    });
+
+    it('tooltip includes the heuristic disclosure note', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('estimate');
+      expect(value).toContain('75%');
+      expect(value).toContain('cached input');
+      expect(value).not.toContain('upper bound');
     });
 
     it('subscribes to tracker stats changes', () => {
@@ -124,18 +162,21 @@ describe('statusBar', () => {
       expect(tracker.onStatsChanged).toHaveBeenCalled();
     });
 
-    it('updates text when stats change', () => {
+    it('updates text and tooltip when stats change', () => {
       const { tracker, fireStatsChanged } = createMockTracker(
-        makeStats({ premiumRequests: 0, estimatedCost: 0 }),
+        makeStats({ totalCostUsd: 0, totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('0 PR');
+      expect(createdItem.text).toContain('$0.00');
 
-      fireStatsChanged(makeStats({ premiumRequests: 25.50, estimatedCost: 1.02 }));
+      fireStatsChanged(makeStats({ totalCostUsd: 1.234, totalAiCredits: 123.4, models: {} }));
 
-      expect(createdItem.text).toContain('26 PR');
-      expect(createdItem.text).toContain('$1.0');
+      expect(createdItem.text).toContain('$1.23');
+      expect(createdItem.text).toContain('Est');
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('$1.2340');
+      expect(value).toContain('123.40 AIC');
     });
 
     it('disposes item and subscription on dispose', () => {
@@ -152,30 +193,25 @@ describe('statusBar', () => {
       expect(subDispose).toHaveBeenCalled();
     });
 
-    it('formats premium requests as integers and cost with one decimal', () => {
-      const { tracker } = createMockTracker(
-        makeStats({ premiumRequests: 12.25, estimatedCost: 0.49 }),
-      );
+    it('wires showStats command', () => {
+      const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('12 PR');
-      expect(createdItem.text).toContain('$0.5');
+      expect(createdItem.command).toBe('copilot-budget.showStats');
     });
   });
 
   describe('showStatsQuickPick', () => {
-    it('shows premium requests and estimated cost in header', async () => {
+    it('shows total USD and AIC in header', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
       expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(1);
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const prItem = items.find((i: any) =>
-        i.label?.includes('Premium Requests'),
-      );
-      expect(prItem).toBeDefined();
-      expect(prItem.label).toContain('15');
-      expect(prItem.description).toContain('$0.6');
+      const totalItem = items.find((i: any) => i.label?.includes('Total'));
+      expect(totalItem).toBeDefined();
+      expect(totalItem.label).toContain('$0.0173');
+      expect(totalItem.description).toContain('1.73 AIC');
     });
 
     it('shows tracking since timestamp', async () => {
@@ -189,31 +225,35 @@ describe('statusBar', () => {
       expect(sinceItem).toBeDefined();
     });
 
-    it('shows per-model premium requests and cost', async () => {
+    it('shows per-model USD and AIC, with all four token buckets in detail', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const gptItem = items.find((i: any) =>
-        i.label?.includes('gpt-4o'),
+      const claudeItem = items.find((i: any) =>
+        i.label?.includes('Claude Sonnet 4.6'),
       );
-      expect(gptItem).toBeDefined();
-      expect(gptItem.description).toContain('10 PR');
-      expect(gptItem.description).toContain('$0.4');
+      expect(claudeItem).toBeDefined();
+      expect(claudeItem.description).toContain('$0.0079');
+      expect(claudeItem.description).toContain('0.79 AIC');
+      expect(claudeItem.detail).toContain('in:');
+      expect(claudeItem.detail).toContain('cache_read:');
+      expect(claudeItem.detail).toContain('cache_creation:');
+      expect(claudeItem.detail).toContain('out:');
+      expect(claudeItem.detail).toContain('500');
+      expect(claudeItem.detail).toContain('1,200');
+      expect(claudeItem.detail).toContain('300');
+      expect(claudeItem.detail).toContain('2,000');
     });
 
-    it('shows tokens in detail line', async () => {
+    it('does not include premium-request column anywhere', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const gptItem = items.find((i: any) =>
-        i.label?.includes('gpt-4o'),
-      );
-      expect(gptItem).toBeDefined();
-      expect(gptItem.detail).toContain('2,300');
-      expect(gptItem.detail).toContain('1,500');
-      expect(gptItem.detail).toContain('800');
+      const serialized = JSON.stringify(items);
+      expect(serialized).not.toMatch(/\bPR\b/);
+      expect(serialized.toLowerCase()).not.toContain('premium request');
     });
 
     it('includes a separator before models', async () => {
@@ -221,21 +261,41 @@ describe('statusBar', () => {
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const separator = items.find(
+      const separators = items.filter(
         (i: any) => i.kind === vscode.QuickPickItemKind.Separator,
       );
-      expect(separator).toBeDefined();
+      expect(separators.length).toBeGreaterThanOrEqual(1);
     });
 
     it('handles empty models gracefully', async () => {
       const { tracker } = createMockTracker(
-        makeStats({ models: {}, totalTokens: 0, interactions: 0, premiumRequests: 0, estimatedCost: 0 }),
+        makeStats({
+          models: {},
+          totalTokens: 0,
+          interactions: 0,
+          totalCostUsd: 0,
+          totalAiCredits: 0,
+        }),
       );
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      // Should have premium requests header and since, but no separator or model items
-      expect(items.length).toBe(2);
+      const modelItems = items.filter((i: any) => i.label?.includes('$(hubot)'));
+      expect(modelItems).toHaveLength(0);
+      const totalItem = items.find((i: any) => i.label?.includes('Total'));
+      expect(totalItem.label).toContain('$0.0000');
+    });
+
+    it('includes the heuristic disclosure note as an item', async () => {
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const noteItem = items.find((i: any) =>
+        i.label?.includes('Estimate note'),
+      );
+      expect(noteItem).toBeDefined();
+      expect(noteItem.description).toContain('75%');
     });
 
     it('passes title and placeHolder to quick pick', async () => {
@@ -243,63 +303,8 @@ describe('statusBar', () => {
       await showStatsQuickPick(tracker);
 
       const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toContain('Copilot Budget');
+      expect(options.title).toBe('Copilot Budget');
       expect(options.placeHolder).toBeTruthy();
-    });
-
-    it('shows plan name in title when plan is detected via api', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'pro',
-        costPerRequest: 10 / 300,
-        source: 'api',
-      });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toBe('Copilot Budget - Premium Requests (pro plan)');
-    });
-
-    it('shows plan name in title when plan is from config', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'enterprise',
-        costPerRequest: 0.039,
-        source: 'config',
-      });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toBe('Copilot Budget - Premium Requests (enterprise plan)');
-    });
-
-    it('does not show plan name when source is default', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'unknown',
-        costPerRequest: 0.04,
-        source: 'default',
-      });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toBe('Copilot Budget - Premium Requests');
-    });
-
-    it('uses plan cost per request for per-model cost', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'pro',
-        costPerRequest: 10 / 300,
-        source: 'api',
-      });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const gptItem = items.find((i: any) => i.label?.includes('gpt-4o'));
-      expect(gptItem).toBeDefined();
-      // 10 PR * (10/300) = $0.33, displayed as $0.3
-      expect(gptItem.description).toContain('$0.3');
     });
   });
 });

@@ -212,12 +212,12 @@ Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the 
 - Modify: `src/statusBar.ts`
 - Modify: `src/statusBar.test.ts` (if exists; otherwise create)
 
-- [ ] status bar text: `$(symbol) $X.XX Est` (use existing icon; choose `$(credit-card)` or similar — keep current icon if it fits)
-- [ ] tooltip: include `Total: $X.XXXX (Y.YY AIC)` plus per-model rows `<model>: $X.XXXX (Y.YY AIC)` plus a heuristic disclosure note that does NOT claim direction: "Cost is an estimate. When per-message cache split isn't reported by Copilot, the extension assumes 75% cached input from turn 2 onward (real value may be higher or lower)."
-- [ ] quick pick (the existing `showDiagnostics`-adjacent panel): per-model rows show input / cache_read / cache_creation / output tokens and USD; drop premium-request column
-- [ ] remove all references to `premiumRequests`, `estimatedCost`, plan info
-- [ ] write/update tests: status bar text formatting, tooltip content, empty state ($0.00)
-- [ ] run `npm test` — must pass before next task
+- [x] status bar text: `$(symbol) $X.XX Est` (use existing icon; choose `$(credit-card)` or similar — keep current icon if it fits)
+- [x] tooltip: include `Total: $X.XXXX (Y.YY AIC)` plus per-model rows `<model>: $X.XXXX (Y.YY AIC)` plus a heuristic disclosure note that does NOT claim direction: "Cost is an estimate. When per-message cache split isn't reported by Copilot, the extension assumes 75% cached input from turn 2 onward (real value may be higher or lower)."
+- [x] quick pick (the existing `showDiagnostics`-adjacent panel): per-model rows show input / cache_read / cache_creation / output tokens and USD; drop premium-request column
+- [x] remove all references to `premiumRequests`, `estimatedCost`, plan info
+- [x] write/update tests: status bar text formatting, tooltip content, empty state ($0.00)
+- [x] run `npm test` — must pass before next task
 
 ### Task 7: Delete dead modules + rewrite hook script + wire up `extension.ts`
 

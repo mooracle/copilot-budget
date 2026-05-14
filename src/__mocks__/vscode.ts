@@ -128,6 +128,29 @@ export class Uri {
   }
 }
 
+export class MarkdownString {
+  value: string;
+  isTrusted: boolean;
+  supportHtml: boolean;
+  constructor(value: string = '', supportHtml: boolean = false) {
+    this.value = value;
+    this.isTrusted = false;
+    this.supportHtml = supportHtml;
+  }
+  appendText(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+  appendMarkdown(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+  appendCodeblock(value: string, _language?: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+}
+
 export class Disposable {
   static from(...disposables: { dispose: () => any }[]) {
     return {
