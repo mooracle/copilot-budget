@@ -109,51 +109,65 @@ The YAML upstream is the **single source of truth**. We mirror it byte-identical
     - log + skip any entry missing required keys (`model`/`provider`/`input`/`cached_input`/`output`); don't crash the extension
   - `getRateCard(modelId: string): RateCard | null` — strips known prefixes (`copilot/`, `copilotcli/`, `claude-code/`), lowercases, then:
     1. exact match against the normalized-id map → return
-    2. family fallback: if stripped id is a prefix of any key (e.g. `claude-sonnet-4` matches `claude-sonnet-4.6`), pick the longest matching key
-    3. `null` if no match — callers log + skip costing but still record tokens
+    2. explicit alias table (initially empty; populated only when we observe a real Copilot id that needs mapping) → return aliased rate card
+    3. `null` if no match — callers log + skip costing but still record tokens. **No family/prefix fallback.** Future variants (`claude-sonnet-5`) must show up in the rate card before they get a price, to prevent silent misprice.
   - `computeCost(modelId, tokens: { input, output, cacheRead, cacheCreation }): number` — USD = `(input × rate.input + cacheRead × rate.cachedInput + cacheCreation × (rate.cacheCreation ?? rate.input) + output × rate.output) / 1_000_000`. Unknown model → `0`.
   - `getDisplayName(modelId): string` — rate card's `displayName` if known, else the normalized id
   - `getAllRates(): ReadonlyMap<string, RateCard>` — for status bar / diagnostics
 - [ ] write tests against `src/__fixtures__/models-and-pricing.yml` (hermetic; don't read the live `data/` file):
-  - normalization unit tests: footnote strip, whitespace→hyphen, dot preserved, case folding
+  - normalization unit tests: footnote strip, whitespace→hyphen, dot preserved (`gpt-4.1`, `claude-opus-4.6`), case folding. Full version-qualified names preserved end-to-end (we never collapse `claude-opus-4.6` to `claude-opus-4`).
   - schema robustness: an entry missing `input` doesn't crash the load, just gets skipped with a logged warning
-  - `getRateCard`: exact match per provider, `copilot/` / `copilotcli/` / `claude-code/` prefix strip, family fallback (`claude-sonnet-4` → latest claude-sonnet-4.x), unknown returns null
-  - `computeCost`: all token types, free models (GPT-4.1, GPT-5 mini) compute to $0 even with non-zero tokens, unknown model returns 0, `cacheCreation` rate fallback to `input` for OpenAI/Gemini (no `cache_write` in YAML)
+  - `getRateCard`: exact match per provider; `copilot/` / `copilotcli/` / `claude-code/` prefix strip; **unknown returns null** (no family fallback — `claude-sonnet-5` not in rate card → null, no silent misprice)
+  - `computeCost`: all token types; GPT-4.1 and GPT-5 mini are charged at their published per-token rates (the "included models" footnote is about plan allowance, not zero pricing — our extension can't see plan allowances so we report list AIC for everyone); unknown model returns 0; `cacheCreation` rate fallback to `input` for OpenAI/Gemini (no `cache_write` in YAML)
   - `getDisplayName`: returns YAML `displayName` for known, stripped id for unknown
 - [ ] run `npm run lint && npm test` — must pass before Task 2
 
-### Task 2: Rewrite `sessionParser.ts` to use server tokens + cache split
+### Task 2: Rewrite `sessionParser.ts` to use server tokens + cache split (atomic with Task 3 — single working state)
+
+Tasks 2 and 3 must land together because `tracker.ts:182` and `tracker.ts:220` both call `parseSessionFileContent(..., estimateTokensFromText)`. Removing the third arg from the parser without simultaneously updating tracker breaks `npm test` mid-refactor. Implement both, then run tests once.
 
 **Files:**
 - Modify: `src/sessionParser.ts`
 - Modify: `src/sessionParser.test.ts`
 
-- [ ] remove `estimateTokensFromText` parameter from `parseSessionFileContent` signature; remove char-based `addTokens` logic
-- [ ] extend `ModelUsage` to `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }` (all numbers, default 0)
-- [ ] per request in the delta-reconstructed session: read `request.result.metadata.promptTokens` (fallback `request.completionTokens` only for output), `outputTokens`, `cacheReadTokens?`, `cacheCreationTokens?`
-- [ ] derive uncached input = `promptTokens - (cacheReadTokens ?? 0) - (cacheCreationTokens ?? 0)`; store as `inputTokens` on `ModelUsage`
-- [ ] when `cacheReadTokens` is **undefined**, apply heuristic: track per-session turn index from session-level `requests[]` order; for turn ≥ 2, set `cacheReadTokens = floor(promptTokens × 0.75)` and recompute `inputTokens = promptTokens - cacheReadTokens`; for turn 1, leave at 0
-- [ ] keep `modelInteractions` counter (still useful for trailers + status bar) but stop using it for cost
-- [ ] normalize the per-request `modelId` via `getRateCard(modelId)` — when a card is found, key all aggregation under its normalized name (e.g. `claude-sonnet-4.6`, never `copilot/claude-sonnet-4.6`); when no card is found, log once + key under the stripped id so token totals still surface (cost will be 0)
-- [ ] update parser to drop legacy plain-JSON session handling **only if** it has no callers (verify in tracker.ts); otherwise keep but apply same metadata-based token reads
-- [ ] write tests covering: explicit cache fields present, cache fields absent (heuristic kicks in turn 2+), turn 1 stays at 0% cache, mixed models in one session, missing `result.metadata` (skip request, no crash)
-- [ ] run `npm test` — must pass before next task
+- [ ] remove `estimateTokensFromText` parameter from `parseSessionFileContent` signature; remove char-based `addTokens` logic. Update **all** callers in `tracker.ts` (lines 182 and 220) in the same diff
+- [ ] extend `ModelUsage` to `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }` (all numbers, default 0). `inputTokens` is the **uncached/fresh** input slice (not total prompt); see Task 3 for `totalTokens` invariant
+- [ ] **keep** the plain-JSON branch (non-`.jsonl` path) — it is called by `readSessionsFromVscdb()` via `tracker.ts:220` to parse vscdb-extracted JSON strings. Apply the same metadata-based token reads in both branches; the only thing being dropped is char-based estimation
+- [ ] per request in the delta-reconstructed session (and in the plain-JSON branch): read `request.result.metadata.promptTokens`, `outputTokens`, `cacheReadTokens?`, `cacheCreationTokens?`. Treat missing/non-numeric/negative values as zero per field; never crash. Pending requests (no `result` or `modelState.value !== 1`) contribute zero tokens and zero cost, but are **not** counted as interactions either — a pending request is half a turn
+- [ ] derive `inputTokens` = `max(0, promptTokens - (cacheReadTokens ?? 0) - (cacheCreationTokens ?? 0))`
+- [ ] when `cacheReadTokens` is **undefined**, apply heuristic: track per-session turn index from session-level `requests[]` order; for turn ≥ 2, set `cacheReadTokens = floor(promptTokens × 0.75)` and recompute `inputTokens = promptTokens - cacheReadTokens`; for turn 1, leave at 0. The heuristic shifts input from full-rate to cached-rate bucket, so the resulting cost is **lower than treating all input as fresh** (NOT an upper bound — label everywhere as "Est"/heuristic, not "upper bound")
+- [ ] keep `modelInteractions` counter (still useful for status bar diagnostics) but stop using it for cost
+- [ ] normalize the per-request `modelId` via `getRateCard(modelId)` — when a card is found, key all aggregation under its normalized name (e.g. `claude-opus-4.6`, never collapsed to `claude-opus`); when no card is found, log once + key under the stripped id so token totals still surface (cost will be 0)
+- [ ] write tests covering:
+  - explicit cache fields present (Anthropic with `cacheReadTokens` + `cacheCreationTokens`); heuristic does NOT fire
+  - cache fields absent → heuristic fires from turn 2; turn 1 stays at 0% cache
+  - mixed models in one session (Sonnet 4.6 + GPT-5.3-Codex), each keyed at full version name
+  - missing `result.metadata` entirely → request skipped, no crash, no interaction increment
+  - **malformed**: `promptTokens = "abc"`, `outputTokens = -100`, `cacheReadTokens = null` → all clamped to 0, request still parsed
+  - **kind:1 path-update delta** carrying `metadata` via `["requests", 0, "result", "metadata"]` path (not just the kind:0 initial snapshot) — verify metadata still reaches the aggregator
+  - pending request (modelState !== 1) → 0 tokens, 0 cost, not counted as an interaction
+  - vscdb plain-JSON path: a captured vscdb session string is parsed the same as a `.jsonl` delta session with equivalent content
+- [ ] run `npm test` — must pass before Task 4
 
-### Task 3: Rewrite `tracker.ts` for token+cost aggregation
+### Task 3: Rewrite `tracker.ts` for token+cost aggregation (atomic with Task 2)
+
+Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the new `parseSessionFileContent` signature.
 
 **Files:**
 - Modify: `src/tracker.ts`
 - Modify: `src/tracker.test.ts`
 
 - [ ] update `TrackingStats` type: `{ since, lastUpdated, models: { [model]: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd } }, totalTokens, interactions, totalCostUsd, totalAiCredits }`. Drop `premiumRequests`, `estimatedCost`
+- [ ] **`totalTokens` invariant**: sum across all four token buckets (`input + cacheRead + cacheCreation + output`) per model, then across models. The status-bar token count must NOT silently drop cached tokens
 - [ ] update `RestoredStats` to mirror new model shape (without `lastUpdated`)
 - [ ] remove `planInfoProvider` field + `setPlanInfoProvider` method
 - [ ] remove imports of `getPremiumMultiplier`, `PlanInfo`, `DEFAULT_COST_PER_REQUEST`
+- [ ] update the two `parseSessionFileContent(...)` callsites (lines 182 and 220) to drop the `estimateTokensFromText` third argument
 - [ ] `computeStats`: compute deltas per model on the four token fields; call `computeCost` from `tokenRates.ts` per model to get `costUsd`; total USD = sum across models; total AIC = totalCostUsd × 100
 - [ ] update `mergeModelUsage` / `accumulateModel` helpers for the new fields
 - [ ] update baseline + cache-eviction logic (no shape change beyond adding two fields)
 - [ ] update `notifyListeners` change-detection comparison (compare totalCostUsd instead of premiumRequests/estimatedCost)
-- [ ] write tests: delta computation per model, free model contributes 0 cost, mixed Anthropic + OpenAI session, restored-from-disk merge, baseline snapshot
+- [ ] write tests: delta computation per model, GPT-4.1 + GPT-5 mini **DO** contribute cost at the published rate (no special-case zero), mixed Anthropic + OpenAI session, restored-from-disk merge, baseline snapshot, `totalTokens` includes cacheRead/cacheCreation
 - [ ] run `npm test` — must pass before next task
 
 ### Task 4: Rewrite `config.ts` trailer settings
@@ -181,8 +195,15 @@ The YAML upstream is the **single source of truth**. We mirror it byte-identical
   - `TR_<estimatedCost>=$<x.xx>` if enabled — **includes the `$` prefix** matching the v0.5.3 output format byte-for-byte
   - `TR_<aiCredits>=<x.xx>` if enabled (credits, 2 dp, no prefix)
   - `TR_<aiCreditsPerModel>=<model1>=<credits1>,<model2>=<credits2>...` if enabled — model names come from `getDisplayName(id)` (the rate card's original `displayName`, e.g. `Claude Sonnet 4.6`); sorted by descending credits; commas separating entries; 2 dp credits. The `MODEL_<sanitized>_*` tracking keys still go through `sanitizeModelName` (POSIX hook grep needs identifier-safe keys), but the human-facing trailer uses the registry display name
-- [ ] `parseTrackingFileContent`: parse the new keys into `RestoredStats`; ignore unknown / legacy keys silently; require `SINCE` to consider file valid
-- [ ] write tests: round-trip (write then parse), missing optional trailers, only some models, malformed lines ignored, MODEL_* with all four fields
+- [ ] `parseTrackingFileContent`: parse the new keys into `RestoredStats`; ignore unknown lines silently; require `SINCE` **and** at least one new-format key (e.g. `TOTAL_COST_USD=` or `TOTAL_AI_CREDITS=`) to consider the file valid. **Legacy v0.5.x files (which only carry `PREMIUM_REQUESTS=` and `MODEL <n> <i> <o> <p>` rows) return `null`** — the tracker treats them as no prior data and starts from scratch. PR and AIC are not convertible metrics; carrying any v0.5.x value into v0.6 would just be noise
+- [ ] write tests:
+  - round-trip (write then parse)
+  - missing optional trailers
+  - only some models
+  - malformed lines ignored
+  - MODEL_* with all four token fields
+  - **legacy v0.5.x file**: input with `PREMIUM_REQUESTS=8.00`, `MODEL claude_sonnet_4_6 ... ... ...` rows → parser returns `null` (no restore)
+- [ ] CHANGELOG entry under 0.6.0: explicit "**Breaking**: upgrading from 0.5.x discards the previous tracking file. Counter starts fresh on first launch."
 - [ ] run `npm test` — must pass before next task
 
 ### Task 6: Update `statusBar.ts` for USD display
@@ -192,25 +213,27 @@ The YAML upstream is the **single source of truth**. We mirror it byte-identical
 - Modify: `src/statusBar.test.ts` (if exists; otherwise create)
 
 - [ ] status bar text: `$(symbol) $X.XX Est` (use existing icon; choose `$(credit-card)` or similar — keep current icon if it fits)
-- [ ] tooltip: include `Total: $X.XXXX (Y.YY AIC)` plus per-model rows `<model>: $X.XXXX (Y.YY AIC)` plus the heuristic disclosure note ("Cost is upper-bound estimate; cache reads not yet reported by Copilot")
+- [ ] tooltip: include `Total: $X.XXXX (Y.YY AIC)` plus per-model rows `<model>: $X.XXXX (Y.YY AIC)` plus a heuristic disclosure note that does NOT claim direction: "Cost is an estimate. When per-message cache split isn't reported by Copilot, the extension assumes 75% cached input from turn 2 onward (real value may be higher or lower)."
 - [ ] quick pick (the existing `showDiagnostics`-adjacent panel): per-model rows show input / cache_read / cache_creation / output tokens and USD; drop premium-request column
 - [ ] remove all references to `premiumRequests`, `estimatedCost`, plan info
 - [ ] write/update tests: status bar text formatting, tooltip content, empty state ($0.00)
 - [ ] run `npm test` — must pass before next task
 
-### Task 7: Delete dead modules + wire up `extension.ts`
+### Task 7: Delete dead modules + rewrite hook script + wire up `extension.ts`
 
 **Files:**
 - Delete: `src/tokenEstimator.ts`, `src/tokenEstimator.test.ts`, `src/tokenEstimators.test.ts`, `data/tokenEstimators.json`, `src/planDetector.ts`, `src/planDetector.test.ts`
 - Modify: `src/extension.ts`
 - Modify: `src/utils.ts` (if it re-exports anything plan-related — verify)
-- Modify: `src/commitHook.ts` (comments only)
+- Modify: `src/commitHook.ts` (**script body changes — see below, not comments only**)
+- Modify: `src/commitHook.test.ts`
 - Modify: `package.json` (esbuild config to stop copying `tokenEstimators.json` to `dist/` if it does)
 
 - [ ] remove plan-detector imports + `detectPlan()` / `startPeriodicRefresh()` / `disposePlanDetector()` / `onPlanChanged` calls in `extension.ts`
 - [ ] remove `tracker.setPlanInfoProvider(...)` call in `extension.ts`
 - [ ] delete the six files above; verify `git grep -l 'tokenEstimator\|planDetector\|PlanInfo\|PLAN_COSTS\|getPremiumMultiplier\|estimateTokensFromText\|PlanSetting'` returns nothing
-- [ ] update `src/commitHook.ts` script comments where they reference premium requests; the generated POSIX hook itself stays unchanged (still greps `TR_` lines generically)
+- [ ] **rewrite `src/commitHook.ts` POSIX script generator**: the current script reads `PREMIUM_REQUESTS=<n>` and `exit 0` if missing or `0.00` — that's the gate that decides whether to append anything. With the new schema there is no `PREMIUM_REQUESTS` key, so the gate would always fire and **no trailers would ever be appended**. New gate: detect presence of **any** `TR_` line. If the tracking file has at least one `TR_<name>=<value>` line, append every such line as a `<name>: <value>` git trailer; otherwise skip. Reset/truncate the tracking file after appending, as today
+- [ ] update `src/commitHook.test.ts` for the new gate logic: tracking file with `TR_Copilot-Est-Cost=$0.26\nTR_Copilot-AI-Credits=26.18` → both trailers appended; tracking file with no `TR_` lines (or empty) → no trailers; legacy v0.5.x file with `PREMIUM_REQUESTS=...` but no `TR_` lines → no trailers (intentional — forces a re-tracking pass)
 - [ ] check `package.json` esbuild script — if it explicitly copies `data/tokenEstimators.json` into `dist/`, drop that line (Task 1 already added the `data/models-and-pricing.yml` copy step); if it copies the whole `data/` dir, no change needed
 - [ ] run `npm run lint && npm test` — must pass before next task
 
