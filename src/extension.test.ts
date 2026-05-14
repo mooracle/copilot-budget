@@ -404,7 +404,16 @@ describe('extension', () => {
       const restored = {
         since: '2024-01-01T00:00:00Z',
         interactions: 5,
-        models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 5 } },
+        models: {
+          'gpt-4o': {
+            inputTokens: 100,
+            outputTokens: 200,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            premiumRequests: 5,
+          },
+        },
       };
       mockReadTrackingFile.mockResolvedValue(restored);
 

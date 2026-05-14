@@ -32,13 +32,29 @@ const sampleStats: TrackingStats = {
   since: '2024-01-15T10:30:00Z',
   lastUpdated: '2024-01-15T12:00:00Z',
   models: {
-    'gpt-4o': { inputTokens: 1500, outputTokens: 800, premiumRequests: 10 },
-    'claude-sonnet-4': { inputTokens: 500, outputTokens: 300, premiumRequests: 5 },
+    'gpt-4o': {
+      inputTokens: 1500,
+      outputTokens: 800,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      premiumRequests: 10,
+    },
+    'claude-sonnet-4': {
+      inputTokens: 500,
+      outputTokens: 300,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      premiumRequests: 5,
+    },
   },
   totalTokens: 3100,
   interactions: 15,
   premiumRequests: 15,
   estimatedCost: 0.60,
+  totalCostUsd: 0,
+  totalAiCredits: 0,
 };
 
 beforeEach(() => {
@@ -112,14 +128,37 @@ describe('trackingFile', () => {
         since: '2024-01-15T10:30:00Z',
         lastUpdated: '2024-01-15T12:00:00Z',
         models: {
-          'model with spaces': { inputTokens: 100, outputTokens: 50, premiumRequests: 1 },
-          'model$(cmd)': { inputTokens: 200, outputTokens: 100, premiumRequests: 1 },
-          'model`id`': { inputTokens: 300, outputTokens: 150, premiumRequests: 1 },
+          'model with spaces': {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            premiumRequests: 1,
+          },
+          'model$(cmd)': {
+            inputTokens: 200,
+            outputTokens: 100,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            premiumRequests: 1,
+          },
+          'model`id`': {
+            inputTokens: 300,
+            outputTokens: 150,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            premiumRequests: 1,
+          },
         },
         totalTokens: 900,
         interactions: 3,
         premiumRequests: 3,
         estimatedCost: 0.12,
+        totalCostUsd: 0,
+        totalAiCredits: 0,
       };
 
       await writeTrackingFile(unsafeStats);
@@ -191,12 +230,21 @@ describe('trackingFile', () => {
         since: '2024-01-15T10:30:00Z',
         lastUpdated: '2024-01-15T12:00:00Z',
         models: {
-          'model$(cmd)': { inputTokens: 200, outputTokens: 100, premiumRequests: 1 },
+          'model$(cmd)': {
+            inputTokens: 200,
+            outputTokens: 100,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            premiumRequests: 1,
+          },
         },
         totalTokens: 300,
         interactions: 1,
         premiumRequests: 1,
         estimatedCost: 0.04,
+        totalCostUsd: 0,
+        totalAiCredits: 0,
       };
 
       await writeTrackingFile(unsafeStats);
@@ -217,6 +265,8 @@ describe('trackingFile', () => {
         interactions: 0,
         premiumRequests: 0,
         estimatedCost: 0,
+        totalCostUsd: 0,
+        totalAiCredits: 0,
       };
 
       await writeTrackingFile(emptyStats);
@@ -245,8 +295,22 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe('2024-01-15T10:30:00Z');
       expect(result!.interactions).toBe(15);
-      expect(result!.models['gpt-4o']).toEqual({ inputTokens: 1500, outputTokens: 800, premiumRequests: 10 });
-      expect(result!.models['claude-sonnet-4']).toEqual({ inputTokens: 500, outputTokens: 300, premiumRequests: 5 });
+      expect(result!.models['gpt-4o']).toEqual({
+        inputTokens: 1500,
+        outputTokens: 800,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        premiumRequests: 10,
+      });
+      expect(result!.models['claude-sonnet-4']).toEqual({
+        inputTokens: 500,
+        outputTokens: 300,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        premiumRequests: 5,
+      });
     });
 
     it('returns null for empty content', () => {
@@ -316,7 +380,14 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe('2024-01-15T10:30:00Z');
       expect(result!.interactions).toBe(5);
-      expect(result!.models['gpt-4o']).toEqual({ inputTokens: 100, outputTokens: 200, premiumRequests: 3 });
+      expect(result!.models['gpt-4o']).toEqual({
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        premiumRequests: 3,
+      });
     });
 
     it('roundtrips with writeTrackingFile output', async () => {
@@ -349,7 +420,14 @@ describe('trackingFile', () => {
       expect(result).not.toBeNull();
       expect(result!.since).toBe('2024-01-15T10:30:00Z');
       expect(result!.interactions).toBe(5);
-      expect(result!.models['gpt-4o']).toEqual({ inputTokens: 100, outputTokens: 200, premiumRequests: 3 });
+      expect(result!.models['gpt-4o']).toEqual({
+        inputTokens: 100,
+        outputTokens: 200,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        premiumRequests: 3,
+      });
     });
 
     it('returns null when no workspace folder', async () => {

@@ -77,7 +77,14 @@ export function parseTrackingFileContent(content: string): RestoredStats | null 
         const outputTokens = parseInt(parts[3], 10);
         const premiumRequests = parseFloat(parts[4]);
         if (!isNaN(inputTokens) && !isNaN(outputTokens) && !isNaN(premiumRequests)) {
-          models[name] = { inputTokens, outputTokens, premiumRequests };
+          models[name] = {
+            inputTokens,
+            outputTokens,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+            premiumRequests,
+          };
         }
       }
     }

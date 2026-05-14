@@ -130,15 +130,15 @@ Tasks 2 and 3 must land together because `tracker.ts:182` and `tracker.ts:220` b
 - Modify: `src/sessionParser.ts`
 - Modify: `src/sessionParser.test.ts`
 
-- [ ] remove `estimateTokensFromText` parameter from `parseSessionFileContent` signature; remove char-based `addTokens` logic. Update **all** callers in `tracker.ts` (lines 182 and 220) in the same diff
-- [ ] extend `ModelUsage` to `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }` (all numbers, default 0). `inputTokens` is the **uncached/fresh** input slice (not total prompt); see Task 3 for `totalTokens` invariant
-- [ ] **keep** the plain-JSON branch (non-`.jsonl` path) — it is called by `readSessionsFromVscdb()` via `tracker.ts:220` to parse vscdb-extracted JSON strings. Apply the same metadata-based token reads in both branches; the only thing being dropped is char-based estimation
-- [ ] per request in the delta-reconstructed session (and in the plain-JSON branch): read `request.result.metadata.promptTokens`, `outputTokens`, `cacheReadTokens?`, `cacheCreationTokens?`. Treat missing/non-numeric/negative values as zero per field; never crash. Pending requests (no `result` or `modelState.value !== 1`) contribute zero tokens and zero cost, but are **not** counted as interactions either — a pending request is half a turn
-- [ ] derive `inputTokens` = `max(0, promptTokens - (cacheReadTokens ?? 0) - (cacheCreationTokens ?? 0))`
-- [ ] when `cacheReadTokens` is **undefined**, apply heuristic: track per-session turn index from session-level `requests[]` order; for turn ≥ 2, set `cacheReadTokens = floor(promptTokens × 0.75)` and recompute `inputTokens = promptTokens - cacheReadTokens`; for turn 1, leave at 0. The heuristic shifts input from full-rate to cached-rate bucket, so the resulting cost is **lower than treating all input as fresh** (NOT an upper bound — label everywhere as "Est"/heuristic, not "upper bound")
-- [ ] keep `modelInteractions` counter (still useful for status bar diagnostics) but stop using it for cost
-- [ ] normalize the per-request `modelId` via `getRateCard(modelId)` — when a card is found, key all aggregation under its normalized name (e.g. `claude-opus-4.6`, never collapsed to `claude-opus`); when no card is found, log once + key under the stripped id so token totals still surface (cost will be 0)
-- [ ] write tests covering:
+- [x] remove `estimateTokensFromText` parameter from `parseSessionFileContent` signature; remove char-based `addTokens` logic. Update **all** callers in `tracker.ts` (lines 182 and 220) in the same diff
+- [x] extend `ModelUsage` to `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }` (all numbers, default 0). `inputTokens` is the **uncached/fresh** input slice (not total prompt); see Task 3 for `totalTokens` invariant
+- [x] **keep** the plain-JSON branch (non-`.jsonl` path) — it is called by `readSessionsFromVscdb()` via `tracker.ts:220` to parse vscdb-extracted JSON strings. Apply the same metadata-based token reads in both branches; the only thing being dropped is char-based estimation
+- [x] per request in the delta-reconstructed session (and in the plain-JSON branch): read `request.result.metadata.promptTokens`, `outputTokens`, `cacheReadTokens?`, `cacheCreationTokens?`. Treat missing/non-numeric/negative values as zero per field; never crash. Pending requests (no `result` or `modelState.value !== 1`) contribute zero tokens and zero cost, but are **not** counted as interactions either — a pending request is half a turn
+- [x] derive `inputTokens` = `max(0, promptTokens - (cacheReadTokens ?? 0) - (cacheCreationTokens ?? 0))`
+- [x] when `cacheReadTokens` is **undefined**, apply heuristic: track per-session turn index from session-level `requests[]` order; for turn ≥ 2, set `cacheReadTokens = floor(promptTokens × 0.75)` and recompute `inputTokens = promptTokens - cacheReadTokens`; for turn 1, leave at 0. The heuristic shifts input from full-rate to cached-rate bucket, so the resulting cost is **lower than treating all input as fresh** (NOT an upper bound — label everywhere as "Est"/heuristic, not "upper bound")
+- [x] keep `modelInteractions` counter (still useful for status bar diagnostics) but stop using it for cost
+- [x] normalize the per-request `modelId` via `getRateCard(modelId)` — when a card is found, key all aggregation under its normalized name (e.g. `claude-opus-4.6`, never collapsed to `claude-opus`); when no card is found, log once + key under the stripped id so token totals still surface (cost will be 0)
+- [x] write tests covering:
   - explicit cache fields present (Anthropic with `cacheReadTokens` + `cacheCreationTokens`); heuristic does NOT fire
   - cache fields absent → heuristic fires from turn 2; turn 1 stays at 0% cache
   - mixed models in one session (Sonnet 4.6 + GPT-5.3-Codex), each keyed at full version name
@@ -147,7 +147,7 @@ Tasks 2 and 3 must land together because `tracker.ts:182` and `tracker.ts:220` b
   - **kind:1 path-update delta** carrying `metadata` via `["requests", 0, "result", "metadata"]` path (not just the kind:0 initial snapshot) — verify metadata still reaches the aggregator
   - pending request (modelState !== 1) → 0 tokens, 0 cost, not counted as an interaction
   - vscdb plain-JSON path: a captured vscdb session string is parsed the same as a `.jsonl` delta session with equivalent content
-- [ ] run `npm test` — must pass before Task 4
+- [x] run `npm test` — must pass before Task 4
 
 ### Task 3: Rewrite `tracker.ts` for token+cost aggregation (atomic with Task 2)
 
@@ -157,18 +157,18 @@ Land alongside Task 2 in the same commit/PR so `tracker.ts` callsites match the 
 - Modify: `src/tracker.ts`
 - Modify: `src/tracker.test.ts`
 
-- [ ] update `TrackingStats` type: `{ since, lastUpdated, models: { [model]: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd } }, totalTokens, interactions, totalCostUsd, totalAiCredits }`. Drop `premiumRequests`, `estimatedCost`
-- [ ] **`totalTokens` invariant**: sum across all four token buckets (`input + cacheRead + cacheCreation + output`) per model, then across models. The status-bar token count must NOT silently drop cached tokens
-- [ ] update `RestoredStats` to mirror new model shape (without `lastUpdated`)
-- [ ] remove `planInfoProvider` field + `setPlanInfoProvider` method
-- [ ] remove imports of `getPremiumMultiplier`, `PlanInfo`, `DEFAULT_COST_PER_REQUEST`
-- [ ] update the two `parseSessionFileContent(...)` callsites (lines 182 and 220) to drop the `estimateTokensFromText` third argument
-- [ ] `computeStats`: compute deltas per model on the four token fields; call `computeCost` from `tokenRates.ts` per model to get `costUsd`; total USD = sum across models; total AIC = totalCostUsd × 100
-- [ ] update `mergeModelUsage` / `accumulateModel` helpers for the new fields
-- [ ] update baseline + cache-eviction logic (no shape change beyond adding two fields)
-- [ ] update `notifyListeners` change-detection comparison (compare totalCostUsd instead of premiumRequests/estimatedCost)
-- [ ] write tests: delta computation per model, GPT-4.1 + GPT-5 mini **DO** contribute cost at the published rate (no special-case zero), mixed Anthropic + OpenAI session, restored-from-disk merge, baseline snapshot, `totalTokens` includes cacheRead/cacheCreation
-- [ ] run `npm test` — must pass before next task
+- [x] update `TrackingStats` type: `{ since, lastUpdated, models: { [model]: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd } }, totalTokens, interactions, totalCostUsd, totalAiCredits }`. Drop `premiumRequests`, `estimatedCost` *(legacy `premiumRequests`/`estimatedCost` retained as 0-valued shims on ModelStats/TrackingStats so statusBar.ts, trackingFile.ts, extension.ts still compile; Tasks 5/6/7 delete them along with their last consumers)*
+- [x] **`totalTokens` invariant**: sum across all four token buckets (`input + cacheRead + cacheCreation + output`) per model, then across models. The status-bar token count must NOT silently drop cached tokens
+- [x] update `RestoredStats` to mirror new model shape (without `lastUpdated`)
+- [x] remove `planInfoProvider` field + `setPlanInfoProvider` method *(method kept as a no-op for caller compile-compat; deleted in Task 7 alongside planDetector)*
+- [x] remove imports of `getPremiumMultiplier`, `PlanInfo`, `DEFAULT_COST_PER_REQUEST` *(only `PlanInfo`/`DEFAULT_COST_PER_REQUEST` still type-imported by the deprecated `setPlanInfoProvider` shim — drops in Task 7)*
+- [x] update the two `parseSessionFileContent(...)` callsites (lines 182 and 220) to drop the `estimateTokensFromText` third argument
+- [x] `computeStats`: compute deltas per model on the four token fields; call `computeCost` from `tokenRates.ts` per model to get `costUsd`; total USD = sum across models; total AIC = totalCostUsd × 100
+- [x] update `mergeModelUsage` / `accumulateModel` helpers for the new fields
+- [x] update baseline + cache-eviction logic (no shape change beyond adding two fields)
+- [x] update `notifyListeners` change-detection comparison (compare totalCostUsd instead of premiumRequests/estimatedCost)
+- [x] write tests: delta computation per model, GPT-4.1 + GPT-5 mini **DO** contribute cost at the published rate (no special-case zero), mixed Anthropic + OpenAI session, restored-from-disk merge, baseline snapshot, `totalTokens` includes cacheRead/cacheCreation
+- [x] run `npm test` — must pass before next task
 
 ### Task 4: Rewrite `config.ts` trailer settings
 
