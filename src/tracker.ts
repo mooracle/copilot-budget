@@ -123,15 +123,6 @@ export class Tracker {
   setPreviousStats(restored: RestoredStats): void {
     this.previousStats = restored;
     this.since = restored.since;
-    // Keep lastStats.since in sync when setPreviousStats is called after
-    // initialize() (i.e. after activation, during unread-recovery). Without
-    // this, a zero-state restore (INTERACTIONS=0, totalAiCredits=0) wouldn't
-    // trip the update() comparator on totalTokens/interactions/totalAiCredits,
-    // and the activation-time since would silently persist into the next
-    // tracking-file write and the status-bar tooltip.
-    if (this.lastStats) {
-      this.lastStats = { ...this.lastStats, since: restored.since };
-    }
   }
 
   onStatsChanged(listener: StatsListener): { dispose: () => void } {
