@@ -543,6 +543,35 @@ describe('Tracker — restored stats merge', () => {
     tracker.dispose();
   });
 
+  it('setPreviousStats after initialize keeps lastStats.since in sync (zero-state restore)', () => {
+    // Scenario: activation observed an 'unread' tracking file. tracker.start()
+    // ran initialize() with the activation-time since. Recovery later reads
+    // the file successfully and finds a zero-state snapshot (INTERACTIONS=0,
+    // totalAiCredits=0). setPreviousStats updates this.since to the restored
+    // value, but update()'s comparator (totalTokens/interactions/totalAiCredits)
+    // sees no change and doesn't refresh lastStats. Without syncing
+    // lastStats.since inside setPreviousStats, getStats() would keep
+    // activation-time since — leaking into the persisted tracking file and
+    // the status-bar tooltip.
+    setupEmptyDiscovery();
+    const tracker = new Tracker();
+    tracker.initialize();
+    const initialSince = tracker.getStats().since;
+
+    const restoredSince = '2026-04-01T00:00:00.000Z';
+    expect(restoredSince).not.toBe(initialSince);
+
+    tracker.setPreviousStats({
+      since: restoredSince,
+      interactions: 0,
+      models: {},
+    });
+    tracker.update();
+
+    expect(tracker.getStats().since).toBe(restoredSince);
+    tracker.dispose();
+  });
+
   it('reset() clears previousStats and resets baseline', () => {
     setupEmptyDiscovery();
     const tracker = new Tracker();

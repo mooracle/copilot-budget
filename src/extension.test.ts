@@ -407,6 +407,381 @@ describe('extension', () => {
       expect(mockWriteTrackingFile).not.toHaveBeenCalled();
     });
 
+    it('defers writes when readTrackingFile returns unread (transient I/O on existing file)', async () => {
+      // 'unread' = file exists with size > 0 but couldn't be read this tick.
+      // Writing zero stats over a valid file would silently destroy the
+      // user's accumulated session. The activation path, stats-change
+      // listener, and refresh poll must all defer writes until a follow-up
+      // read succeeds.
+      jest.useFakeTimers();
+      mockReadTrackingFile.mockResolvedValue({ kind: 'unread' });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+
+      // Stats-change listener fires while still unread → still no write.
+      statsChangedListeners[0]({ ...SAMPLE_STATS });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
+      // Refresh poll fires while still unread → also no write.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('recovers from unread state once read succeeds, restoring previous stats', async () => {
+      jest.useFakeTimers();
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'unread' });
+      const restored = {
+        since: '2024-01-01T00:00:00Z',
+        interactions: 5,
+        models: {},
+      };
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'restored', stats: restored });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+
+      // Next refresh tick re-reads, gets 'restored', restores stats and
+      // resumes writes. update() emits a stats-change which writes.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.setPreviousStats).toHaveBeenCalledWith(restored);
+      expect(trackerInstance.update).toHaveBeenCalled();
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('overwrites legacy content immediately when recovering from unread', async () => {
+      // Scenario: activation observes 'unread' (file exists but not readable).
+      // Later the file becomes readable but contains legacy v0.5.x content —
+      // possibly with stale TR_ lines the commit hook would pick up. The
+      // activation path always overwrites legacy content immediately (see
+      // lines around `if (trackingFile.kind === 'legacy')`). Recovery must
+      // mirror that: otherwise the stale file lingers until the next
+      // stats-change or 5s poll, and a commit landing in the gap appends
+      // stale trailers.
+      jest.useFakeTimers();
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'unread' });
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'legacy' });
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
+      // Refresh tick: re-read returns 'legacy'. Recovery must immediately
+      // overwrite the stale content with current stats.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
+      // setPreviousStats must NOT be called on legacy — the file's contents
+      // are unparseable as the new format, so there's nothing to restore.
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('writes current stats immediately when recovery finds the file absent', async () => {
+      // Scenario: activation observes 'unread' (file exists but not readable).
+      // Later the file becomes readable but is genuinely absent — possibly
+      // deleted by the user or consumed by the commit hook between activation
+      // and the next tick. In-memory stats may already be accumulating, so
+      // recovery must write them out immediately. Otherwise a commit landing
+      // in the gap before the next stats-change or 5s poll would find no
+      // tracking file and drop the trailer entirely.
+      jest.useFakeTimers();
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'unread' });
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'absent' });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
+      // Refresh tick: re-read returns 'absent'. Recovery must immediately
+      // write the current in-memory stats so a commit can't slip through
+      // before the next poll.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
+      // setPreviousStats must NOT be called on 'absent' — there's nothing on
+      // disk to restore.
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('does not call consume() again when an intervening stat() fails between truncated polls', async () => {
+      // Scenario: hook truncates, first poll detects, consume() runs, write
+      // fails → pendingConsumeWrite=true. Second poll's stat() fails with an
+      // ambiguous error (isTrackingFileTruncated returns null) — caller must
+      // NOT clear pendingConsumeWrite. Third poll sees file still truncated;
+      // because pendingConsumeWrite is still true, consume() does NOT run a
+      // second time and the previously-rebased post-commit delta is preserved.
+      jest.useFakeTimers();
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      mockWriteTrackingFile.mockResolvedValue(false);
+      const ctx = makeContext();
+      await activate(ctx);
+      trackerInstance.consume.mockClear();
+      mockWriteTrackingFile.mockClear();
+
+      // Tick 1: consume() + failed write. pendingConsumeWrite is now true.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+
+      // Tick 2: stat fails with an ambiguous error → null. checkCommitReset
+      // must preserve pendingConsumeWrite (no consume(), no write).
+      mockIsTrackingFileTruncated.mockResolvedValueOnce(null as any);
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+
+      // Tick 3: stat works again, file still truncated. Because the flag
+      // survived tick 2, consume() does NOT run a second time — the write is
+      // simply retried.
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      mockWriteTrackingFile.mockClear();
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(1);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('does not write pre-consume stats when the first stat() is ambiguous (null)', async () => {
+      // Scenario: hook truncates the file, then the very first poll's stat()
+      // fails with an ambiguous error (FileNotFound is OK, anything else is
+      // ambiguous → null). pendingConsumeWrite is still false (no prior
+      // consume() ran), so this is NOT a retry. If checkCommitReset returns
+      // false here, the caller's fallback writeTrackingFile would re-populate
+      // the 0-byte file with current (pre-consume) cumulative stats, including
+      // TR_ lines the hook just consumed → duplicate trailers on the next
+      // commit. The fix: when stat is null AND pendingConsumeWrite is false,
+      // signal "skip the fallback write" so we wait for a clean re-stat.
+      jest.useFakeTimers();
+      mockIsTrackingFileTruncated.mockResolvedValue(null as any);
+      const ctx = makeContext();
+      await activate(ctx);
+      trackerInstance.consume.mockClear();
+      mockWriteTrackingFile.mockClear();
+
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Can't tell if truncated → must not consume() yet.
+      expect(trackerInstance.consume).not.toHaveBeenCalled();
+      // And must NOT do the fallback write (would clobber a truncated file).
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
+      // Next tick: stat works, file is genuinely truncated. consume() now
+      // runs cleanly and the post-rebase write happens.
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('clears pendingConsumeWrite after a successful fallback write so a later truncation rebases again', async () => {
+      // Scenario the prior test misses: tick 1 truncated → consume() ran,
+      // write failed (pendingConsumeWrite=true). Tick 2 stat is ambiguous
+      // (null) so checkCommitReset returns false without touching the flag.
+      // The listener/poll fallback writeTrackingFile then SUCCEEDS, which
+      // means the file is no longer truncated. If we don't clear
+      // pendingConsumeWrite on that success, a brand-new real commit
+      // truncation on tick 3 will be misclassified as a retry and skip
+      // consume(), absorbing post-commit usage into the new baseline.
+      jest.useFakeTimers();
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      mockWriteTrackingFile.mockResolvedValue(false);
+      const ctx = makeContext();
+      await activate(ctx);
+      trackerInstance.consume.mockClear();
+      mockWriteTrackingFile.mockClear();
+
+      // Tick 1: consume() + failed write. pendingConsumeWrite=true.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+
+      // Tick 2: stat ambiguous → checkCommitReset returns false. Fallback
+      // writeTrackingFile succeeds this time → must clear pendingConsumeWrite.
+      mockIsTrackingFileTruncated.mockResolvedValueOnce(null as any);
+      mockWriteTrackingFile.mockResolvedValue(true);
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+
+      // Tick 3: brand-new commit truncation. With pendingConsumeWrite
+      // properly cleared, consume() must run again to rebase the tracker
+      // for the new commit.
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(2);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('overlapping unread recoveries do not both apply setPreviousStats', async () => {
+      // Race scenario: activation observes 'unread'. Two recovery attempts
+      // start concurrently (e.g., stats-change listener + 5s poll). The
+      // first awaiting read resolves to 'restored' and applies
+      // setPreviousStats + update(); after that the on-disk file has been
+      // refreshed to include those restored stats. The second recovery's
+      // own pending read then resolves — without re-checking safeToWrite
+      // after the await, it would apply setPreviousStats a second time on
+      // top of the already-restored state, double-counting on the next
+      // update().
+      mockReadTrackingFile.mockReset();
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'unread' });
+
+      let resolveSecond: ((v: any) => void) | undefined;
+      let resolveThird: ((v: any) => void) | undefined;
+      mockReadTrackingFile.mockReturnValueOnce(
+        new Promise((res) => {
+          resolveSecond = res;
+        }) as any,
+      );
+      mockReadTrackingFile.mockReturnValueOnce(
+        new Promise((res) => {
+          resolveThird = res;
+        }) as any,
+      );
+
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+
+      // Two overlapping recovery callers, both suspending on their own read.
+      statsChangedListeners[0](SAMPLE_STATS);
+      statsChangedListeners[0](SAMPLE_STATS);
+      await Promise.resolve();
+
+      // Second caller wins the race, resolves first to 'restored' and
+      // restores previousStats + safeToWrite=true.
+      const restoredFirst = {
+        since: '2024-01-01T00:00:00Z',
+        interactions: 5,
+        models: {},
+      };
+      resolveSecond!({ kind: 'restored', stats: restoredFirst });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.setPreviousStats).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.setPreviousStats).toHaveBeenCalledWith(restoredFirst);
+      trackerInstance.setPreviousStats.mockClear();
+      trackerInstance.update.mockClear();
+
+      // Third caller (the second overlapping recovery) now resolves with a
+      // newer snapshot — exactly the content of the freshly-written file.
+      // Without the post-await safeToWrite recheck, setPreviousStats would
+      // be called again here, double-applying the restored data.
+      const restoredSecond = {
+        since: '2024-01-01T00:00:00Z',
+        interactions: 7,
+        models: {},
+      };
+      resolveThird!({ kind: 'restored', stats: restoredSecond });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+      expect(trackerInstance.update).not.toHaveBeenCalled();
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+    });
+
+    it('does not call consume() again on a subsequent truncated tick after a post-consume write fails', async () => {
+      // Scenario: hook truncates file, extension detects, consume() rebases
+      // and writes the post-commit delta. The write fails (filesystem
+      // transient). Next poll sees the file still truncated. Without this
+      // guard, consume() would run a second time and absorb the unwritten
+      // post-commit delta into the new baseline — silently losing usage.
+      jest.useFakeTimers();
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      mockWriteTrackingFile.mockResolvedValue(false);
+      const ctx = makeContext();
+      await activate(ctx);
+      trackerInstance.consume.mockClear();
+      mockWriteTrackingFile.mockClear();
+
+      // First detection: consume + (failed) write.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(1);
+
+      // Second tick: file still truncated, write still failing. Must retry
+      // the write but NOT call consume() again.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(2);
+
+      // Third tick: write finally succeeds. Pending flag clears so a later
+      // truncation (e.g. a new commit) would consume again correctly.
+      mockWriteTrackingFile.mockResolvedValue(true);
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(3);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
     it('auto-installs hook when commitHook.enabled is true and workspace exists', async () => {
       mockIsCommitHookEnabled.mockReturnValue(true);
       (vscode as any).workspace.workspaceFolders = [
@@ -530,6 +905,202 @@ describe('extension', () => {
 
       __commandCallbacks['copilot-budget.resetTracking']();
       expect(trackerInstance.reset).toHaveBeenCalledTimes(1);
+    });
+
+    it('resetTracking writes the reset snapshot directly even when checkCommitReset would skip', async () => {
+      // Hook truncates the file, then stat() starts returning null (ambiguous
+      // I/O error). The listener path's checkCommitReset returns true (skip
+      // fallback write) on a first probe with pendingConsumeWrite=false,
+      // leaving the file's stale TR_ lines in place. Reset stats have
+      // totalAiCredits=0 (no TR_ emission), so resetTracking must write
+      // directly to clear those stale trailers, not depend on the listener.
+      mockIsTrackingFileTruncated.mockResolvedValue(null as any);
+
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+
+      const resetSnapshot = {
+        ...SAMPLE_STATS,
+        totalAiCredits: 0,
+        interactions: 0,
+        totalTokens: 0,
+        models: {},
+      };
+      trackerInstance.getStats.mockReturnValueOnce(resetSnapshot);
+
+      __commandCallbacks['copilot-budget.resetTracking']();
+      expect(trackerInstance.reset).toHaveBeenCalledTimes(1);
+      // Direct write fires synchronously with the reset snapshot, ignoring
+      // the listener's skip signal.
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(resetSnapshot);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+    });
+
+    it('resetTracking after an unread startup is not silently undone by a later recovery', async () => {
+      // Activate with 'unread', then have subsequent reads return a
+      // 'restored' snapshot (the file became readable later). Without the
+      // safeToWrite=true in the reset command, the listener's recovery
+      // attempt would call setPreviousStats with the OLD on-disk stats,
+      // overwriting the freshly-reset in-memory state — and the next write
+      // would persist the restored totals back, silently undoing the reset.
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'unread' });
+      const restoredOldStats = {
+        since: '2024-01-01T00:00:00Z',
+        interactions: 50,
+        models: {
+          'gpt-4o': {
+            inputTokens: 5000,
+            outputTokens: 5000,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costAic: 10,
+          },
+        },
+      };
+      mockReadTrackingFile.mockResolvedValue({
+        kind: 'restored',
+        stats: restoredOldStats,
+      });
+
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+
+      // User runs reset while still in the 'unread' state.
+      __commandCallbacks['copilot-budget.resetTracking']();
+      expect(trackerInstance.reset).toHaveBeenCalledTimes(1);
+
+      // Simulate the stats-change tracker.reset() would emit: the listener
+      // must now take the normal write path, NOT the unread-recovery path.
+      const resetStats = { ...SAMPLE_STATS, totalAiCredits: 0, interactions: 0 };
+      statsChangedListeners[0](resetStats);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(resetStats);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+    });
+
+    it('resetTracking cancels an in-flight stats-change write so it cannot re-persist pre-reset stats', async () => {
+      // Race scenario: a stats-change listener fires with pre-reset stats S1
+      // and starts checkCommitReset, which suspends on isTrackingFileTruncated.
+      // While suspended, the user resets. The pending callback must NOT
+      // proceed to writeTrackingFile(S1) once the truncation check resolves —
+      // doing so would race the reset's direct write of S0 and re-persist
+      // stale totals + TR_ lines, silently undoing the reset.
+      let resolveTruncated: (val: boolean) => void = () => {};
+      mockIsTrackingFileTruncated.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveTruncated = resolve;
+          }),
+      );
+
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+
+      const preResetStats = {
+        since: '2024-01-01T00:00:00Z',
+        lastUpdated: '2024-01-01T01:00:00Z',
+        models: {
+          'gpt-4o': {
+            inputTokens: 1000,
+            outputTokens: 2000,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costAic: 42,
+          },
+        },
+        totalTokens: 3000,
+        interactions: 10,
+        totalAiCredits: 42,
+      };
+      statsChangedListeners[0](preResetStats);
+      await Promise.resolve();
+
+      // User resets while the stats-change write is still suspended.
+      __commandCallbacks['copilot-budget.resetTracking']();
+      expect(trackerInstance.reset).toHaveBeenCalledTimes(1);
+
+      // Reset's direct write fired with the (mock) reset snapshot.
+      const directWriteCount = mockWriteTrackingFile.mock.calls.length;
+
+      // Now release the suspended truncation check.
+      resolveTruncated(false);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The pending listener invocation MUST have aborted instead of writing
+      // preResetStats. Total writes since reset should equal the direct write
+      // only — no extra writeTrackingFile(preResetStats) snuck through.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalledWith(preResetStats);
+      expect(mockWriteTrackingFile.mock.calls.length).toBe(directWriteCount);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+    });
+
+    it('resetTracking cancels an already in-flight unread recovery', async () => {
+      // Activate with 'unread'. The stats-change listener then fires while
+      // safeToWrite is still false, kicking off an attemptRecoverFromUnread
+      // that awaits readTrackingFile. While that read is pending, the user
+      // invokes reset. The pending read must NOT call setPreviousStats once
+      // it resolves — doing so would silently restore the pre-reset snapshot
+      // on top of the freshly reset state.
+      mockReadTrackingFile.mockReset();
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'unread' });
+
+      let resolveSecondRead: ((v: any) => void) | undefined;
+      mockReadTrackingFile.mockReturnValueOnce(
+        new Promise((res) => {
+          resolveSecondRead = res;
+        }) as any,
+      );
+
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+
+      // Stats-change while still 'unread' kicks off attemptRecoverFromUnread,
+      // which awaits the second readTrackingFile (still pending).
+      statsChangedListeners[0](SAMPLE_STATS);
+      await Promise.resolve();
+
+      // User resets before the in-flight read resolves.
+      __commandCallbacks['copilot-budget.resetTracking']();
+      expect(trackerInstance.reset).toHaveBeenCalledTimes(1);
+
+      // Now resolve the pending read with a 'restored' snapshot.
+      const restoredOldStats = {
+        since: '2024-01-01T00:00:00Z',
+        interactions: 50,
+        models: {
+          'gpt-4o': {
+            inputTokens: 5000,
+            outputTokens: 5000,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costAic: 10,
+          },
+        },
+      };
+      resolveSecondRead!({ kind: 'restored', stats: restoredOldStats });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The in-flight recovery must have aborted: no setPreviousStats, no
+      // tracker.update from the recovery path.
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+      expect(trackerInstance.update).not.toHaveBeenCalled();
+
+      for (const sub of ctx.subscriptions) sub.dispose();
     });
 
     it('installHook command calls installHook', async () => {
@@ -662,6 +1233,75 @@ describe('extension', () => {
       await activate(ctx);
       await deactivate();
       expect(mockDisposeLogger).toHaveBeenCalled();
+    });
+
+    it('attempts a final unread recovery before the last write so short sessions are not lost', async () => {
+      // Scenario: file is unreadable at activation, VS Code closes before
+      // the first 5s poll (or after the last unsuccessful retry). Without a
+      // recovery attempt in deactivate, this session's accumulated stats
+      // never reach disk. With it, if the file is now readable, the prior
+      // snapshot is merged and the final write succeeds.
+      mockReadTrackingFile.mockResolvedValueOnce({ kind: 'unread' });
+      const restored = {
+        since: '2024-01-01T00:00:00Z',
+        interactions: 5,
+        models: {},
+      };
+      mockReadTrackingFile.mockResolvedValueOnce({
+        kind: 'restored',
+        stats: restored,
+      });
+
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
+      await deactivate();
+
+      expect(trackerInstance.setPreviousStats).toHaveBeenCalledWith(restored);
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(
+        trackerInstance.getStats(),
+      );
+    });
+
+    it('still performs the final write when the stat probe is ambiguous at deactivate', async () => {
+      // The listener/poll paths skip the fallback write on a null stat
+      // (truncated=null, !pendingConsumeWrite) so a clean re-stat on the
+      // next tick can decide between "truncated" and "fine" before we risk
+      // re-emitting consumed TR_ lines. Deactivate has no next tick: if it
+      // honored that "skip" signal, a single transient stat hiccup at
+      // shutdown would drop every stat accumulated this session. The risk
+      // of duplicate trailers (only if the file was actually truncated at
+      // the exact ambiguous moment) is acceptable next to silent data
+      // loss.
+      mockIsTrackingFileTruncated.mockResolvedValue(null as any);
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+
+      await deactivate();
+
+      expect(trackerInstance.consume).not.toHaveBeenCalled();
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(
+        trackerInstance.getStats(),
+      );
+    });
+
+    it('skips the final write when the file remains unread through deactivate', async () => {
+      // If the file never becomes readable, we must NOT overwrite it with a
+      // fresh zero baseline (which would clobber the user's accumulated
+      // session that's locked behind whatever I/O issue caused 'unread').
+      mockReadTrackingFile.mockResolvedValue({ kind: 'unread' });
+
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
+      await deactivate();
+
+      expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+      expect(trackerInstance.dispose).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { TrackingStats, ModelStats, RestoredStats } from './tracker';
 import { resolveGitDir } from './gitDir';
-import { readTextFile, writeTextFile, stat } from './fsUtils';
+import { readTextFile, writeTextFile } from './fsUtils';
 import { getTrailerConfig } from './config';
 import { sanitizeModelName } from './utils';
 import { getDisplayName } from './tokenRates';
@@ -19,11 +19,32 @@ async function getTrackingFileUri(): Promise<vscode.Uri | null> {
 // extension reset the tracker so the next commit only attributes new usage
 // (per-commit attribution, per README). Distinguishing 0 bytes from missing
 // matters: a missing file is "no tracking yet"; a 0-byte file is "hook ran".
-export async function isTrackingFileTruncated(): Promise<boolean> {
+//
+// Returns:
+//   true  — file exists with size 0 (hook just consumed trailers)
+//   false — file has content, OR no workspace, OR file is genuinely absent
+//   null  — stat failed with an error of unknown nature (transient I/O,
+//           permissions, etc.); caller cannot conclude either state and
+//           should not change any retry-tracking state until the next probe
+export async function isTrackingFileTruncated(): Promise<boolean | null> {
   const uri = await getTrackingFileUri();
   if (!uri) return false;
-  const fileStat = await stat(uri);
-  return fileStat !== null && fileStat.size === 0;
+  try {
+    const fileStat = await vscode.workspace.fs.stat(uri);
+    return fileStat.size === 0;
+  } catch (err) {
+    // Treat FileNotFound as a definite "no file, nothing to consume" so the
+    // caller can confidently clear any pending retry. Any other error is
+    // ambiguous — could be a transient I/O hiccup while the file is still
+    // truncated, in which case collapsing it to "not truncated" would let a
+    // later true-truncation tick call consume() a second time and absorb
+    // unwritten post-commit deltas into the new baseline.
+    if (err !== null && typeof err === 'object' && 'code' in err
+        && (err as { code?: string }).code === 'FileNotFound') {
+      return false;
+    }
+    return null;
+  }
 }
 
 export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> {
@@ -159,16 +180,37 @@ export function parseTrackingFileContent(content: string): RestoredStats | null 
 export type TrackingFileResult =
   | { kind: 'restored'; stats: RestoredStats }
   | { kind: 'legacy' }
-  | { kind: 'absent' };
+  | { kind: 'absent' }
+  | { kind: 'unread' };
 
 export async function readTrackingFile(): Promise<TrackingFileResult> {
   const uri = await getTrackingFileUri();
   if (!uri) return { kind: 'absent' };
 
   const content = await readTextFile(uri);
-  // readTextFile returns null for both ENOENT and transient I/O errors —
-  // we can't tell them apart, so treat as absent and don't overwrite.
-  if (content === null) return { kind: 'absent' };
+  if (content === null) {
+    // Differentiate "file doesn't exist" from "file exists but isn't
+    // readable right now" (AV scan, brief file lock, FS hiccup). Treating
+    // both as absent lets the refresh loop clobber a valid file with a
+    // fresh zero baseline; 'unread' tells the caller to defer writes
+    // until the file is readable again. We can't use the fsUtils stat
+    // wrapper here because it collapses every exception into null, which
+    // would put a transient stat failure in the same bucket as a genuine
+    // FileNotFound — conservatively treat any non-FileNotFound stat error
+    // as 'unread' so a shared lock/AV hiccup can't trigger a clobbering
+    // write.
+    try {
+      const fileStat = await vscode.workspace.fs.stat(uri);
+      if (fileStat.size > 0) return { kind: 'unread' };
+      return { kind: 'absent' };
+    } catch (err) {
+      if (err !== null && typeof err === 'object' && 'code' in err
+          && (err as { code?: string }).code === 'FileNotFound') {
+        return { kind: 'absent' };
+      }
+      return { kind: 'unread' };
+    }
+  }
   if (!content.trim()) return { kind: 'absent' };
 
   const stats = parseTrackingFileContent(content);

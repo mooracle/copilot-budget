@@ -29,7 +29,7 @@ const mockVscode = vscode as any;
 const mockResolveGitDir = gitDir.resolveGitDir as jest.MockedFunction<typeof gitDir.resolveGitDir>;
 const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
 const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
-const mockStat = fsUtils.stat as jest.MockedFunction<typeof fsUtils.stat>;
+const mockVscodeStat = mockVscode.workspace.fs.stat as jest.Mock;
 const mockGetTrailerConfig = config.getTrailerConfig as jest.MockedFunction<typeof config.getTrailerConfig>;
 const mockGetDisplayName = tokenRates.getDisplayName as jest.MockedFunction<typeof tokenRates.getDisplayName>;
 
@@ -639,11 +639,54 @@ describe('trackingFile', () => {
       expect(await readTrackingFile()).toEqual({ kind: 'absent' });
     });
 
-    it('returns absent on transient read failure (so a valid file is not clobbered)', async () => {
+    it('returns absent when the file does not exist (read null, stat FileNotFound)', async () => {
       setupWorkspace('/project');
       mockReadTextFile.mockResolvedValue(null);
+      mockVscodeStat.mockRejectedValue({ code: 'FileNotFound' });
 
       expect(await readTrackingFile()).toEqual({ kind: 'absent' });
+    });
+
+    it('returns unread when read fails but the file exists with content', async () => {
+      // Transient I/O error (AV scan, brief lock, FS hiccup) on an existing
+      // valid file. Must not be collapsed into 'absent', or the refresh
+      // loop will clobber the file with a fresh zero baseline.
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue(null);
+      mockVscodeStat.mockResolvedValue({ size: 128, type: 1, ctime: 0, mtime: 0 });
+
+      expect(await readTrackingFile()).toEqual({ kind: 'unread' });
+    });
+
+    it('returns absent when read fails and stat reports a zero-byte file', async () => {
+      // Hook truncation race: file exists but is empty. Same as the empty
+      // content branch — treat as absent so the next write proceeds.
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue(null);
+      mockVscodeStat.mockResolvedValue({ size: 0, type: 1, ctime: 0, mtime: 0 });
+
+      expect(await readTrackingFile()).toEqual({ kind: 'absent' });
+    });
+
+    it('returns unread when both read and stat fail with the same ambiguous error', async () => {
+      // A shared FS hiccup (file lock, AV scan, permissions blip) makes
+      // both readFile and stat throw. Collapsing this into 'absent' would
+      // let the refresh loop overwrite a still-existing valid file with a
+      // fresh zero baseline. Conservatively map non-FileNotFound stat
+      // errors to 'unread' so writes defer until the FS settles.
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue(null);
+      mockVscodeStat.mockRejectedValue({ code: 'Unavailable' });
+
+      expect(await readTrackingFile()).toEqual({ kind: 'unread' });
+    });
+
+    it('returns unread when stat throws a generic Error after read fails', async () => {
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue(null);
+      mockVscodeStat.mockRejectedValue(new Error('EBUSY'));
+
+      expect(await readTrackingFile()).toEqual({ kind: 'unread' });
     });
 
     it('returns absent for empty file (truncated by commit hook)', async () => {
@@ -737,22 +780,43 @@ describe('trackingFile', () => {
   });
 
   describe('isTrackingFileTruncated', () => {
+    const mockVscodeStat = mockVscode.workspace.fs.stat as jest.Mock;
+
+    beforeEach(() => {
+      mockVscodeStat.mockReset();
+    });
+
     it('returns true when the file exists with 0 bytes (hook just consumed trailers)', async () => {
       setupWorkspace('/project');
-      mockStat.mockResolvedValue({ size: 0, type: 1, ctime: 0, mtime: 0 } as any);
+      mockVscodeStat.mockResolvedValue({ size: 0, type: 1, ctime: 0, mtime: 0 });
       expect(await isTrackingFileTruncated()).toBe(true);
     });
 
     it('returns false when the file has content', async () => {
       setupWorkspace('/project');
-      mockStat.mockResolvedValue({ size: 128, type: 1, ctime: 0, mtime: 0 } as any);
+      mockVscodeStat.mockResolvedValue({ size: 128, type: 1, ctime: 0, mtime: 0 });
       expect(await isTrackingFileTruncated()).toBe(false);
     });
 
-    it('returns false when the file is missing (stat returns null)', async () => {
+    it('returns false when the file is genuinely missing (FileNotFound)', async () => {
       setupWorkspace('/project');
-      mockStat.mockResolvedValue(null);
+      mockVscodeStat.mockRejectedValue({ code: 'FileNotFound' });
       expect(await isTrackingFileTruncated()).toBe(false);
+    });
+
+    it('returns null when stat fails with an ambiguous error (transient I/O)', async () => {
+      // EBUSY, NoPermissions, etc. — we cannot tell whether the file is
+      // truncated or not. Returning a tri-state lets the caller preserve
+      // any pending-retry flag rather than clearing it prematurely.
+      setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue({ code: 'Unavailable' });
+      expect(await isTrackingFileTruncated()).toBeNull();
+    });
+
+    it('returns null when stat throws without a recognised error code', async () => {
+      setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(new Error('EBUSY'));
+      expect(await isTrackingFileTruncated()).toBeNull();
     });
 
     it('returns false when there is no workspace', async () => {
