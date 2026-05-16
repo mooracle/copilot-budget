@@ -97,7 +97,6 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockSqliteReader.isSqliteReady.mockReturnValue(false);
   mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);
-  mockDiscovery.discoverVscdbFiles.mockReturnValue([]);
   mockTokenRates.computeCost.mockImplementation((modelId, tokens) =>
     fixtureCost(modelId, tokens) * 100,
   );
@@ -828,72 +827,6 @@ describe('Tracker — error handling', () => {
     const tracker = new Tracker();
     tracker.initialize();
     expect(tracker.getStats().totalTokens).toBe(0);
-    tracker.dispose();
-  });
-});
-
-describe('Tracker — vscdb integration', () => {
-  it('does not discover vscdb files when sqlite is not ready', () => {
-    setupEmptyDiscovery();
-    mockSqliteReader.isSqliteReady.mockReturnValue(false);
-    const tracker = new Tracker();
-    tracker.initialize();
-    expect(mockDiscovery.discoverVscdbFiles).not.toHaveBeenCalled();
-    tracker.dispose();
-  });
-
-  it('processes vscdb sessions and merges them into the delta', () => {
-    setupEmptyDiscovery();
-    mockSqliteReader.isSqliteReady.mockReturnValue(true);
-    mockDiscovery.discoverVscdbFiles.mockReturnValue(['/ws/state.vscdb']);
-    mockFs.statSync.mockImplementation((p: fs.PathLike) => {
-      if (p.toString() === '/ws/state.vscdb') {
-        return { mtimeMs: 5000 } as fs.Stats;
-      }
-      throw new Error('ENOENT');
-    });
-
-    const sessionData = { requests: [] };
-    mockSqliteReader.readSessionsFromVscdb.mockReturnValue([
-      JSON.stringify([sessionData]),
-    ]);
-    mockParser.parseSessionFileContent.mockReturnValue({
-      interactions: 1,
-      modelUsage: {
-        'claude-sonnet-4.6': {
-          ...emptyTokens(),
-          inputTokens: 100,
-          outputTokens: 50,
-        },
-      },
-      modelInteractions: { 'claude-sonnet-4.6': 1 },
-    });
-
-    const tracker = new Tracker();
-    tracker.initialize();
-    expect(tracker.getStats().totalTokens).toBe(0); // baseline = current
-
-    mockFs.statSync.mockImplementation((p: fs.PathLike) => {
-      if (p.toString() === '/ws/state.vscdb') {
-        return { mtimeMs: 6000 } as fs.Stats;
-      }
-      throw new Error('ENOENT');
-    });
-    mockParser.parseSessionFileContent.mockReturnValue({
-      interactions: 3,
-      modelUsage: {
-        'claude-sonnet-4.6': {
-          ...emptyTokens(),
-          inputTokens: 250,
-          outputTokens: 120,
-        },
-      },
-      modelInteractions: { 'claude-sonnet-4.6': 3 },
-    });
-    tracker.update();
-    const stats = tracker.getStats();
-    expect(stats.totalTokens).toBe(250 - 100 + (120 - 50));
-    expect(stats.models['claude-sonnet-4.6'].costAic).toBeGreaterThan(0);
     tracker.dispose();
   });
 });

@@ -174,11 +174,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       for (const f of diag.filesFound) {
         ch.appendLine(`  ${f}`);
       }
-      ch.appendLine('');
-      ch.appendLine(`Vscdb files found: ${diag.vscdbFilesFound.length}`);
-      for (const f of diag.vscdbFilesFound) {
-        ch.appendLine(`  ${f}`);
-      }
 
       if (tracker) {
         const stats = tracker.getStats();

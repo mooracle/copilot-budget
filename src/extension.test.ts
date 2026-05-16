@@ -154,7 +154,6 @@ beforeEach(async () => {
       { path: '/home/test/.config/Code - Insiders/User', exists: false },
     ],
     filesFound: ['/home/test/.config/Code/User/globalStorage/github.copilot-chat/sessions/test.json'],
-    vscdbFilesFound: [],
   });
   mockGetOutputChannel.mockReturnValue({
     appendLine: jest.fn(),
@@ -635,26 +634,6 @@ describe('extension', () => {
       }
     });
 
-    it('showDiagnostics command displays vscdb file info', async () => {
-      mockGetDiscoveryDiagnostics.mockReturnValue({
-        platform: 'darwin',
-        homedir: '/home/test',
-        candidatePaths: [],
-        filesFound: [],
-        vscdbFilesFound: ['/path/to/state.vscdb'],
-      });
-      const ctx = makeContext();
-      await activate(ctx);
-
-      const mockChannel = mockGetOutputChannel();
-      __commandCallbacks['copilot-budget.showDiagnostics']();
-
-      const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
-        (c: any[]) => c[0],
-      );
-      expect(appendCalls).toContain('Vscdb files found: 1');
-      expect(appendCalls).toContain('  /path/to/state.vscdb');
-    });
   });
 
   describe('deactivate', () => {

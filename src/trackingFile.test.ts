@@ -701,7 +701,6 @@ describe('trackingFile', () => {
       (tokenRates.computeCost as jest.Mock).mockReturnValue(FRESH_COST_AIC);
       (sqliteReader.isSqliteReady as jest.Mock).mockReturnValue(false);
       (sqliteReader.readSessionsFromVscdb as jest.Mock).mockReturnValue([]);
-      (sessionDiscovery.discoverVscdbFiles as jest.Mock).mockReturnValue([]);
       // initialize() snapshots an empty baseline so subsequent fresh activity
       // shows up as a positive delta on update().
       (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([]);

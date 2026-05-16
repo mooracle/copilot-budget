@@ -1,7 +1,7 @@
 import * as fs from 'fs';
-import { discoverSessionFiles, discoverVscdbFiles } from './sessionDiscovery';
+import { discoverSessionFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
-import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
+import { readSessionsFromVscdb } from './sqliteReader';
 import { computeCost } from './tokenRates';
 import { log } from './logger';
 
@@ -176,7 +176,7 @@ export class Tracker {
     modelInteractions: { [model: string]: number };
   } {
     const files = discoverSessionFiles();
-    const vscdbFiles = isSqliteReady() ? discoverVscdbFiles() : [];
+    const vscdbFiles: string[] = [];
     log(
       `scanAll: discovered ${files.length} session file(s), ${vscdbFiles.length} vscdb file(s)`,
     );

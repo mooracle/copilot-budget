@@ -10,7 +10,7 @@ const mockFs = fs as jest.Mocked<typeof fs>;
 const mockOs = os as jest.Mocked<typeof os>;
 
 // Must import after mocks are set up
-import { getVSCodeUserPaths, discoverSessionFiles, discoverVscdbFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
+import { getVSCodeUserPaths, discoverSessionFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
 
 let savedXdg: string | undefined;
 
@@ -186,103 +186,26 @@ describe('discoverSessionFiles', () => {
     expect(files).toHaveLength(1); // readme.txt excluded
   });
 
-  it('finds session files in globalStorage/github.copilot-chat/ recursively', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const copilotChat = path.join(userPath, 'globalStorage', 'github.copilot-chat');
-    const subDir = path.join(copilotChat, 'sessions');
-
-    setupMockFs(new Set([userPath, copilotChat]), {
-      [copilotChat]: [dirent('sessions', true), dirent('data.json', false)],
-      [subDir]: [dirent('s1.json', false), dirent('s2.jsonl', false)],
-    });
-
-    const files = discoverSessionFiles();
-    expect(files).toContain(path.join(copilotChat, 'data.json'));
-    expect(files).toContain(path.join(subDir, 's1.json'));
-    expect(files).toContain(path.join(subDir, 's2.jsonl'));
-    expect(files).toHaveLength(3);
-  });
-
-  it('finds session files in globalStorage/github.copilot/ recursively', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const copilot = path.join(userPath, 'globalStorage', 'github.copilot');
-    const subDir = path.join(copilot, 'sessions');
-
-    setupMockFs(new Set([userPath, copilot]), {
-      [copilot]: [dirent('sessions', true), dirent('usage.json', false)],
-      [subDir]: [dirent('s1.json', false)],
-    });
-
-    const files = discoverSessionFiles();
-    expect(files).toContain(path.join(copilot, 'usage.json'));
-    expect(files).toContain(path.join(subDir, 's1.json'));
-    expect(files).toHaveLength(2);
-  });
-
-  it('finds session files in workspaceStorage/*/github.copilot-chat/', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const wsStorage = path.join(userPath, 'workspaceStorage');
-    const wsCopilotChat = path.join(wsStorage, 'ws1', 'github.copilot-chat');
-
-    mockOs.platform.mockReturnValue('darwin');
-    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
-      new Set([userPath, wsStorage, wsCopilotChat]).has(p.toString()),
-    );
-    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
-      const key = p.toString();
-      if (key === wsStorage) return ['ws1'] as any;
-      if (key === wsCopilotChat) return [dirent('data.json', false)] as any;
-      throw new Error(`ENOENT: ${key}`);
-    });
-    mockFs.statSync.mockReturnValue({ size: 100 } as any);
-
-    const files = discoverSessionFiles();
-    expect(files).toContain(path.join(wsCopilotChat, 'data.json'));
-  });
-
-  it('finds session files in workspaceStorage/*/github.copilot/', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const wsStorage = path.join(userPath, 'workspaceStorage');
-    const wsCopilot = path.join(wsStorage, 'ws1', 'github.copilot');
-
-    mockOs.platform.mockReturnValue('darwin');
-    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
-      new Set([userPath, wsStorage, wsCopilot]).has(p.toString()),
-    );
-    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
-      const key = p.toString();
-      if (key === wsStorage) return ['ws1'] as any;
-      if (key === wsCopilot) return [dirent('usage.json', false)] as any;
-      throw new Error(`ENOENT: ${key}`);
-    });
-    mockFs.statSync.mockReturnValue({ size: 100 } as any);
-
-    const files = discoverSessionFiles();
-    expect(files).toContain(path.join(wsCopilot, 'usage.json'));
-  });
-
   it('deduplicates files found in multiple scan categories', () => {
     const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const copilotChat = path.join(userPath, 'globalStorage', 'github.copilot-chat');
-    // Simulate the same file found twice (e.g., overlapping scan patterns)
-    const sharedFile = path.join(copilotChat, 'session.json');
+    const emptyWindow = path.join(userPath, 'globalStorage', 'emptyWindowChatSessions');
+    const sharedFile = path.join(emptyWindow, 'session.json');
 
-    setupMockFs(new Set([userPath, copilotChat]), {
-      [copilotChat]: [dirent('session.json', false)],
+    setupMockFs(new Set([userPath, emptyWindow]), {
+      [emptyWindow]: [dirent('session.json', false)],
     });
 
     const files = discoverSessionFiles();
-    // The file appears in the copilot-chat scan; dedup ensures it's only once
     const count = files.filter((f) => f === sharedFile).length;
     expect(count).toBe(1);
   });
 
   it('filters out non-session files (embeddings, index, cache, etc.)', () => {
     const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const copilotChat = path.join(userPath, 'globalStorage', 'github.copilot-chat');
+    const emptyWindow = path.join(userPath, 'globalStorage', 'emptyWindowChatSessions');
 
-    setupMockFs(new Set([userPath, copilotChat]), {
-      [copilotChat]: [
+    setupMockFs(new Set([userPath, emptyWindow]), {
+      [emptyWindow]: [
         dirent('commandEmbeddings.json', false),
         dirent('index.json', false),
         dirent('cache.json', false),
@@ -300,22 +223,57 @@ describe('discoverSessionFiles', () => {
 
   it('skips empty files (size === 0)', () => {
     const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const copilotChat = path.join(userPath, 'globalStorage', 'github.copilot-chat');
+    const emptyWindow = path.join(userPath, 'globalStorage', 'emptyWindowChatSessions');
 
     setupMockFs(
-      new Set([userPath, copilotChat]),
+      new Set([userPath, emptyWindow]),
       {
-        [copilotChat]: [dirent('session.json', false), dirent('empty.json', false)],
+        [emptyWindow]: [dirent('session.json', false), dirent('empty.json', false)],
       },
       {
-        [path.join(copilotChat, 'session.json')]: { size: 500 },
-        [path.join(copilotChat, 'empty.json')]: { size: 0 },
+        [path.join(emptyWindow, 'session.json')]: { size: 500 },
+        [path.join(emptyWindow, 'empty.json')]: { size: 0 },
       },
     );
 
     const files = discoverSessionFiles();
     expect(files).toHaveLength(1);
     expect(files[0]).toContain('session.json');
+  });
+
+  it('skips workspaceStorage subdirs other than chatSessions', () => {
+    const userPath = '/home/testuser/Library/Application Support/Code/User';
+    const wsStorage = path.join(userPath, 'workspaceStorage');
+    const wsCopilotChat = path.join(wsStorage, 'ws1', 'github.copilot-chat');
+    const wsCopilot = path.join(wsStorage, 'ws1', 'github.copilot');
+
+    mockOs.platform.mockReturnValue('darwin');
+    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
+      new Set([userPath, wsStorage, wsCopilotChat, wsCopilot]).has(p.toString()),
+    );
+    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
+      const key = p.toString();
+      if (key === wsStorage) return ['ws1'] as any;
+      throw new Error(`ENOENT: ${key}`);
+    });
+    mockFs.statSync.mockReturnValue({ size: 100 } as any);
+
+    const files = discoverSessionFiles();
+    expect(files).toEqual([]);
+  });
+
+  it('skips globalStorage subdirs other than emptyWindowChatSessions', () => {
+    const userPath = '/home/testuser/Library/Application Support/Code/User';
+    const copilotChat = path.join(userPath, 'globalStorage', 'github.copilot-chat');
+    const copilot = path.join(userPath, 'globalStorage', 'github.copilot');
+
+    setupMockFs(new Set([userPath, copilotChat, copilot]), {
+      [copilotChat]: [dirent('data.json', false)],
+      [copilot]: [dirent('usage.json', false)],
+    });
+
+    const files = discoverSessionFiles();
+    expect(files).toEqual([]);
   });
 
   it('handles filesystem errors gracefully', () => {
@@ -336,95 +294,8 @@ describe('discoverSessionFiles', () => {
   });
 });
 
-describe('discoverVscdbFiles', () => {
-  it('finds state.vscdb in workspaceStorage directories', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const wsStorage = path.join(userPath, 'workspaceStorage');
-    const vscdbPath = path.join(wsStorage, 'abc123', 'state.vscdb');
-
-    mockOs.platform.mockReturnValue('darwin');
-    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
-      new Set([wsStorage, vscdbPath]).has(p.toString()),
-    );
-    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
-      if (p.toString() === wsStorage) return ['abc123'] as any;
-      throw new Error(`ENOENT: ${p}`);
-    });
-    mockFs.statSync.mockReturnValue({ size: 4096 } as any);
-
-    const files = discoverVscdbFiles();
-    expect(files).toContain(vscdbPath);
-    expect(files).toHaveLength(1);
-  });
-
-  it('skips empty vscdb files', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const wsStorage = path.join(userPath, 'workspaceStorage');
-    const vscdbPath = path.join(wsStorage, 'abc123', 'state.vscdb');
-
-    mockOs.platform.mockReturnValue('darwin');
-    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
-      new Set([wsStorage, vscdbPath]).has(p.toString()),
-    );
-    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
-      if (p.toString() === wsStorage) return ['abc123'] as any;
-      throw new Error(`ENOENT: ${p}`);
-    });
-    mockFs.statSync.mockReturnValue({ size: 0 } as any);
-
-    const files = discoverVscdbFiles();
-    expect(files).toEqual([]);
-  });
-
-  it('handles missing workspaceStorage gracefully', () => {
-    mockOs.platform.mockReturnValue('darwin');
-    mockFs.existsSync.mockReturnValue(false);
-
-    const files = discoverVscdbFiles();
-    expect(files).toEqual([]);
-  });
-
-  it('finds vscdb files across multiple workspaces', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const wsStorage = path.join(userPath, 'workspaceStorage');
-    const vscdb1 = path.join(wsStorage, 'ws1', 'state.vscdb');
-    const vscdb2 = path.join(wsStorage, 'ws2', 'state.vscdb');
-
-    mockOs.platform.mockReturnValue('darwin');
-    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
-      new Set([wsStorage, vscdb1, vscdb2]).has(p.toString()),
-    );
-    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
-      if (p.toString() === wsStorage) return ['ws1', 'ws2'] as any;
-      throw new Error(`ENOENT: ${p}`);
-    });
-    mockFs.statSync.mockReturnValue({ size: 8192 } as any);
-
-    const files = discoverVscdbFiles();
-    expect(files).toContain(vscdb1);
-    expect(files).toContain(vscdb2);
-    expect(files).toHaveLength(2);
-  });
-
-  it('handles filesystem errors gracefully', () => {
-    const userPath = '/home/testuser/Library/Application Support/Code/User';
-    const wsStorage = path.join(userPath, 'workspaceStorage');
-
-    mockOs.platform.mockReturnValue('darwin');
-    mockFs.existsSync.mockImplementation((p: fs.PathLike) =>
-      p.toString() === wsStorage,
-    );
-    mockFs.readdirSync.mockImplementation(() => {
-      throw new Error('EACCES: permission denied');
-    });
-
-    const files = discoverVscdbFiles();
-    expect(files).toEqual([]);
-  });
-});
-
 describe('getDiscoveryDiagnostics', () => {
-  it('returns platform, homedir, candidatePaths, filesFound, and vscdbFilesFound', () => {
+  it('returns platform, homedir, candidatePaths, and filesFound', () => {
     mockOs.platform.mockReturnValue('darwin');
     mockOs.homedir.mockReturnValue('/home/testuser');
     mockFs.existsSync.mockReturnValue(false);
@@ -438,7 +309,7 @@ describe('getDiscoveryDiagnostics', () => {
     expect(diag.candidatePaths[0]).toHaveProperty('path');
     expect(diag.candidatePaths[0]).toHaveProperty('exists');
     expect(diag.filesFound).toEqual([]);
-    expect(diag.vscdbFilesFound).toEqual([]);
+    expect(diag).not.toHaveProperty('vscdbFilesFound');
   });
 
   it('marks existing paths correctly', () => {
