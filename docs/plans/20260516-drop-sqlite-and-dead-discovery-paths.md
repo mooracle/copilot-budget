@@ -152,18 +152,19 @@ Tests touching the deleted surface:
 - Modify: `README.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] in `CLAUDE.md`:
+- [x] in `CLAUDE.md`:
   - line ~30: drop "initializes SQLite" from the activate() summary
   - line ~43: delete the `sqliteReader.ts` module bullet
   - line ~45: drop sqliteReader from the utils.ts consumer list
   - line ~54: rewrite the "Runtime dependencies" bullet — sql.js is gone; only js-yaml remains
   - line ~55: drop sqliteReader from the host-side modules list (sessionDiscovery.ts is the only one left)
   - line ~56: drop `sql-wasm.wasm` from the esbuild copy description
-- [ ] in `README.md`:
+  - Scope note: also corrected stale descriptions of `sessionDiscovery.ts` (lines ~35) and `sessionParser.ts` (line ~36) so the module summaries match post-Tasks-1-and-3 behavior (chatSessions + emptyWindowChatSessions only; JSONL-only parser).
+- [x] in `README.md`:
   - line ~13: drop the "SQLite session support" feature bullet
   - line ~147: rewrite the Discovery paragraph to reflect the two remaining scan paths (`workspaceStorage/*/chatSessions/`, `globalStorage/emptyWindowChatSessions/`); cite the rationale in one sentence ("VS Code consolidated chat storage to JSONL files; the legacy SQLite path no longer holds active sessions")
   - line ~167: drop the sql.js bundling note; leave the js-yaml line as-is
-- [ ] add a `CHANGELOG.md` entry under the unreleased section: "Removed: SQLite/vscdb session reader. VS Code now writes all chat sessions to JSONL files; reading them is sufficient. The `sql.js` dependency and `sql-wasm.wasm` binary are gone, reducing bundle size by ~500 KB."
+- [x] add a `CHANGELOG.md` entry under the unreleased section: "Removed: SQLite/vscdb session reader. VS Code now writes all chat sessions to JSONL files; reading them is sufficient. The `sql.js` dependency and `sql-wasm.wasm` binary are gone, reducing bundle size by ~500 KB."
 
 ### Task 7: Verify acceptance criteria
 

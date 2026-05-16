@@ -10,7 +10,6 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 - **Upstream rate card** — per-model rates are a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml), shipped with the extension.
 - **Commit hook integration** — automatically appends configurable git trailers (`Copilot-AI-Credits` on by default; `Copilot-Est-Cost` USD trailer and per-model breakdown are opt-in) to commit messages. Trailer keys can be renamed or individually disabled via settings.
 - **Persistent tracking** — stats accumulate across VS Code restarts. On deactivation the extension writes current stats to a tracking file; on activation it reads them back. Use the "Reset Tracking" command to start fresh.
-- **SQLite session support** — reads Copilot sessions from `state.vscdb` databases, catching sessions that only exist in SQLite after recent Copilot storage migrations.
 - **Worktree & submodule support** — correctly follows `.git` files in git worktrees, submodules, and devcontainers for both hook installation and tracking file placement.
 - **Lightweight** — polls every two minutes with file-level caching; no network calls at runtime.
 
@@ -144,7 +143,7 @@ In git worktrees, the hook is installed in the **common git directory** (shared 
 
 ## How It Works
 
-1. **Discovery** — On activation, Copilot Budget scans known Copilot session file locations for conversation logs, including `globalStorage/github.copilot-chat/`, `globalStorage/github.copilot/`, `workspaceStorage/*/github.copilot-chat/`, `workspaceStorage/*/github.copilot/`, and `workspaceStorage/*/chatSessions/`. It also reads `state.vscdb` SQLite databases in `workspaceStorage/*/` to catch sessions stored only in SQLite. All discovery activity is logged to the "Copilot Budget" Output channel.
+1. **Discovery** — On activation, Copilot Budget scans `workspaceStorage/*/chatSessions/` for per-workspace chat logs and `globalStorage/emptyWindowChatSessions/` for workspace-less chats. VS Code consolidated chat storage to JSONL files; the legacy SQLite path no longer holds active sessions. All discovery activity is logged to the "Copilot Budget" Output channel.
 2. **Parsing** — Each session file is parsed to extract per-request `result.metadata.{promptTokens, outputTokens, cacheReadTokens?, cacheCreationTokens?}`. When the cache split is absent the turn-based heuristic fills it in.
 3. **Baseline & Restore** — A token snapshot is taken at startup as a baseline so only new activity is counted. If a tracking file from a previous session exists (written on deactivation), those stats are restored and merged, providing continuity across VS Code restarts.
 4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.
@@ -164,7 +163,7 @@ Also works in remote environments (Codespaces, WSL, SSH Remote).
 ## Requirements
 
 - GitHub Copilot extension (provides the session files that Copilot Budget reads)
-- The extension bundles [sql.js](https://github.com/sql-js/sql.js) for reading SQLite-based session storage and [js-yaml](https://github.com/nodeca/js-yaml) for parsing the rate card. No additional installation is required.
+- The extension bundles [js-yaml](https://github.com/nodeca/js-yaml) for parsing the rate card. No additional installation is required.
 
 ## Contributing
 
