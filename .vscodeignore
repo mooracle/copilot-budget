@@ -8,7 +8,8 @@ tsconfig.json
 esbuild.js
 **/*.map
 **/*.ts
-!dist/**
+!dist/extension.js
+!dist/models-and-pricing.yml
 .ralphex/**
 plan.md
 coverage/**
@@ -21,3 +22,6 @@ CLAUDE.md
 eslint.config.mjs
 .nvmrc
 assets/icon.svg
+docs/**
+scripts/**
+data/**

@@ -57,7 +57,7 @@ describe('discoverSessionFiles', () => {
     expect(files).toEqual([]);
   });
 
-  it('returns .json/.jsonl files from the chatSessions directory', () => {
+  it('returns only .jsonl files from the chatSessions directory', () => {
     const storageUri = makeStorageUri();
     const chatDir = path.join(
       path.dirname(storageUri.fsPath),
@@ -67,7 +67,7 @@ describe('discoverSessionFiles', () => {
     mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
       if (p.toString() === chatDir) {
         return [
-          dirent('session1.json', false),
+          dirent('legacy-session.json', false),
           dirent('session2.jsonl', false),
           dirent('readme.txt', false),
         ] as any;
@@ -77,9 +77,7 @@ describe('discoverSessionFiles', () => {
     mockFs.statSync.mockReturnValue({ size: 100 } as any);
 
     const files = discoverSessionFiles(storageUri);
-    expect(files).toContain(path.join(chatDir, 'session1.json'));
-    expect(files).toContain(path.join(chatDir, 'session2.jsonl'));
-    expect(files).toHaveLength(2);
+    expect(files).toEqual([path.join(chatDir, 'session2.jsonl')]);
   });
 
   it('filters out non-session filenames (embeddings, index, cache, etc.)', () => {
@@ -92,13 +90,13 @@ describe('discoverSessionFiles', () => {
     mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
       if (p.toString() === chatDir) {
         return [
-          dirent('commandEmbeddings.json', false),
-          dirent('index.json', false),
-          dirent('cache.json', false),
-          dirent('preferences.json', false),
-          dirent('settings.json', false),
-          dirent('myconfig.json', false),
-          dirent('actual-session.json', false),
+          dirent('commandEmbeddings.jsonl', false),
+          dirent('index.jsonl', false),
+          dirent('cache.jsonl', false),
+          dirent('preferences.jsonl', false),
+          dirent('settings.jsonl', false),
+          dirent('myconfig.jsonl', false),
+          dirent('actual-session.jsonl', false),
         ] as any;
       }
       throw new Error(`ENOENT: ${p}`);
@@ -107,7 +105,7 @@ describe('discoverSessionFiles', () => {
 
     const files = discoverSessionFiles(storageUri);
     expect(files).toHaveLength(1);
-    expect(files[0]).toContain('actual-session.json');
+    expect(files[0]).toContain('actual-session.jsonl');
   });
 
   it('skips zero-byte files', () => {
@@ -120,20 +118,20 @@ describe('discoverSessionFiles', () => {
     mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
       if (p.toString() === chatDir) {
         return [
-          dirent('session.json', false),
-          dirent('empty.json', false),
+          dirent('session.jsonl', false),
+          dirent('empty.jsonl', false),
         ] as any;
       }
       throw new Error(`ENOENT: ${p}`);
     });
     mockFs.statSync.mockImplementation((p: fs.PathLike) => {
-      if (p.toString().endsWith('empty.json')) return { size: 0 } as any;
+      if (p.toString().endsWith('empty.jsonl')) return { size: 0 } as any;
       return { size: 500 } as any;
     });
 
     const files = discoverSessionFiles(storageUri);
     expect(files).toHaveLength(1);
-    expect(files[0]).toContain('session.json');
+    expect(files[0]).toContain('session.jsonl');
   });
 
   it('skips subdirectories inside chatSessions', () => {
@@ -147,7 +145,7 @@ describe('discoverSessionFiles', () => {
       if (p.toString() === chatDir) {
         return [
           dirent('nested', true),
-          dirent('session.json', false),
+          dirent('session.jsonl', false),
         ] as any;
       }
       throw new Error(`ENOENT: ${p}`);
@@ -155,7 +153,7 @@ describe('discoverSessionFiles', () => {
     mockFs.statSync.mockReturnValue({ size: 100 } as any);
 
     const files = discoverSessionFiles(storageUri);
-    expect(files).toEqual([path.join(chatDir, 'session.json')]);
+    expect(files).toEqual([path.join(chatDir, 'session.jsonl')]);
   });
 
   it('resolves chatSessions one level up from storageUri', () => {

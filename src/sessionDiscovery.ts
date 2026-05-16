@@ -61,7 +61,7 @@ export function discoverSessionFiles(storageUri: vscode.Uri | undefined): string
   const files: string[] = [];
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    if (!(entry.name.endsWith('.json') || entry.name.endsWith('.jsonl'))) continue;
+    if (!entry.name.endsWith('.jsonl')) continue;
     if (isNonSessionFile(entry.name)) continue;
     const full = path.join(chatSessionsDir, entry.name);
     try {
