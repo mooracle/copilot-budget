@@ -7,7 +7,7 @@ jest.mock('./logger');
 jest.mock('./sessionDiscovery');
 
 import * as vscode from 'vscode';
-import { __commandCallbacks } from './__mocks__/vscode';
+import { __commandCallbacks, createMockExtensionContext } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
@@ -62,13 +62,15 @@ const mockDisposeLogger = disposeLogger as jest.MockedFunction<
 >;
 
 function makeContext(): vscode.ExtensionContext {
-  return {
-    subscriptions: [],
-    extensionPath: '/test',
-    globalState: { get: () => undefined, update: async () => {} },
-    workspaceState: { get: () => undefined, update: async () => {} },
-    extensionUri: { fsPath: '/test' },
-  } as any;
+  return createMockExtensionContext({
+    storageUri: vscode.Uri.file(
+      '/test/workspaceStorage/abc123/mooracle.copilot-budget',
+    ),
+  }) as vscode.ExtensionContext;
+}
+
+function makeEmptyWindowContext(): vscode.ExtensionContext {
+  return createMockExtensionContext({}) as vscode.ExtensionContext;
 }
 
 let trackerInstance: any;
@@ -518,6 +520,147 @@ describe('extension', () => {
       const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
       expect(readOrder).toBeLessThan(startOrder);
     });
+
+    it('passes context.storageUri to the Tracker constructor', async () => {
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(MockTracker).toHaveBeenCalledWith(ctx.storageUri);
+    });
+  });
+
+  describe('empty-window activation (storageUri undefined)', () => {
+    it('does not construct a Tracker', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(MockTracker).not.toHaveBeenCalled();
+    });
+
+    it('does not call readTrackingFile or writeTrackingFile', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(mockReadTrackingFile).not.toHaveBeenCalled();
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+    });
+
+    it('does not call createStatusBar (uses a static status bar instead)', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(mockCreateStatusBar).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-install the commit hook even if enabled', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(true);
+      (vscode as any).workspace.workspaceFolders = [
+        { uri: vscode.Uri.file('/project'), name: 'test', index: 0 },
+      ];
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(mockInstallHook).not.toHaveBeenCalled();
+    });
+
+    it('registers a static status bar item with the no-workspace text/tooltip', async () => {
+      const createStatusBarItem = jest.spyOn(vscode.window, 'createStatusBarItem');
+      const fakeItem: any = {
+        text: '',
+        tooltip: '',
+        command: '',
+        show: jest.fn(),
+        hide: jest.fn(),
+        dispose: jest.fn(),
+      };
+      createStatusBarItem.mockReturnValue(fakeItem);
+
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      expect(createStatusBarItem).toHaveBeenCalledWith(
+        vscode.StatusBarAlignment.Right,
+        100,
+      );
+      expect(fakeItem.text).toBe('$(circle-slash) Copilot Budget');
+      expect(fakeItem.tooltip).toBe(
+        'No workspace open — open a folder to track Copilot usage.',
+      );
+      expect(fakeItem.command).toBe('copilot-budget.showDiagnostics');
+      expect(fakeItem.show).toHaveBeenCalled();
+      expect(ctx.subscriptions).toContain(fakeItem);
+
+      createStatusBarItem.mockRestore();
+    });
+
+    it('registers all 5 commands; non-diagnostics ones surface an info message', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      for (const cmd of [
+        'copilot-budget.showStats',
+        'copilot-budget.resetTracking',
+        'copilot-budget.installHook',
+        'copilot-budget.uninstallHook',
+        'copilot-budget.showDiagnostics',
+      ]) {
+        expect(typeof __commandCallbacks[cmd]).toBe('function');
+      }
+
+      const showInfo = vscode.window.showInformationMessage as jest.Mock;
+      showInfo.mockClear();
+      __commandCallbacks['copilot-budget.showStats']();
+      __commandCallbacks['copilot-budget.resetTracking']();
+      __commandCallbacks['copilot-budget.installHook']();
+      __commandCallbacks['copilot-budget.uninstallHook']();
+      expect(showInfo).toHaveBeenCalledTimes(4);
+      for (const call of showInfo.mock.calls) {
+        expect(call[0]).toMatch(/no workspace open/i);
+      }
+      expect(mockInstallHook).not.toHaveBeenCalled();
+      expect(mockUninstallHook).not.toHaveBeenCalled();
+      expect(mockShowStatsQuickPick).not.toHaveBeenCalled();
+    });
+
+    it('showDiagnostics works in empty-window mode and passes undefined storageUri', async () => {
+      mockGetDiscoveryDiagnostics.mockReturnValueOnce({
+        platform: 'darwin',
+        homedir: '/home/test',
+        storageUri: null,
+        chatSessionsDir: null,
+        filesFound: [],
+      });
+
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      const mockChannel = mockGetOutputChannel();
+      __commandCallbacks['copilot-budget.showDiagnostics']();
+
+      expect(mockGetDiscoveryDiagnostics).toHaveBeenCalledWith(undefined);
+      const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
+        (c: any[]) => c[0],
+      );
+      expect(appendCalls).toContain('Storage URI: (none — empty window)');
+      expect(appendCalls).toContain('Chat sessions dir: (none — empty window)');
+      expect(mockChannel.show).toHaveBeenCalled();
+    });
+
+    it('disposes the empty-window status bar on deactivate', async () => {
+      const createStatusBarItem = jest.spyOn(vscode.window, 'createStatusBarItem');
+      const dispose = jest.fn();
+      createStatusBarItem.mockReturnValue({
+        text: '',
+        tooltip: '',
+        command: '',
+        show: jest.fn(),
+        hide: jest.fn(),
+        dispose,
+      } as any);
+
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      expect(dispose).toHaveBeenCalled();
+
+      createStatusBarItem.mockRestore();
+    });
   });
 
   describe('commands', () => {
@@ -560,7 +703,7 @@ describe('extension', () => {
       const mockChannel = mockGetOutputChannel();
       __commandCallbacks['copilot-budget.showDiagnostics']();
 
-      expect(mockGetDiscoveryDiagnostics).toHaveBeenCalled();
+      expect(mockGetDiscoveryDiagnostics).toHaveBeenCalledWith(ctx.storageUri);
       expect(mockChannel.appendLine).toHaveBeenCalled();
       expect(mockChannel.show).toHaveBeenCalled();
     });

@@ -56,6 +56,47 @@ const ALL_COMMANDS = [
   'copilot-budget.showDiagnostics',
 ];
 
+const EMPTY_WINDOW_MESSAGE =
+  'Copilot Budget: no workspace open. Open a folder to track Copilot usage.';
+
+function activateEmptyWindow(context: vscode.ExtensionContext): void {
+  const item = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    100,
+  );
+  item.text = '$(circle-slash) Copilot Budget';
+  item.tooltip = 'No workspace open — open a folder to track Copilot usage.';
+  item.command = 'copilot-budget.showDiagnostics';
+  item.show();
+  context.subscriptions.push(item);
+
+  const infoHandler = () => vscode.window.showInformationMessage(EMPTY_WINDOW_MESSAGE);
+  for (const cmd of ALL_COMMANDS) {
+    if (cmd === 'copilot-budget.showDiagnostics') continue;
+    context.subscriptions.push(vscode.commands.registerCommand(cmd, infoHandler));
+  }
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
+      const ch = getOutputChannel();
+      const diag = getDiscoveryDiagnostics(context.storageUri);
+
+      ch.appendLine('=== Copilot Budget Diagnostics ===');
+      ch.appendLine(`Platform: ${diag.platform}`);
+      ch.appendLine(`Home directory: ${diag.homedir}`);
+      ch.appendLine('');
+      ch.appendLine(`Storage URI: ${diag.storageUri ?? '(none — empty window)'}`);
+      ch.appendLine(`Chat sessions dir: ${diag.chatSessionsDir ?? '(none — empty window)'}`);
+      ch.appendLine('');
+      ch.appendLine(`Session files found: ${diag.filesFound.length}`);
+      for (const f of diag.filesFound) {
+        ch.appendLine(`  ${f}`);
+      }
+      ch.show();
+    }),
+  );
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   if (!isEnabled()) {
     const handler = () =>
@@ -67,6 +108,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand(cmd, handler),
       );
     }
+    return;
+  }
+
+  if (!context.storageUri) {
+    activateEmptyWindow(context);
     return;
   }
 
@@ -153,7 +199,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
       const ch = getOutputChannel();
-      const diag = getDiscoveryDiagnostics(undefined);
+      const diag = getDiscoveryDiagnostics(context.storageUri);
 
       ch.appendLine('=== Copilot Budget Diagnostics ===');
       ch.appendLine(`Platform: ${diag.platform}`);

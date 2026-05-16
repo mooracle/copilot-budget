@@ -105,13 +105,13 @@ This must land first because Tasks 2-4's tests all need a way to construct a moc
 
 Merged: the empty-window status bar and the activation branch that registers it land together (they're meaningless apart).
 
-- [ ] at `activate(context)`, check `context.storageUri`. If undefined: create a single static `vscode.StatusBarItem` directly (text `$(circle-slash) Copilot Budget`, tooltip `No workspace open — open a folder to track Copilot usage.`, command bound to `copilot-budget.showDiagnostics`), register the 5 commands as info-message handlers (mirror the existing `!isEnabled()` pattern in `extension.ts:60-71`), and skip tracker / tracking-file / hook auto-install entirely. Register the status bar item in `context.subscriptions`.
-- [ ] when `storageUri` is defined: pass it to `new Tracker(context.storageUri)` and proceed as today.
-- [ ] `showDiagnostics` command works in both states — pass `context.storageUri` into `getDiscoveryDiagnostics` and update the printout block (`extension.ts:158-181`) to match the new diagnostics shape: print `storageUri`, `chatSessionsDir`, then `filesFound`. Drop the candidate-paths loop.
-- [ ] do NOT touch `statusBar.ts` — `createStatusBar(tracker)` stays as-is, used only on the workspace path
-- [ ] write tests for empty-window activation: no tracker started, no tracking file written, static status bar registered with expected text/tooltip, command handlers show info messages, disposal on deactivate.
-- [ ] write tests for workspace activation: tracker constructed with the storageUri, normal status bar wired up.
-- [ ] run `npm test` — must pass before Task 5
+- [x] at `activate(context)`, check `context.storageUri`. If undefined: create a single static `vscode.StatusBarItem` directly (text `$(circle-slash) Copilot Budget`, tooltip `No workspace open — open a folder to track Copilot usage.`, command bound to `copilot-budget.showDiagnostics`), register the 5 commands as info-message handlers (mirror the existing `!isEnabled()` pattern in `extension.ts:60-71`), and skip tracker / tracking-file / hook auto-install entirely. Register the status bar item in `context.subscriptions`.
+- [x] when `storageUri` is defined: pass it to `new Tracker(context.storageUri)` and proceed as today.
+- [x] `showDiagnostics` command works in both states — pass `context.storageUri` into `getDiscoveryDiagnostics` and update the printout block (`extension.ts:158-181`) to match the new diagnostics shape: print `storageUri`, `chatSessionsDir`, then `filesFound`. Drop the candidate-paths loop.
+- [x] do NOT touch `statusBar.ts` — `createStatusBar(tracker)` stays as-is, used only on the workspace path
+- [x] write tests for empty-window activation: no tracker started, no tracking file written, static status bar registered with expected text/tooltip, command handlers show info messages, disposal on deactivate.
+- [x] write tests for workspace activation: tracker constructed with the storageUri, normal status bar wired up.
+- [x] run `npm test` — must pass before Task 5
 
 ### Task 5: Verify acceptance criteria
 
