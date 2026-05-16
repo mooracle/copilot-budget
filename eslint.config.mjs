@@ -30,7 +30,6 @@ export default tseslint.config(
     files: [
       "src/sessionParser.ts",
       "src/commitHook.ts",
-      "src/sqliteReader.ts",
     ],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",

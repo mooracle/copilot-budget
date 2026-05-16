@@ -147,7 +147,7 @@ beforeEach(async () => {
       { path: '/home/test/.config/Code/User', exists: true },
       { path: '/home/test/.config/Code - Insiders/User', exists: false },
     ],
-    filesFound: ['/home/test/.config/Code/User/globalStorage/github.copilot-chat/sessions/test.json'],
+    filesFound: ['/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions/test.jsonl'],
   });
   mockGetOutputChannel.mockReturnValue({
     appendLine: jest.fn(),
