@@ -130,9 +130,9 @@ Merged: the empty-window status bar and the activation branch that registers it 
 - Modify: `README.md`
 - Move: this plan → `docs/plans/completed/20260516-window-scoped-tracking.md`
 
-- [ ] update `CLAUDE.md` architecture notes: session discovery is window-scoped via `context.storageUri`; empty windows show a disabled status bar
-- [ ] update `README.md` (only if it mentions discovery behavior or multi-window) to note that each window tracks its own workspace's usage
-- [ ] `mkdir -p docs/plans/completed` and `git mv` this plan there
+- [x] update `CLAUDE.md` architecture notes: session discovery is window-scoped via `context.storageUri`; empty windows show a disabled status bar
+- [x] update `README.md` (only if it mentions discovery behavior or multi-window) to note that each window tracks its own workspace's usage
+- [x] `mkdir -p docs/plans/completed` and `git mv` this plan there
 
 ## Technical Details
 

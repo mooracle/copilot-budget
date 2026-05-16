@@ -143,7 +143,7 @@ In git worktrees, the hook is installed in the **common git directory** (shared 
 
 ## How It Works
 
-1. **Discovery** — On activation, Copilot Budget scans `workspaceStorage/*/chatSessions/` for per-workspace chat logs and `globalStorage/emptyWindowChatSessions/` for workspace-less chats. VS Code consolidated chat storage to JSONL files; the legacy SQLite path no longer holds active sessions. All discovery activity is logged to the "Copilot Budget" Output channel.
+1. **Discovery** — On activation, Copilot Budget scans only the current window's `workspaceStorage/<hash>/chatSessions/` directory, derived from the extension's `storageUri`. Each open window tracks its own workspace's usage independently — multi-window setups no longer double-count tokens across windows. When VS Code is opened with no folder, no scanning is performed and the status bar shows a visible "no workspace" indicator instead. All discovery activity is logged to the "Copilot Budget" Output channel.
 2. **Parsing** — Each session file is parsed to extract per-request `result.metadata.{promptTokens, outputTokens, cacheReadTokens?, cacheCreationTokens?}`. When the cache split is absent the turn-based heuristic fills it in.
 3. **Baseline & Restore** — A token snapshot is taken at startup as a baseline so only new activity is counted. If a tracking file from a previous session exists (written on deactivation), those stats are restored and merged, providing continuity across VS Code restarts.
 4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.
