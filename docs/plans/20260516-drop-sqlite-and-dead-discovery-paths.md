@@ -96,11 +96,11 @@ Tests touching the deleted surface:
 - Modify: `src/tracker.ts`
 - Modify: `src/tracker.test.ts`
 
-- [ ] remove the `import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader'` line (`src/tracker.ts:4`)
-- [ ] remove the `discoverVscdbFiles()` import if it's still present after Task 1
-- [ ] delete the `vscdbFiles` loop and `readSessionsFromVscdb(vscdbFile)` call site (around `src/tracker.ts:179` and `:227`) along with any local variables/branches that exist only to feed it
-- [ ] delete vscdb-path tests in `src/tracker.test.ts` (any test mocking `readSessionsFromVscdb`, `isSqliteReady`, or asserting tracker behavior against a plain-JSON session string fed from vscdb)
-- [ ] run `npm test && npm run lint` — must pass before next task
+- [x] remove the `import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader'` line (`src/tracker.ts:4`)
+- [x] remove the `discoverVscdbFiles()` import if it's still present after Task 1
+- [x] delete the `vscdbFiles` loop and `readSessionsFromVscdb(vscdbFile)` call site (around `src/tracker.ts:179` and `:227`) along with any local variables/branches that exist only to feed it
+- [x] delete vscdb-path tests in `src/tracker.test.ts` (any test mocking `readSessionsFromVscdb`, `isSqliteReady`, or asserting tracker behavior against a plain-JSON session string fed from vscdb)
+- [x] run `npm test && npm run lint` — must pass before next task
 
 ### Task 3: Drop the plain-JSON branch of sessionParser
 

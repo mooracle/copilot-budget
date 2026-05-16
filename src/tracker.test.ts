@@ -2,20 +2,17 @@ import { Tracker, TrackingStats, ModelStats } from './tracker';
 import * as fs from 'fs';
 import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
-import * as sqliteReader from './sqliteReader';
 import * as tokenRates from './tokenRates';
 
 jest.mock('fs');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
-jest.mock('./sqliteReader');
 jest.mock('./tokenRates');
 jest.mock('./logger');
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const mockDiscovery = sessionDiscovery as jest.Mocked<typeof sessionDiscovery>;
 const mockParser = sessionParser as jest.Mocked<typeof sessionParser>;
-const mockSqliteReader = sqliteReader as jest.Mocked<typeof sqliteReader>;
 const mockTokenRates = tokenRates as jest.Mocked<typeof tokenRates>;
 
 // Fixture rates pulled directly from src/__fixtures__/models-and-pricing.yml so
@@ -95,8 +92,6 @@ function setupFiles(
 beforeEach(() => {
   jest.clearAllMocks();
   jest.useFakeTimers();
-  mockSqliteReader.isSqliteReady.mockReturnValue(false);
-  mockSqliteReader.readSessionsFromVscdb.mockReturnValue([]);
   mockTokenRates.computeCost.mockImplementation((modelId, tokens) =>
     fixtureCost(modelId, tokens) * 100,
   );

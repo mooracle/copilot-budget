@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import { discoverSessionFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
-import { readSessionsFromVscdb } from './sqliteReader';
 import { computeCost } from './tokenRates';
 import { log } from './logger';
 
@@ -176,12 +175,9 @@ export class Tracker {
     modelInteractions: { [model: string]: number };
   } {
     const files = discoverSessionFiles();
-    const vscdbFiles: string[] = [];
-    log(
-      `scanAll: discovered ${files.length} session file(s), ${vscdbFiles.length} vscdb file(s)`,
-    );
+    log(`scanAll: discovered ${files.length} session file(s)`);
 
-    const currentFiles = new Set([...files, ...vscdbFiles]);
+    const currentFiles = new Set(files);
     const totals = {
       interactions: 0,
       modelUsage: {} as ModelUsage,
@@ -215,50 +211,6 @@ export class Tracker {
             log(`scanAll: failed to parse session file: ${file}`);
             return null;
           }
-        },
-        totals,
-      );
-    }
-
-    for (const vscdbFile of vscdbFiles) {
-      this.processFileWithCache(
-        vscdbFile,
-        () => {
-          const jsonStrings = readSessionsFromVscdb(vscdbFile);
-          let fileInteractions = 0;
-          const fileModelUsage: ModelUsage = {};
-          const fileModelInteractions: { [model: string]: number } = {};
-
-          for (const jsonStr of jsonStrings) {
-            let sessions: unknown[];
-            try {
-              const parsed = JSON.parse(jsonStr);
-              sessions = Array.isArray(parsed) ? parsed : [parsed];
-            } catch {
-              continue;
-            }
-
-            for (const session of sessions) {
-              if (typeof session !== 'object' || session === null) {
-                continue;
-              }
-              const sessionContent = JSON.stringify(session);
-              try {
-                const result = parseSessionFileContent(vscdbFile, sessionContent);
-                fileInteractions += result.interactions;
-                mergeModelUsage(fileModelUsage, result.modelUsage);
-                mergeModelInteractions(fileModelInteractions, result.modelInteractions);
-              } catch {
-                continue;
-              }
-            }
-          }
-
-          return {
-            interactions: fileInteractions,
-            modelUsage: fileModelUsage,
-            modelInteractions: fileModelInteractions,
-          };
         },
         totals,
       );
