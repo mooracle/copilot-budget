@@ -108,11 +108,12 @@ Tests touching the deleted surface:
 - Modify: `src/sessionParser.ts`
 - Modify: `src/sessionParser.test.ts`
 
-- [ ] verify the plain-JSON branch (`src/sessionParser.ts:313` `else` of the `.jsonl` check) has no remaining callers after Task 2 (`git grep` for `parseSessionFileContent` callsites; the only one in tracker.ts should now always pass a `.jsonl` path)
-- [ ] if the only difference between the two branches was the `.jsonl` check, drop the conditional and inline the JSONL parser; rename or simplify the function signature only if it tightens the contract (do not introduce a new abstraction layer)
-- [ ] delete tests in `src/sessionParser.test.ts` that feed plain-JSON paths (non-`.jsonl`) to the parser; keep all JSONL tests intact
-- [ ] confirm `src/sessionParser.test.ts` still covers the vscdb-equivalent metadata cases (server token reads, cache split, malformed metadata) on the JSONL path — these were the substantive checks; the vscdb-string fixture was the same content
-- [ ] run `npm test && npm run lint` — must pass before next task
+- [x] verify the plain-JSON branch (`src/sessionParser.ts:313` `else` of the `.jsonl` check) has no remaining callers after Task 2 (`git grep` for `parseSessionFileContent` callsites; the only one in tracker.ts should now always pass a `.jsonl` path)
+- [x] if the only difference between the two branches was the `.jsonl` check, drop the conditional and inline the JSONL parser; rename or simplify the function signature only if it tightens the contract (do not introduce a new abstraction layer)
+  - Note: the two branches differed in more than the path check (delta apply vs single JSON.parse), so this collapsed to keeping only the JSONL delta path and tightening the signature by dropping the unused path argument (`parseSessionFileContent(content)`). Tracker call updated; tracker test mock keyed on content (with a per-file tag) since fixtures share `content: '{}'`.
+- [x] delete tests in `src/sessionParser.test.ts` that feed plain-JSON paths (non-`.jsonl`) to the parser; keep all JSONL tests intact
+- [x] confirm `src/sessionParser.test.ts` still covers the vscdb-equivalent metadata cases (server token reads, cache split, malformed metadata) on the JSONL path — these were the substantive checks; the vscdb-string fixture was the same content
+- [x] run `npm test && npm run lint` — must pass before next task
 
 ### Task 4: Delete sqliteReader module and wire-up
 

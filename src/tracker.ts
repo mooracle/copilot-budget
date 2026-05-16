@@ -201,7 +201,7 @@ export class Tracker {
             return null;
           }
           try {
-            const result = parseSessionFileContent(file, content);
+            const result = parseSessionFileContent(content);
             return {
               interactions: result.interactions,
               modelUsage: result.modelUsage,

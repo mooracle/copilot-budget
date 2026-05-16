@@ -306,55 +306,41 @@ function processRequests(requests: unknown[]): ParsedSession {
   return { interactions, modelUsage, modelInteractions };
 }
 
-export function parseSessionFileContent(
-  sessionFilePath: string,
-  fileContent: string,
-): ParsedSession {
-  if (sessionFilePath.endsWith('.jsonl')) {
-    const lines = fileContent.split(/\r?\n/).filter((l) => l.trim());
+const EMPTY_SESSION: ParsedSession = {
+  interactions: 0,
+  modelUsage: {},
+  modelInteractions: {},
+};
 
-    let isDeltaBased = false;
-    if (lines.length > 0) {
-      try {
-        const first = JSON.parse(lines[0]);
-        if (first && typeof first.kind === 'number') {
-          isDeltaBased = true;
-        }
-      } catch {
-        // Not delta format
-      }
-    }
-
-    if (isDeltaBased) {
-      let sessionState: unknown = Object.create(null);
-      for (const line of lines) {
-        try {
-          const delta = JSON.parse(line);
-          sessionState = applyDelta(sessionState, delta);
-        } catch {
-          // Skip invalid lines
-        }
-      }
-
-      const requests =
-        isObject(sessionState) && Array.isArray((sessionState as any).requests)
-          ? ((sessionState as any).requests as unknown[])
-          : [];
-      return processRequests(requests);
-    }
+export function parseSessionFileContent(fileContent: string): ParsedSession {
+  const lines = fileContent.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) {
+    return EMPTY_SESSION;
   }
 
-  let sessionJson: any;
+  let first: unknown;
   try {
-    sessionJson = JSON.parse(fileContent);
+    first = JSON.parse(lines[0]);
   } catch {
-    return { interactions: 0, modelUsage: {}, modelInteractions: {} };
+    return EMPTY_SESSION;
+  }
+  if (!isObject(first) || typeof (first as any).kind !== 'number') {
+    return EMPTY_SESSION;
   }
 
-  const requests = Array.isArray(sessionJson?.requests)
-    ? sessionJson.requests
-    : Array.isArray(sessionJson?.history)
-      ? sessionJson.history
+  let sessionState: unknown = Object.create(null);
+  for (const line of lines) {
+    try {
+      const delta = JSON.parse(line);
+      sessionState = applyDelta(sessionState, delta);
+    } catch {
+      // Skip invalid lines
+    }
+  }
+
+  const requests =
+    isObject(sessionState) && Array.isArray((sessionState as any).requests)
+      ? ((sessionState as any).requests as unknown[])
       : [];
   return processRequests(requests);
 }

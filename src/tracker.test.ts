@@ -67,22 +67,27 @@ function setupFiles(
     parseResult: ReturnType<typeof sessionParser.parseSessionFileContent>;
   }[],
 ) {
-  mockDiscovery.discoverSessionFiles.mockReturnValue(files.map((f) => f.path));
+  // Tag content per-file so the parser mock can route on content alone now
+  // that parseSessionFileContent no longer takes a path argument. Fixtures
+  // share `content: '{}'`, so the tag is what makes them distinct.
+  const tagged = files.map((f, i) => ({ ...f, taggedContent: `${f.content}\n#file=${i}` }));
+
+  mockDiscovery.discoverSessionFiles.mockReturnValue(tagged.map((f) => f.path));
 
   mockFs.statSync.mockImplementation((p: fs.PathLike) => {
-    const file = files.find((f) => f.path === p.toString());
+    const file = tagged.find((f) => f.path === p.toString());
     if (!file) throw new Error(`ENOENT: no such file ${p}`);
     return { mtimeMs: file.mtime } as fs.Stats;
   });
 
   mockFs.readFileSync.mockImplementation((p: fs.PathOrFileDescriptor) => {
-    const file = files.find((f) => f.path === p.toString());
+    const file = tagged.find((f) => f.path === p.toString());
     if (!file) throw new Error(`ENOENT: no such file ${p}`);
-    return file.content as any;
+    return file.taggedContent as any;
   });
 
-  mockParser.parseSessionFileContent.mockImplementation((filePath: string) => {
-    const file = files.find((f) => f.path === filePath);
+  mockParser.parseSessionFileContent.mockImplementation((content: string) => {
+    const file = tagged.find((f) => f.taggedContent === content);
     if (!file)
       return { interactions: 0, modelUsage: {}, modelInteractions: {} };
     return file.parseResult;
