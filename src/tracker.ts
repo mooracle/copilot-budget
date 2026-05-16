@@ -115,7 +115,7 @@ export class Tracker {
   private listeners: StatsListener[] = [];
   private lastStats: TrackingStats | null = null;
   private previousStats: RestoredStats | null = null;
-  private storageUri: vscode.Uri | undefined;
+  private readonly storageUri: vscode.Uri | undefined;
 
   constructor(storageUri: vscode.Uri | undefined) {
     this.since = new Date().toISOString();

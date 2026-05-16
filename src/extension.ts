@@ -59,6 +59,40 @@ const ALL_COMMANDS = [
 const EMPTY_WINDOW_MESSAGE =
   'Copilot Budget: no workspace open. Open a folder to track Copilot usage.';
 
+function registerShowDiagnostics(context: vscode.ExtensionContext): void {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
+      const ch = getOutputChannel();
+      const diag = getDiscoveryDiagnostics(context.storageUri);
+
+      ch.appendLine('=== Copilot Budget Diagnostics ===');
+      ch.appendLine(`Platform: ${diag.platform}`);
+      ch.appendLine(`Home directory: ${diag.homedir}`);
+      ch.appendLine('');
+      ch.appendLine(`Storage URI: ${diag.storageUri ?? '(none — empty window)'}`);
+      ch.appendLine(`Chat sessions dir: ${diag.chatSessionsDir ?? '(none — empty window)'}`);
+      ch.appendLine('');
+      ch.appendLine(`Session files found: ${diag.filesFound.length}`);
+      for (const f of diag.filesFound) {
+        ch.appendLine(`  ${f}`);
+      }
+
+      if (tracker) {
+        const stats = tracker.getStats();
+        ch.appendLine('');
+        ch.appendLine('Current stats:');
+        ch.appendLine(`  Total tokens: ${stats.totalTokens}`);
+        ch.appendLine(`  Interactions: ${stats.interactions}`);
+        ch.appendLine(`  AI Credits: ${stats.totalAiCredits.toFixed(2)}`);
+        ch.appendLine(`  Since: ${stats.since}`);
+        ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
+      }
+
+      ch.show();
+    }),
+  );
+}
+
 function activateEmptyWindow(context: vscode.ExtensionContext): void {
   const item = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -76,25 +110,7 @@ function activateEmptyWindow(context: vscode.ExtensionContext): void {
     context.subscriptions.push(vscode.commands.registerCommand(cmd, infoHandler));
   }
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
-      const ch = getOutputChannel();
-      const diag = getDiscoveryDiagnostics(context.storageUri);
-
-      ch.appendLine('=== Copilot Budget Diagnostics ===');
-      ch.appendLine(`Platform: ${diag.platform}`);
-      ch.appendLine(`Home directory: ${diag.homedir}`);
-      ch.appendLine('');
-      ch.appendLine(`Storage URI: ${diag.storageUri ?? '(none — empty window)'}`);
-      ch.appendLine(`Chat sessions dir: ${diag.chatSessionsDir ?? '(none — empty window)'}`);
-      ch.appendLine('');
-      ch.appendLine(`Session files found: ${diag.filesFound.length}`);
-      for (const f of diag.filesFound) {
-        ch.appendLine(`  ${f}`);
-      }
-      ch.show();
-    }),
-  );
+  registerShowDiagnostics(context);
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -196,37 +212,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
-      const ch = getOutputChannel();
-      const diag = getDiscoveryDiagnostics(context.storageUri);
-
-      ch.appendLine('=== Copilot Budget Diagnostics ===');
-      ch.appendLine(`Platform: ${diag.platform}`);
-      ch.appendLine(`Home directory: ${diag.homedir}`);
-      ch.appendLine('');
-      ch.appendLine(`Storage URI: ${diag.storageUri ?? '(none — empty window)'}`);
-      ch.appendLine(`Chat sessions dir: ${diag.chatSessionsDir ?? '(none — empty window)'}`);
-      ch.appendLine('');
-      ch.appendLine(`Session files found: ${diag.filesFound.length}`);
-      for (const f of diag.filesFound) {
-        ch.appendLine(`  ${f}`);
-      }
-
-      if (tracker) {
-        const stats = tracker.getStats();
-        ch.appendLine('');
-        ch.appendLine('Current stats:');
-        ch.appendLine(`  Total tokens: ${stats.totalTokens}`);
-        ch.appendLine(`  Interactions: ${stats.interactions}`);
-        ch.appendLine(`  AI Credits: ${stats.totalAiCredits.toFixed(2)}`);
-        ch.appendLine(`  Since: ${stats.since}`);
-        ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
-      }
-
-      ch.show();
-    }),
-  );
+  registerShowDiagnostics(context);
 
   // Auto-install/refresh hook if enabled in settings (only when a workspace is open)
   if (isCommitHookEnabled() && vscode.workspace.workspaceFolders?.length) {
