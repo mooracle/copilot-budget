@@ -1,8 +1,9 @@
 const esbuild = require('esbuild');
-const { copyFileSync, mkdirSync, existsSync } = require('fs');
+const { copyFileSync, mkdirSync, existsSync, rmSync } = require('fs');
 const path = require('path');
 
 const watch = process.argv.includes('--watch');
+const distDir = path.join(__dirname, 'dist');
 
 /** @type {import('esbuild').BuildOptions} */
 const buildOptions = {
@@ -17,11 +18,15 @@ const buildOptions = {
   minify: false,
 };
 
+function cleanDist() {
+  rmSync(distDir, { recursive: true, force: true });
+}
+
 function copyRateCard() {
-  mkdirSync('dist', { recursive: true });
+  mkdirSync(distDir, { recursive: true });
   const yamlSrc = path.join(__dirname, 'data', 'models-and-pricing.yml');
   if (existsSync(yamlSrc)) {
-    copyFileSync(yamlSrc, path.join(__dirname, 'dist', 'models-and-pricing.yml'));
+    copyFileSync(yamlSrc, path.join(distDir, 'models-and-pricing.yml'));
     console.log('Copied models-and-pricing.yml to dist/');
   } else {
     console.warn('Warning: models-and-pricing.yml not found at', yamlSrc, '— run npm run update-rates');
@@ -29,6 +34,7 @@ function copyRateCard() {
 }
 
 async function main() {
+  cleanDist();
   if (watch) {
     copyRateCard();
     const ctx = await esbuild.context(buildOptions);
