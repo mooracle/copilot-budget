@@ -153,16 +153,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
       const ch = getOutputChannel();
-      const diag = getDiscoveryDiagnostics();
+      const diag = getDiscoveryDiagnostics(undefined);
 
       ch.appendLine('=== Copilot Budget Diagnostics ===');
       ch.appendLine(`Platform: ${diag.platform}`);
       ch.appendLine(`Home directory: ${diag.homedir}`);
       ch.appendLine('');
-      ch.appendLine('Candidate paths:');
-      for (const cp of diag.candidatePaths) {
-        ch.appendLine(`  ${cp.exists ? 'EXISTS' : 'MISSING'}: ${cp.path}`);
-      }
+      ch.appendLine(`Storage URI: ${diag.storageUri ?? '(none — empty window)'}`);
+      ch.appendLine(`Chat sessions dir: ${diag.chatSessionsDir ?? '(none — empty window)'}`);
       ch.appendLine('');
       ch.appendLine(`Session files found: ${diag.filesFound.length}`);
       for (const f of diag.filesFound) {

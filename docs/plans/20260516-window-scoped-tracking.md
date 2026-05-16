@@ -75,14 +75,14 @@ This must land first because Tasks 2-4's tests all need a way to construct a moc
 - Modify: `src/sessionDiscovery.ts`
 - Modify: `src/sessionDiscovery.test.ts`
 
-- [ ] change `discoverSessionFiles()` signature to `discoverSessionFiles(storageUri: vscode.Uri | undefined): string[]`. Single function: when `storageUri` is undefined return `[]`; otherwise derive `chatSessionsDir = Uri.joinPath(storageUri, '..', 'chatSessions').fsPath` and scan it for `.json`/`.jsonl` files using the existing `NON_SESSION_PATTERNS` filter and zero-byte skip. Inline the scan — no separate exported helpers.
-- [ ] update `getDiscoveryDiagnostics(storageUri)` to return the new shape `{platform, homedir, storageUri: string | null, chatSessionsDir: string | null, filesFound: string[]}`. `storageUri`/`chatSessionsDir` are null in the disabled state.
-- [ ] delete `getVSCodeUserPaths()`, the `VSCODE_VARIANTS` constant, and the `scanDirectory` helper if unused. Grep first to confirm no remaining callers outside this file.
-- [ ] clean up now-unused imports (`os`, `path` branching) left over after the deletion — final import list should match what the new code actually uses
-- [ ] write tests for `discoverSessionFiles`: undefined storageUri → `[]`; valid storageUri with chatSessions dir present → returns its files; valid storageUri with no chatSessions dir → `[]`; skips non-session names; skips zero-byte files
-- [ ] write a path-derivation assertion test: for `storageUri = file:///path/workspaceStorage/abc123/pub.ext` the resolved dir equals `/path/workspaceStorage/abc123/chatSessions` (catches the one-`..`-vs-two regression)
-- [ ] write test for `getDiscoveryDiagnostics` in both states (workspace + empty)
-- [ ] run `npm test` — must pass before Task 3
+- [x] change `discoverSessionFiles()` signature to `discoverSessionFiles(storageUri: vscode.Uri | undefined): string[]`. Single function: when `storageUri` is undefined return `[]`; otherwise derive `chatSessionsDir = Uri.joinPath(storageUri, '..', 'chatSessions').fsPath` and scan it for `.json`/`.jsonl` files using the existing `NON_SESSION_PATTERNS` filter and zero-byte skip. Inline the scan — no separate exported helpers.
+- [x] update `getDiscoveryDiagnostics(storageUri)` to return the new shape `{platform, homedir, storageUri: string | null, chatSessionsDir: string | null, filesFound: string[]}`. `storageUri`/`chatSessionsDir` are null in the disabled state.
+- [x] delete `getVSCodeUserPaths()`, the `VSCODE_VARIANTS` constant, and the `scanDirectory` helper if unused. Grep first to confirm no remaining callers outside this file.
+- [x] clean up now-unused imports (`os`, `path` branching) left over after the deletion — final import list should match what the new code actually uses
+- [x] write tests for `discoverSessionFiles`: undefined storageUri → `[]`; valid storageUri with chatSessions dir present → returns its files; valid storageUri with no chatSessions dir → `[]`; skips non-session names; skips zero-byte files
+- [x] write a path-derivation assertion test: for `storageUri = file:///path/workspaceStorage/abc123/pub.ext` the resolved dir equals `/path/workspaceStorage/abc123/chatSessions` (catches the one-`..`-vs-two regression)
+- [x] write test for `getDiscoveryDiagnostics` in both states (workspace + empty)
+- [x] run `npm test` — must pass before Task 3
 
 ### Task 3: Thread `storageUri` into `Tracker`
 

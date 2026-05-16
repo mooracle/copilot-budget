@@ -139,7 +139,7 @@ export class Tracker {
     modelUsage: ModelUsage;
     modelInteractions: { [model: string]: number };
   } {
-    const files = discoverSessionFiles();
+    const files = discoverSessionFiles(undefined);
     log(`scanAll: discovered ${files.length} session file(s)`);
 
     const currentFiles = new Set(files);

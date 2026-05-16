@@ -143,10 +143,8 @@ beforeEach(async () => {
   mockGetDiscoveryDiagnostics.mockReturnValue({
     platform: 'darwin',
     homedir: '/home/test',
-    candidatePaths: [
-      { path: '/home/test/.config/Code/User', exists: true },
-      { path: '/home/test/.config/Code - Insiders/User', exists: false },
-    ],
+    storageUri: '/home/test/.config/Code/User/workspaceStorage/abc123/mooracle.copilot-budget',
+    chatSessionsDir: '/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions',
     filesFound: ['/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions/test.jsonl'],
   });
   mockGetOutputChannel.mockReturnValue({
