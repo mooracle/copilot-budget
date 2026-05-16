@@ -198,3 +198,22 @@ export const tasks = {
   executeTask: jest.fn(async () => undefined),
   onDidEndTaskProcess: jest.fn(() => ({ dispose: () => {} })),
 };
+
+export interface MockExtensionContextOverrides {
+  storageUri?: Uri;
+  globalStorageUri?: Uri;
+}
+
+export function createMockExtensionContext(
+  overrides: MockExtensionContextOverrides = {},
+): any {
+  return {
+    subscriptions: [],
+    extensionPath: '/test',
+    extensionUri: Uri.file('/test'),
+    globalState: { get: () => undefined, update: async () => {} },
+    workspaceState: { get: () => undefined, update: async () => {} },
+    storageUri: overrides.storageUri,
+    globalStorageUri: overrides.globalStorageUri ?? Uri.file('/test/global'),
+  };
+}
