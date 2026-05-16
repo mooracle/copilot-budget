@@ -9,7 +9,7 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 - **Per-model breakdown** — see AIC cost and input / cache_read / cache_creation / output tokens grouped by model (GPT, Claude, Gemini, etc.) in the status bar tooltip and quick pick panel.
 - **Upstream rate card** — per-model rates are a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml), shipped with the extension.
 - **Commit hook integration** — automatically appends configurable git trailers (`Copilot-AI-Credits` on by default; `Copilot-Est-Cost` USD trailer and per-model breakdown are opt-in) to commit messages. Trailer keys can be renamed or individually disabled via settings.
-- **Persistent tracking** — stats accumulate across VS Code restarts. On deactivation the extension writes current stats to a tracking file; on activation it reads them back. Use the "Reset Tracking" command to start fresh.
+- **Persistent tracking** — stats accumulate across VS Code restarts. The extension writes current stats to a tracking file on every stats update, on a 5-second refresh interval, and on deactivation; on activation it reads them back. Use the "Reset Tracking" command to start fresh.
 - **Worktree & submodule support** — correctly follows `.git` files in git worktrees, submodules, and devcontainers for both hook installation and tracking file placement.
 - **Lightweight** — polls every two minutes with file-level caching; no network calls at runtime.
 
@@ -92,11 +92,11 @@ By default (`copilot-budget.commitHook.enabled: false`), the hook is **not** ins
 ### Data Flow
 
 1. **Extension tracks usage** — as you use GitHub Copilot, the extension detects new activity every 2 minutes and updates an internal stats object with per-model token counts and cost.
-2. **Tracking file is written** — on every stats update (and every poll cycle), the extension writes current stats to `.git/copilot-budget` in a key=value format. This file contains both raw stats and `TR_`-prefixed lines that encode the trailer data.
+2. **Tracking file is written** — on every stats update and on a 5-second refresh interval, the extension writes current stats to `.git/copilot-budget` in a key=value format. This file contains both raw stats and `TR_`-prefixed lines that encode the trailer data.
 3. **You commit** — when you run `git commit`, Git triggers the `prepare-commit-msg` hook.
 4. **Hook appends trailers** — the hook reads `.git/copilot-budget`, extracts all `TR_` lines, converts them to git trailers (e.g. `TR_Copilot-AI-Credits=42.31` becomes `Copilot-AI-Credits: 42.31`), and appends them to the commit message.
-5. **Hook resets the tracking file** — after appending, the hook truncates `.git/copilot-budget` so the next commit only includes usage since the last commit.
-6. **Stats persist** — the extension re-writes the tracking file on the next poll cycle with any new activity that occurred after the commit.
+5. **Hook resets the tracking file** — after appending, the hook truncates `.git/copilot-budget` to zero bytes so the next commit only includes usage since the last commit.
+6. **Stats persist** — within 5 seconds the extension detects the truncation, rebases the tracker so future writes only include usage after the commit, and re-writes the tracking file with any new activity already captured by the in-memory tracker.
 
 ### What Gets Appended
 
