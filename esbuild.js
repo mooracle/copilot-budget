@@ -17,17 +17,6 @@ const buildOptions = {
   minify: false,
 };
 
-function copyWasm() {
-  mkdirSync('dist', { recursive: true });
-  const wasmSrc = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
-  if (existsSync(wasmSrc)) {
-    copyFileSync(wasmSrc, path.join(__dirname, 'dist', 'sql-wasm.wasm'));
-    console.log('Copied sql-wasm.wasm to dist/');
-  } else {
-    console.warn('Warning: sql-wasm.wasm not found at', wasmSrc, '— run npm install first');
-  }
-}
-
 function copyRateCard() {
   mkdirSync('dist', { recursive: true });
   const yamlSrc = path.join(__dirname, 'data', 'models-and-pricing.yml');
@@ -41,14 +30,12 @@ function copyRateCard() {
 
 async function main() {
   if (watch) {
-    copyWasm();
     copyRateCard();
     const ctx = await esbuild.context(buildOptions);
     await ctx.watch();
     console.log('Watching for changes...');
   } else {
     await esbuild.build(buildOptions);
-    copyWasm();
     copyRateCard();
     console.log('Build complete');
   }
