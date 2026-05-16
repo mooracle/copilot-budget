@@ -62,22 +62,6 @@ export function getVSCodeUserPaths(): string[] {
 }
 
 /**
- * If `dirPath` exists, scan it for session files and log the count.
- * Silently ignores missing or inaccessible paths.
- */
-function scanPathSafe(dirPath: string, label: string, files: string[]): void {
-  try {
-    if (fs.existsSync(dirPath)) {
-      const before = files.length;
-      scanDirectory(dirPath, files);
-      log(`  ${label}: ${files.length - before} files`);
-    }
-  } catch {
-    // skip inaccessible paths
-  }
-}
-
-/**
  * Recursively scan a directory for .json / .jsonl session files,
  * excluding known non-session files.
  */
@@ -160,11 +144,16 @@ export function discoverSessionFiles(): string[] {
       // skip
     }
 
-    scanPathSafe(
-      path.join(userPath, 'globalStorage', 'emptyWindowChatSessions'),
-      'globalStorage/emptyWindowChatSessions',
-      files,
-    );
+    const emptyWindowPath = path.join(userPath, 'globalStorage', 'emptyWindowChatSessions');
+    try {
+      if (fs.existsSync(emptyWindowPath)) {
+        const before = files.length;
+        scanDirectory(emptyWindowPath, files);
+        log(`  globalStorage/emptyWindowChatSessions: ${files.length - before} files`);
+      }
+    } catch {
+      // skip inaccessible paths
+    }
   }
 
   // Deduplicate using a Set

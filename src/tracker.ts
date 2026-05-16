@@ -134,41 +134,6 @@ export class Tracker {
     };
   }
 
-  private processFileWithCache(
-    file: string,
-    parseFn: () => Omit<FileCache, 'mtime'> | null,
-    totals: {
-      interactions: number;
-      modelUsage: ModelUsage;
-      modelInteractions: { [model: string]: number };
-    },
-  ): void {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      return;
-    }
-
-    const mtime = stat.mtimeMs;
-    const cached = this.fileCache.get(file);
-
-    if (cached && cached.mtime === mtime) {
-      totals.interactions += cached.interactions;
-      mergeModelUsage(totals.modelUsage, cached.modelUsage);
-      mergeModelInteractions(totals.modelInteractions, cached.modelInteractions);
-      return;
-    }
-
-    const result = parseFn();
-    if (!result) return;
-
-    this.fileCache.set(file, { mtime, ...result });
-    totals.interactions += result.interactions;
-    mergeModelUsage(totals.modelUsage, result.modelUsage);
-    mergeModelInteractions(totals.modelInteractions, result.modelInteractions);
-  }
-
   private scanAll(): {
     interactions: number;
     modelUsage: ModelUsage;
@@ -191,29 +156,47 @@ export class Tracker {
     }
 
     for (const file of files) {
-      this.processFileWithCache(
-        file,
-        () => {
-          let content: string;
-          try {
-            content = fs.readFileSync(file, 'utf-8');
-          } catch {
-            return null;
-          }
-          try {
-            const result = parseSessionFileContent(content);
-            return {
-              interactions: result.interactions,
-              modelUsage: result.modelUsage,
-              modelInteractions: result.modelInteractions,
-            };
-          } catch {
-            log(`scanAll: failed to parse session file: ${file}`);
-            return null;
-          }
-        },
-        totals,
-      );
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        continue;
+      }
+
+      const mtime = stat.mtimeMs;
+      const cached = this.fileCache.get(file);
+
+      if (cached && cached.mtime === mtime) {
+        totals.interactions += cached.interactions;
+        mergeModelUsage(totals.modelUsage, cached.modelUsage);
+        mergeModelInteractions(totals.modelInteractions, cached.modelInteractions);
+        continue;
+      }
+
+      let content: string;
+      try {
+        content = fs.readFileSync(file, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      let parsed;
+      try {
+        parsed = parseSessionFileContent(content);
+      } catch {
+        log(`scanAll: failed to parse session file: ${file}`);
+        continue;
+      }
+
+      const entry = {
+        interactions: parsed.interactions,
+        modelUsage: parsed.modelUsage,
+        modelInteractions: parsed.modelInteractions,
+      };
+      this.fileCache.set(file, { mtime, ...entry });
+      totals.interactions += entry.interactions;
+      mergeModelUsage(totals.modelUsage, entry.modelUsage);
+      mergeModelInteractions(totals.modelInteractions, entry.modelInteractions);
     }
 
     log(
