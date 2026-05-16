@@ -10,7 +10,6 @@ import { installHook, uninstallHook } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
 import { getOutputChannel, disposeLogger, log } from './logger';
-import { initSqlite, disposeSqlite } from './sqliteReader';
 
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
@@ -69,11 +68,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
     }
     return;
-  }
-
-  const sqliteOk = await initSqlite();
-  if (!sqliteOk) {
-    log('SQLite support unavailable — vscdb files will be skipped');
   }
 
   tracker = new Tracker();
@@ -221,6 +215,5 @@ export async function deactivate(): Promise<void> {
     statusBar = null;
   }
   commitResetCheck = null;
-  disposeSqlite();
   disposeLogger();
 }

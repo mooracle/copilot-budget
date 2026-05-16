@@ -309,7 +309,6 @@ describe('getDiscoveryDiagnostics', () => {
     expect(diag.candidatePaths[0]).toHaveProperty('path');
     expect(diag.candidatePaths[0]).toHaveProperty('exists');
     expect(diag.filesFound).toEqual([]);
-    expect(diag).not.toHaveProperty('vscdbFilesFound');
   });
 
   it('marks existing paths correctly', () => {

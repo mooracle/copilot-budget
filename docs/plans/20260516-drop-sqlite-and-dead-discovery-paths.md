@@ -123,13 +123,14 @@ Tests touching the deleted surface:
 - Modify: `src/extension.ts`
 - Modify: `src/extension.test.ts`
 
-- [ ] delete `src/sqliteReader.ts` and `src/sqliteReader.test.ts`
-- [ ] remove `initSqlite` import + activation call in `src/extension.ts`; remove the `sqliteOk` log line
-- [ ] remove `disposeSqlite` import + deactivate call in `src/extension.ts`
-- [ ] remove the `Vscdb files found:` block from the `showDiagnostics` command body in `src/extension.ts` (and its surrounding loop over `diag.vscdbFilesFound`)
-- [ ] update `src/extension.test.ts`: drop assertions on `initSqlite`/`disposeSqlite` being called; drop assertions on `Vscdb files found:` appearing in diagnostics output
-- [ ] grep guard: `git grep -E 'sql\.js|sqliteReader|initSqlite|disposeSqlite|isSqliteReady|readSessionsFromVscdb|discoverVscdbFiles|vscdbFilesFound|sql-wasm' src/` must return nothing
-- [ ] run `npm test && npm run lint` — must pass before next task
+- [x] delete `src/sqliteReader.ts` and `src/sqliteReader.test.ts`
+- [x] remove `initSqlite` import + activation call in `src/extension.ts`; remove the `sqliteOk` log line
+- [x] remove `disposeSqlite` import + deactivate call in `src/extension.ts`
+- [x] remove the `Vscdb files found:` block from the `showDiagnostics` command body in `src/extension.ts` (and its surrounding loop over `diag.vscdbFilesFound`) — already removed in Task 1's scope-note surgery
+- [x] update `src/extension.test.ts`: drop assertions on `initSqlite`/`disposeSqlite` being called; drop assertions on `Vscdb files found:` appearing in diagnostics output
+  - Also removed stale `sqliteReader` mock + isSqliteReady/readSessionsFromVscdb setup from `src/trackingFile.test.ts` to satisfy the grep guard, and dropped the `vscdbFilesFound` regression assertion from `src/sessionDiscovery.test.ts` (the property is gone from the type, and the grep guard now enforces it).
+- [x] grep guard: `git grep -E 'sql\.js|sqliteReader|initSqlite|disposeSqlite|isSqliteReady|readSessionsFromVscdb|discoverVscdbFiles|vscdbFilesFound|sql-wasm' src/` must return nothing
+- [x] run `npm test && npm run lint` — must pass before next task
 
 ### Task 5: Drop sql.js dependency and esbuild WASM copy
 

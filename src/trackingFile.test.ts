@@ -13,7 +13,6 @@ import * as config from './config';
 import * as tokenRates from './tokenRates';
 import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
-import * as sqliteReader from './sqliteReader';
 
 jest.mock('fs');
 jest.mock('./gitDir');
@@ -22,7 +21,6 @@ jest.mock('./config');
 jest.mock('./tokenRates');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
-jest.mock('./sqliteReader');
 jest.mock('./logger');
 
 const mockVscode = vscode as any;
@@ -699,8 +697,6 @@ describe('trackingFile', () => {
 
       const FRESH_COST_AIC = 42.5;
       (tokenRates.computeCost as jest.Mock).mockReturnValue(FRESH_COST_AIC);
-      (sqliteReader.isSqliteReady as jest.Mock).mockReturnValue(false);
-      (sqliteReader.readSessionsFromVscdb as jest.Mock).mockReturnValue([]);
       // initialize() snapshots an empty baseline so subsequent fresh activity
       // shows up as a positive delta on update().
       (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([]);

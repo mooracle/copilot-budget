@@ -5,7 +5,6 @@ jest.mock('./commitHook');
 jest.mock('./config');
 jest.mock('./logger');
 jest.mock('./sessionDiscovery');
-jest.mock('./sqliteReader');
 
 import * as vscode from 'vscode';
 import { __commandCallbacks } from './__mocks__/vscode';
@@ -21,7 +20,6 @@ import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
 import { getOutputChannel, disposeLogger } from './logger';
-import { initSqlite, disposeSqlite } from './sqliteReader';
 
 const MockTracker = Tracker as jest.MockedClass<typeof Tracker>;
 const mockCreateStatusBar = createStatusBar as jest.MockedFunction<
@@ -61,10 +59,6 @@ const mockGetOutputChannel = getOutputChannel as jest.MockedFunction<
 >;
 const mockDisposeLogger = disposeLogger as jest.MockedFunction<
   typeof disposeLogger
->;
-const mockInitSqlite = initSqlite as jest.MockedFunction<typeof initSqlite>;
-const _mockDisposeSqlite = disposeSqlite as jest.MockedFunction<
-  typeof disposeSqlite
 >;
 
 function makeContext(): vscode.ExtensionContext {
@@ -164,7 +158,6 @@ beforeEach(async () => {
     dispose: jest.fn(),
     name: 'Copilot Budget',
   } as any);
-  mockInitSqlite.mockResolvedValue(true);
 
   // Reset module-level state by calling deactivate
   await deactivate();
@@ -185,7 +178,6 @@ beforeEach(async () => {
   mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
   mockIsTrackingFileTruncated.mockResolvedValue(false);
   mockIsHookInstalled.mockResolvedValue(false);
-  mockInitSqlite.mockResolvedValue(true);
   trackerInstance.onStatsChanged = jest.fn((listener: any) => {
     statsChangedListeners = [];
     statsChangedListeners.push(listener);
@@ -483,32 +475,6 @@ describe('extension', () => {
       mockIsCommitHookEnabled.mockReturnValue(true);
       configChangedCallback!({} as any);
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls initSqlite before starting tracker', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockInitSqlite).toHaveBeenCalledTimes(1);
-      // initSqlite should be called before tracker.start
-      const initOrder = mockInitSqlite.mock.invocationCallOrder[0];
-      const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
-      expect(initOrder).toBeLessThan(startOrder);
-    });
-
-    it('does not call initSqlite when disabled', async () => {
-      mockIsEnabled.mockReturnValue(false);
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockInitSqlite).not.toHaveBeenCalled();
-    });
-
-    it('continues when initSqlite returns false', async () => {
-      mockInitSqlite.mockResolvedValue(false);
-      const ctx = makeContext();
-      await activate(ctx);
-      // Tracker should still be created and started
-      expect(MockTracker).toHaveBeenCalledTimes(1);
-      expect(trackerInstance.start).toHaveBeenCalledTimes(1);
     });
 
     it('restores previous stats from tracking file', async () => {
