@@ -1,5 +1,6 @@
 import { Tracker, TrackingStats, ModelStats } from './tracker';
 import * as fs from 'fs';
+import * as vscode from 'vscode';
 import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
 import * as tokenRates from './tokenRates';
@@ -14,6 +15,8 @@ const mockFs = fs as jest.Mocked<typeof fs>;
 const mockDiscovery = sessionDiscovery as jest.Mocked<typeof sessionDiscovery>;
 const mockParser = sessionParser as jest.Mocked<typeof sessionParser>;
 const mockTokenRates = tokenRates as jest.Mocked<typeof tokenRates>;
+
+const STUB_STORAGE_URI = vscode.Uri.file('/test/workspaceStorage/abc123/pub.ext');
 
 // Fixture rates pulled directly from src/__fixtures__/models-and-pricing.yml so
 // the cost assertions match what the real rate card would produce.
@@ -108,7 +111,7 @@ afterEach(() => {
 
 describe('Tracker — initial state', () => {
   it('returns zero stats before initialize', () => {
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     const stats = tracker.getStats();
     expect(stats.totalTokens).toBe(0);
     expect(stats.interactions).toBe(0);
@@ -142,7 +145,7 @@ describe('Tracker — baseline computation', () => {
       },
     ]);
 
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     const stats = tracker.getStats();
 
@@ -155,7 +158,7 @@ describe('Tracker — baseline computation', () => {
 
   it('handles no session files', () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     expect(tracker.getStats().totalTokens).toBe(0);
     tracker.dispose();
@@ -184,7 +187,7 @@ describe('Tracker — delta computation', () => {
       },
     ]);
 
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
 
     setupFiles([
@@ -247,7 +250,7 @@ describe('Tracker — delta computation', () => {
       },
     ]);
 
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     const listener = jest.fn();
     tracker.onStatsChanged(listener);
     tracker.initialize();
@@ -269,7 +272,7 @@ describe('Tracker — delta computation', () => {
         },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     const listener = jest.fn();
     tracker.onStatsChanged(listener);
     tracker.initialize();
@@ -314,7 +317,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
         },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
 
     setupFiles([
@@ -348,7 +351,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
 
     setupFiles([
@@ -388,7 +391,7 @@ describe('Tracker — mixed-model session', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
 
     setupFiles([
@@ -447,7 +450,7 @@ describe('Tracker — totalTokens invariant', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
 
     setupFiles([
@@ -486,7 +489,7 @@ describe('Tracker — restored stats merge', () => {
       },
     ]);
 
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.setPreviousStats({
       since: '2026-04-01T00:00:00.000Z',
       interactions: 7,
@@ -544,7 +547,7 @@ describe('Tracker — restored stats merge', () => {
 
   it('reset() clears previousStats and resets baseline', () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.setPreviousStats({
       since: '2026-04-01T00:00:00.000Z',
       interactions: 5,
@@ -583,7 +586,7 @@ describe('Tracker — restored stats merge', () => {
         },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
 
     setupFiles([
@@ -659,7 +662,7 @@ describe('Tracker — restored stats merge', () => {
         },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     tracker.update();
 
@@ -673,7 +676,7 @@ describe('Tracker — restored stats merge', () => {
 
   it('consume() clears previousStats so restored prior-session stats do not leak forward', () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.setPreviousStats({
       since: '2026-04-01T00:00:00.000Z',
       interactions: 5,
@@ -711,7 +714,7 @@ describe('Tracker — mtime caching', () => {
         },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
 
@@ -729,7 +732,7 @@ describe('Tracker — mtime caching', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
 
@@ -761,7 +764,7 @@ describe('Tracker — mtime caching', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
 
@@ -782,7 +785,7 @@ describe('Tracker — mtime caching', () => {
 describe('Tracker — periodic scanning', () => {
   it('calls update on interval', () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.start(60_000);
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledTimes(1);
 
@@ -812,7 +815,7 @@ describe('Tracker — error handling', () => {
       modelUsage: {},
       modelInteractions: {},
     });
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
     tracker.dispose();
@@ -824,7 +827,7 @@ describe('Tracker — error handling', () => {
     mockFs.readFileSync.mockImplementation(() => {
       throw new Error('EACCES');
     });
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.initialize();
     expect(tracker.getStats().totalTokens).toBe(0);
     tracker.dispose();
@@ -834,10 +837,40 @@ describe('Tracker — error handling', () => {
 describe('Tracker — dispose', () => {
   it('clears timer, listeners, and cache', () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker();
+    const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.start(60_000);
     tracker.dispose();
     jest.advanceTimersByTime(120_000);
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Tracker — storageUri threading', () => {
+  it('passes the stored storageUri to discoverSessionFiles on scan', () => {
+    setupEmptyDiscovery();
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    tracker.initialize();
+    expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledWith(STUB_STORAGE_URI);
+    tracker.dispose();
+  });
+
+  it('passes undefined to discoverSessionFiles when no storageUri given', () => {
+    setupEmptyDiscovery();
+    const tracker = new Tracker(undefined);
+    tracker.initialize();
+    expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledWith(undefined);
+    tracker.dispose();
+  });
+
+  it('reports zero stats when storageUri is undefined and discovery returns empty', () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue([]);
+    const tracker = new Tracker(undefined);
+    tracker.initialize();
+    const stats = tracker.getStats();
+    expect(stats.interactions).toBe(0);
+    expect(stats.totalTokens).toBe(0);
+    expect(stats.totalAiCredits).toBe(0);
+    expect(stats.models).toEqual({});
+    tracker.dispose();
   });
 });

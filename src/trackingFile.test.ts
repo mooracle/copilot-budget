@@ -701,7 +701,7 @@ describe('trackingFile', () => {
       // shows up as a positive delta on update().
       (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([]);
 
-      const tracker = new Tracker();
+      const tracker = new Tracker(undefined);
       tracker.setPreviousStats(restored!);
       tracker.initialize();
 

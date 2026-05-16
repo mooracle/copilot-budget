@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as vscode from 'vscode';
 import { discoverSessionFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
 import { computeCost } from './tokenRates';
@@ -114,9 +115,11 @@ export class Tracker {
   private listeners: StatsListener[] = [];
   private lastStats: TrackingStats | null = null;
   private previousStats: RestoredStats | null = null;
+  private storageUri: vscode.Uri | undefined;
 
-  constructor() {
+  constructor(storageUri: vscode.Uri | undefined) {
     this.since = new Date().toISOString();
+    this.storageUri = storageUri;
   }
 
   setPreviousStats(restored: RestoredStats): void {
@@ -139,7 +142,7 @@ export class Tracker {
     modelUsage: ModelUsage;
     modelInteractions: { [model: string]: number };
   } {
-    const files = discoverSessionFiles(undefined);
+    const files = discoverSessionFiles(this.storageUri);
     log(`scanAll: discovered ${files.length} session file(s)`);
 
     const currentFiles = new Set(files);

@@ -90,12 +90,12 @@ This must land first because Tasks 2-4's tests all need a way to construct a moc
 - Modify: `src/tracker.ts`
 - Modify: `src/tracker.test.ts`
 
-- [ ] change `Tracker` constructor to accept `storageUri: vscode.Uri | undefined` and store it as a private field
-- [ ] update `scanAll()` to call `discoverSessionFiles(this.storageUri)` instead of the no-arg form
-- [ ] no other Tracker logic changes — baseline / delta / consume mechanics work unchanged on the smaller file set
-- [ ] update existing Tracker tests to pass a stub Uri in constructor; add a test that confirms `scanAll` is called with the stored storageUri (mock `discoverSessionFiles` and assert the argument)
-- [ ] add a test for `storageUri: undefined` → `scanAll` returns zero interactions / zero models
-- [ ] run `npm test` — must pass before Task 4
+- [x] change `Tracker` constructor to accept `storageUri: vscode.Uri | undefined` and store it as a private field
+- [x] update `scanAll()` to call `discoverSessionFiles(this.storageUri)` instead of the no-arg form
+- [x] no other Tracker logic changes — baseline / delta / consume mechanics work unchanged on the smaller file set
+- [x] update existing Tracker tests to pass a stub Uri in constructor; add a test that confirms `scanAll` is called with the stored storageUri (mock `discoverSessionFiles` and assert the argument)
+- [x] add a test for `storageUri: undefined` → `scanAll` returns zero interactions / zero models
+- [x] run `npm test` — must pass before Task 4
 
 ### Task 4: Gate activation + empty-window status bar in `extension.ts`
 

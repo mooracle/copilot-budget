@@ -70,7 +70,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
-  tracker = new Tracker();
+  tracker = new Tracker(context.storageUri);
 
   // Restore stats from previous session (if tracking file exists)
   const trackingFile = await readTrackingFile();
