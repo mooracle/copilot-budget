@@ -564,6 +564,7 @@ describe('extension', () => {
         text: '',
         tooltip: '',
         command: '',
+        name: '',
         show: jest.fn(),
         hide: jest.fn(),
         dispose: jest.fn(),
@@ -574,9 +575,11 @@ describe('extension', () => {
       await activate(ctx);
 
       expect(createStatusBarItem).toHaveBeenCalledWith(
+        'copilot-budget.statusBar',
         vscode.StatusBarAlignment.Right,
         100,
       );
+      expect(fakeItem.name).toBe('Copilot Budget');
       expect(fakeItem.text).toBe('$(circle-slash) Copilot Budget');
       expect(fakeItem.tooltip).toBe(
         'No workspace open — open a folder to track Copilot usage.',

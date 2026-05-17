@@ -95,9 +95,11 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
 
 function activateEmptyWindow(context: vscode.ExtensionContext): void {
   const item = vscode.window.createStatusBarItem(
+    'copilot-budget.statusBar',
     vscode.StatusBarAlignment.Right,
     100,
   );
+  item.name = 'Copilot Budget';
   item.text = '$(circle-slash) Copilot Budget';
   item.tooltip = 'No workspace open — open a folder to track Copilot usage.';
   item.command = 'copilot-budget.showDiagnostics';

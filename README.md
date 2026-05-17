@@ -11,7 +11,7 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 - **Commit hook integration** — automatically appends configurable git trailers (`Copilot-AI-Credits` on by default; `Copilot-Est-Cost` USD trailer and per-model breakdown are opt-in) to commit messages. Trailer keys can be renamed or individually disabled via settings.
 - **Persistent tracking** — stats accumulate across VS Code restarts. The extension writes current stats to a tracking file on every stats update, on a 5-second refresh interval, and on deactivation; on activation it reads them back. Use the "Reset Tracking" command to start fresh.
 - **Worktree & submodule support** — correctly follows `.git` files in git worktrees, submodules, and devcontainers for both hook installation and tracking file placement.
-- **Lightweight** — polls every two minutes with file-level caching; no network calls at runtime.
+- **Lightweight** — polls every 30 seconds with file-level caching; no network calls at runtime.
 
 ## Getting Started
 
@@ -91,7 +91,7 @@ By default (`copilot-budget.commitHook.enabled: false`), the hook is **not** ins
 
 ### Data Flow
 
-1. **Extension tracks usage** — as you use GitHub Copilot, the extension detects new activity every 2 minutes and updates an internal stats object with per-model token counts and cost.
+1. **Extension tracks usage** — as you use GitHub Copilot, the extension detects new activity every 30 seconds and updates an internal stats object with per-model token counts and cost.
 2. **Tracking file is written** — on every stats update and on a 5-second refresh interval, the extension writes current stats to `.git/copilot-budget` in a key=value format. This file contains both raw stats and `TR_`-prefixed lines that encode the trailer data.
 3. **You commit** — when you run `git commit`, Git triggers the `prepare-commit-msg` hook.
 4. **Hook appends trailers** — the hook reads `.git/copilot-budget`, extracts all `TR_` lines, converts them to git trailers (e.g. `TR_Copilot-AI-Credits=42.31` becomes `Copilot-AI-Credits: 42.31`), and appends them to the commit message.
@@ -146,7 +146,7 @@ In git worktrees, the hook is installed in the **common git directory** (shared 
 1. **Discovery** — On activation, Copilot Budget scans only the current window's `workspaceStorage/<hash>/chatSessions/` directory, derived from the extension's `storageUri`. Each open window tracks its own workspace's usage independently — multi-window setups no longer double-count tokens across windows. When VS Code is opened with no folder, no scanning is performed and the status bar shows a visible "no workspace" indicator instead. All discovery activity is logged to the "Copilot Budget" Output channel.
 2. **Parsing** — Each session file is parsed to extract per-request `result.metadata.{promptTokens, outputTokens, cacheReadTokens?, cacheCreationTokens?}`. When the cache split is absent the turn-based heuristic fills it in.
 3. **Baseline & Restore** — A token snapshot is taken at startup as a baseline so only new activity is counted. If a tracking file from a previous session exists (written on deactivation), those stats are restored and merged, providing continuity across VS Code restarts.
-4. **Polling** — Every two minutes the extension re-scans, using file mtime caching to skip unchanged files.
+4. **Polling** — Every 30 seconds the extension re-scans, using file mtime caching to skip unchanged files.
 5. **Cost computation** — Per-model rates are loaded from the bundled `models-and-pricing.yml` (mirror of `github/docs` upstream). The rate card publishes USD per million tokens; rates are converted to AIC (× 100) once at load time, so all in-extension cost values are AIC.
 6. **Commit hook** — See [Commit Hook Workflow](#commit-hook-workflow) above for the full details.
 

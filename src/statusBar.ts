@@ -54,9 +54,11 @@ export function createStatusBar(
   tracker: Tracker,
 ): { item: vscode.StatusBarItem; dispose: () => void } {
   const item = vscode.window.createStatusBarItem(
+    'copilot-budget.statusBar',
     vscode.StatusBarAlignment.Right,
     100,
   );
+  item.name = 'Copilot Budget';
   item.command = 'copilot-budget.showStats';
 
   function updateText(stats: TrackingStats): void {

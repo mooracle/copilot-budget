@@ -90,14 +90,16 @@ describe('statusBar', () => {
   });
 
   describe('createStatusBar', () => {
-    it('creates a right-aligned status bar item with priority 100', () => {
+    it('creates a right-aligned status bar item with a stable id, name, and priority 100', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
       expect(mockWindow.createStatusBarItem).toHaveBeenCalledWith(
+        'copilot-budget.statusBar',
         vscode.StatusBarAlignment.Right,
         100,
       );
+      expect(createdItem.name).toBe('Copilot Budget');
     });
 
     it('sets initial text with AIC integer', () => {

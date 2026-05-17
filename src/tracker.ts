@@ -313,7 +313,7 @@ export class Tracker {
     }
   }
 
-  start(intervalMs: number = 120_000): void {
+  start(intervalMs: number = 30_000): void {
     this.initialize();
     this.timer = setInterval(() => this.update(), intervalMs);
   }
