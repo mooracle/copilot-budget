@@ -29,7 +29,6 @@ function dirent(name: string, isDir: boolean): fs.Dirent {
     isFIFO: () => false,
     isSocket: () => false,
     isSymbolicLink: () => false,
-    path: '',
     parentPath: '',
   };
 }
