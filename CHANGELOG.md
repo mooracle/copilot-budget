@@ -5,6 +5,21 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-05-19
+
+### Fixed
+
+- Extension host freeze reported on some accounts. Session scan is now async with per-file yields and a single-flight mutex; activation no longer blocks on the initial baseline. Files older than `copilot-budget.sessionMaxAgeDays` (default 7) are skipped on discovery.
+- Active chat sessions are parsed incrementally — only the new tail is processed on each mtime change, with falls back to full re-parse on truncation or evicted state. Partial trailing lines are held until the next scan completes them.
+
+### Added
+
+- `copilot-budget.sessionMaxAgeDays` setting (default 7).
+
+### Changed
+
+- CI tests against Node 22 and 24; GitHub Actions upgraded.
+
 ## [1.0.0] - 2026-05-19
 
 Aligns with GitHub Copilot's usage-based billing model (effective 2026-06-01). Premium-request math is gone; cost is now derived from server-reported token counts against the published per-million-token rate card and displayed in AI Credits (AIC; 1 AIC = $0.01).
