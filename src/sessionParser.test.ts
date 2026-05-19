@@ -1,5 +1,10 @@
 import * as path from 'path';
-import { parseSessionFileContent } from './sessionParser';
+import {
+  aggregateFromState,
+  applyDeltaLines,
+  createParserState,
+  parseSessionFileContent,
+} from './sessionParser';
 import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
 const FIXTURE_PATH = path.join(__dirname, '__fixtures__', 'models-and-pricing.json');
@@ -545,5 +550,229 @@ describe('prototype pollution prevention', () => {
     ];
     const result = parseSessionFileContent(lines.join('\n'));
     expect(result.interactions).toBe(0);
+  });
+});
+
+describe('stateful parser API', () => {
+  it('createParserState returns expected shape', () => {
+    const state = createParserState();
+    expect(state).toHaveProperty('sessionState');
+    expect(typeof state.sessionState).toBe('object');
+    expect(state.sessionState).not.toBeNull();
+  });
+
+  it('aggregateFromState on empty state returns zero aggregate', () => {
+    const state = createParserState();
+    expect(aggregateFromState(state)).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
+    });
+  });
+
+  it('refuses to apply when fresh state sees an unparseable first line', () => {
+    const state = createParserState();
+    applyDeltaLines(
+      [
+        'not json',
+        JSON.stringify({
+          kind: 2,
+          k: ['requests'],
+          v: makeRequest({
+            model: 'gpt-4.1',
+            promptTokens: 500,
+            outputTokens: 100,
+            cacheReadTokens: 0,
+          }),
+        }),
+      ],
+      state,
+    );
+    // Subsequent valid kind:2 must NOT fabricate a requests tree from an
+    // empty state when no initial delta was ever accepted.
+    expect(aggregateFromState(state)).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
+    });
+  });
+
+  it('refuses to apply when fresh state sees JSON without a numeric kind', () => {
+    const state = createParserState();
+    applyDeltaLines(
+      [
+        JSON.stringify({ requests: [] }),
+        JSON.stringify({
+          kind: 2,
+          k: ['requests'],
+          v: makeRequest({
+            model: 'gpt-4.1',
+            promptTokens: 500,
+            outputTokens: 100,
+            cacheReadTokens: 0,
+          }),
+        }),
+      ],
+      state,
+    );
+    expect(aggregateFromState(state)).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
+    });
+  });
+
+  it('guard does not fire on a state that already received deltas', () => {
+    const state = createParserState();
+    // Prime the state with a valid initial snapshot.
+    applyDeltaLines([JSON.stringify({ kind: 0, v: { requests: [] } })], state);
+    // Now feed a junk first line in a subsequent chunk — should be skipped,
+    // not refused outright, and subsequent valid deltas should still apply.
+    applyDeltaLines(
+      [
+        'garbage line',
+        JSON.stringify({
+          kind: 2,
+          k: ['requests'],
+          v: makeRequest({
+            model: 'gpt-4.1',
+            promptTokens: 500,
+            outputTokens: 100,
+            cacheReadTokens: 0,
+          }),
+        }),
+      ],
+      state,
+    );
+    const result = aggregateFromState(state);
+    expect(result.interactions).toBe(1);
+    expect(result.modelInteractions).toEqual({ 'gpt-4.1': 1 });
+  });
+
+  it('applyDeltaLines across chunks matches one-shot result', () => {
+    const a = [
+      JSON.stringify({ kind: 0, v: { requests: [] } }),
+      JSON.stringify({
+        kind: 2,
+        k: ['requests'],
+        v: makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 500,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+        }),
+      }),
+    ];
+    const b = [
+      JSON.stringify({
+        kind: 2,
+        k: ['requests'],
+        v: makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 200,
+          cacheReadTokens: 800,
+        }),
+      }),
+    ];
+
+    const chunked = createParserState();
+    applyDeltaLines(a, chunked);
+    applyDeltaLines(b, chunked);
+    const chunkedResult = aggregateFromState(chunked);
+
+    const oneShot = parseSessionFileContent([...a, ...b].join('\n'));
+    expect(chunkedResult).toEqual(oneShot);
+  });
+
+  it('applyDeltaLines mutates and returns the same state object', () => {
+    const state = createParserState();
+    const returned = applyDeltaLines(
+      [JSON.stringify({ kind: 0, v: { requests: [] } })],
+      state,
+    );
+    expect(returned).toBe(state);
+  });
+
+  it('pending→completed transitions across two applyDeltaLines calls', () => {
+    const state = createParserState();
+
+    // Scan 1: append pending request (modelState.value = 0).
+    applyDeltaLines(
+      [
+        JSON.stringify({ kind: 0, v: { requests: [] } }),
+        JSON.stringify({
+          kind: 2,
+          k: ['requests'],
+          v: {
+            modelId: 'gpt-4.1',
+            modelState: { value: 0 },
+          },
+        }),
+      ],
+      state,
+    );
+    expect(aggregateFromState(state)).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
+    });
+
+    // Scan 2: complete it — fill metadata and flip modelState.value to 1.
+    applyDeltaLines(
+      [
+        JSON.stringify({
+          kind: 1,
+          k: ['requests', '0', 'result'],
+          v: {
+            metadata: {
+              promptTokens: 500,
+              outputTokens: 100,
+              cacheReadTokens: 0,
+            },
+          },
+        }),
+        JSON.stringify({
+          kind: 1,
+          k: ['requests', '0', 'modelState', 'value'],
+          v: 1,
+        }),
+      ],
+      state,
+    );
+    const result = aggregateFromState(state);
+    expect(result.interactions).toBe(1);
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 500,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+    expect(result.modelInteractions).toEqual({ 'gpt-4.1': 1 });
+  });
+
+  it('skips invalid JSON lines mid-stream without poisoning subsequent lines', () => {
+    const state = createParserState();
+    applyDeltaLines(
+      [
+        JSON.stringify({ kind: 0, v: { requests: [] } }),
+        '{ not json',
+        'also-not-json',
+        JSON.stringify({
+          kind: 2,
+          k: ['requests'],
+          v: makeRequest({
+            model: 'gpt-4.1',
+            promptTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 0,
+          }),
+        }),
+      ],
+      state,
+    );
+    const result = aggregateFromState(state);
+    expect(result.interactions).toBe(1);
+    expect(result.modelUsage['gpt-4.1'].inputTokens).toBe(100);
   });
 });

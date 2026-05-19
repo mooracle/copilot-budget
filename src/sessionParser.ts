@@ -312,35 +312,70 @@ const EMPTY_SESSION: ParsedSession = {
   modelInteractions: {},
 };
 
+export interface ParserState {
+  sessionState: unknown;
+  // Flips true once a syntactically valid delta has been applied. Gates the
+  // first-line validity check below — incremental scans against an already-
+  // primed state skip the check, full re-parses against a fresh state enforce
+  // it. Optional so existing mocks that stub `createParserState` without this
+  // field still type-check (a missing flag is treated as `false`).
+  hasReceivedDelta?: boolean;
+}
+
+export function createParserState(): ParserState {
+  return { sessionState: Object.create(null), hasReceivedDelta: false };
+}
+
+export function applyDeltaLines(lines: string[], state: ParserState): ParserState {
+  let i = 0;
+  // First-line validity guard: when state is fresh (no delta yet applied),
+  // refuse the whole batch unless the first line parses to a delta object
+  // with a numeric `kind`. Without this, a file whose first line is non-delta
+  // JSON (or is unparseable) could still feed subsequent kind:1/kind:2
+  // deltas into an empty state and fabricate a `requests` tree. Mirrors the
+  // pre-existing guard in `parseSessionFileContent` so callers that drive
+  // the stateful API directly (e.g. tracker full re-parse) get the same
+  // protection.
+  if (!state.hasReceivedDelta && lines.length > 0) {
+    let first: unknown;
+    try {
+      first = JSON.parse(lines[0]);
+    } catch {
+      return state;
+    }
+    if (!isObject(first) || typeof (first as any).kind !== 'number') {
+      return state;
+    }
+    state.sessionState = applyDelta(state.sessionState, first);
+    state.hasReceivedDelta = true;
+    i = 1;
+  }
+  for (; i < lines.length; i++) {
+    try {
+      const delta = JSON.parse(lines[i]);
+      state.sessionState = applyDelta(state.sessionState, delta);
+    } catch {
+      // Skip invalid lines
+    }
+  }
+  return state;
+}
+
+export function aggregateFromState(state: ParserState): ParsedSession {
+  const requests =
+    isObject(state.sessionState) && Array.isArray((state.sessionState as any).requests)
+      ? ((state.sessionState as any).requests as unknown[])
+      : [];
+  return processRequests(requests);
+}
+
 export function parseSessionFileContent(fileContent: string): ParsedSession {
   const lines = fileContent.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length === 0) {
     return EMPTY_SESSION;
   }
-
-  let first: unknown;
-  try {
-    first = JSON.parse(lines[0]);
-  } catch {
-    return EMPTY_SESSION;
-  }
-  if (!isObject(first) || typeof (first as any).kind !== 'number') {
-    return EMPTY_SESSION;
-  }
-
-  let sessionState: unknown = Object.create(null);
-  for (const line of lines) {
-    try {
-      const delta = JSON.parse(line);
-      sessionState = applyDelta(sessionState, delta);
-    } catch {
-      // Skip invalid lines
-    }
-  }
-
-  const requests =
-    isObject(sessionState) && Array.isArray((sessionState as any).requests)
-      ? ((sessionState as any).requests as unknown[])
-      : [];
-  return processRequests(requests);
+  // applyDeltaLines enforces the first-line validity guard internally for
+  // fresh states, so callers don't need to duplicate it here.
+  const state = applyDeltaLines(lines, createParserState());
+  return aggregateFromState(state);
 }

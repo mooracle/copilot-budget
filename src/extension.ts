@@ -35,7 +35,7 @@ function checkCommitReset(): Promise<boolean> {
   commitResetCheck = (async () => {
     try {
       if (!tracker || !(await isTrackingFileTruncated())) return false;
-      tracker.consume();
+      await tracker.consume();
       log('Tracking file truncated by commit hook — stats rebased to last snapshot');
       if (tracker) {
         await writeTrackingFile(tracker.getStats()).catch(() => {});
@@ -62,7 +62,7 @@ const EMPTY_WINDOW_MESSAGE =
 
 function registerShowDiagnostics(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-budget.showDiagnostics', () => {
+    vscode.commands.registerCommand('copilot-budget.showDiagnostics', async () => {
       const ch = getOutputChannel();
       const diag = getDiscoveryDiagnostics(context.storageUri);
 
@@ -81,7 +81,7 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
       if (tracker) {
         // Force a fresh scan so the per-file breakdown reflects what's on
         // disk right now, not whatever was cached up to ~30s ago.
-        tracker.update();
+        await tracker.update();
         const stats = tracker.getStats();
         ch.appendLine('');
         ch.appendLine('Current stats:');
@@ -181,14 +181,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log('No previous stats to restore');
   }
 
-  tracker.start();
+  // Kick off the initial scan in the background so activation doesn't hang
+  // on accounts with many historical chats. The status bar shows zero (or
+  // restored stats from setPreviousStats) until baseline lands and listeners
+  // fire. Legacy-file overwrite chains onto start so the new schema is
+  // written once we have real numbers — until then the legacy file remains
+  // and is ignored by the hook (it lacks TOTAL_AI_CREDITS).
+  const startPromise = tracker.start();
 
-  // Only overwrite when we positively identified legacy content — a missing
-  // file, empty file (hook truncation), or transient I/O read failure all
-  // map to 'absent' and must NOT be clobbered with zero stats.
   if (trackingFile.kind === 'legacy') {
-    await writeTrackingFile(tracker.getStats()).catch(() => {});
+    startPromise
+      .then(() => tracker && writeTrackingFile(tracker.getStats()).catch(() => {}))
+      .catch(() => {});
   }
+  startPromise.catch(() => {});
 
   statusBar = createStatusBar(tracker);
   context.subscriptions.push({ dispose: () => statusBar?.dispose() });
@@ -228,9 +234,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-budget.resetTracking', () => {
+    vscode.commands.registerCommand('copilot-budget.resetTracking', async () => {
       if (tracker) {
-        tracker.reset();
+        await tracker.reset();
         vscode.window.showInformationMessage('Copilot Budget: Tracking reset.');
       }
     }),

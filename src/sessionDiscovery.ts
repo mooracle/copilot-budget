@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as vscode from 'vscode';
+import { getSessionMaxAgeDays } from './config';
 import { log } from './logger';
 
 /** Known non-session filename patterns to exclude */
@@ -58,22 +59,40 @@ export function discoverSessionFiles(storageUri: vscode.Uri | undefined): string
     return [];
   }
 
+  // Mtime filter — old sessions are stable; their tokens are already folded
+  // into the tracker's baseline on first scan, so re-reading them every poll
+  // gains nothing and is what makes activation hang on accounts with many
+  // historical chats. Set sessionMaxAgeDays=0 to disable.
+  const maxAgeDays = getSessionMaxAgeDays();
+  const cutoffMs = maxAgeDays > 0 ? Date.now() - maxAgeDays * 86_400_000 : 0;
+
   const files: string[] = [];
+  let skippedOld = 0;
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     if (!entry.name.endsWith('.jsonl')) continue;
     if (isNonSessionFile(entry.name)) continue;
     const full = path.join(chatSessionsDir, entry.name);
     try {
-      if (fs.statSync(full).size > 0) {
-        files.push(full);
+      const s = fs.statSync(full);
+      if (s.size === 0) continue;
+      if (cutoffMs > 0 && s.mtimeMs < cutoffMs) {
+        skippedOld += 1;
+        continue;
       }
+      files.push(full);
     } catch {
       // skip inaccessible files
     }
   }
 
-  log(`Discovery complete: ${files.length} files`);
+  if (skippedOld > 0) {
+    log(
+      `Discovery complete: ${files.length} files (${skippedOld} skipped — older than ${maxAgeDays}d)`,
+    );
+  } else {
+    log(`Discovery complete: ${files.length} files`);
+  }
   return files;
 }
 

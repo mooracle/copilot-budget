@@ -697,7 +697,7 @@ describe('trackingFile', () => {
   });
 
   describe('Tracker integration with legacy-parsed RestoredStats', () => {
-    it('recomputes totalAiCredits from fresh tokens, ignoring dropped legacy _COST_USD', () => {
+    it('recomputes totalAiCredits from fresh tokens, ignoring dropped legacy _COST_USD', async () => {
       // Legacy 0.6.x dev-host file: TOTAL_AI_CREDITS + tokens are preserved,
       // but per-model _COST_USD keys are silently dropped on parse, so
       // restored costAic is 0 per model. After a tracker scan picks up fresh
@@ -728,7 +728,7 @@ describe('trackingFile', () => {
 
       const tracker = new Tracker(undefined);
       tracker.setPreviousStats(restored!);
-      tracker.initialize();
+      await tracker.initialize();
 
       const FILE_PATH = '/tmp/session.json';
       (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([FILE_PATH]);
@@ -736,7 +736,13 @@ describe('trackingFile', () => {
         () => ({ mtimeMs: 1 }) as fs.Stats,
       );
       (fs.readFileSync as jest.Mock).mockReturnValue('{}');
-      (sessionParser.parseSessionFileContent as jest.Mock).mockReturnValue({
+      (sessionParser.createParserState as jest.Mock).mockReturnValue({
+        sessionState: {},
+      });
+      (sessionParser.applyDeltaLines as jest.Mock).mockImplementation(
+        (_lines, state) => state,
+      );
+      (sessionParser.aggregateFromState as jest.Mock).mockReturnValue({
         interactions: 5,
         modelUsage: {
           'gpt-4.1': {
@@ -749,7 +755,7 @@ describe('trackingFile', () => {
         modelInteractions: { 'gpt-4.1': 5 },
       });
 
-      tracker.update();
+      await tracker.update();
       const stats = tracker.getStats();
 
       expect(stats.totalAiCredits).toBeCloseTo(FRESH_COST_AIC, 6);

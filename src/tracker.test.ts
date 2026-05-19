@@ -72,8 +72,13 @@ function setupFiles(
 ) {
   // Tag content per-file so the parser mock can route on content alone now
   // that parseSessionFileContent no longer takes a path argument. Fixtures
-  // share `content: '{}'`, so the tag is what makes them distinct.
-  const tagged = files.map((f, i) => ({ ...f, taggedContent: `${f.content}\n#file=${i}` }));
+  // share `content: '{}'`, so the tag is what makes them distinct. The
+  // trailing newline keeps the fixture realistic — the tracker's full
+  // re-parse path now only parses lines that have a terminating \n.
+  const tagged = files.map((f, i) => ({
+    ...f,
+    taggedContent: `${f.content}\n#file=${i}\n`,
+  }));
 
   mockDiscovery.discoverSessionFiles.mockReturnValue(tagged.map((f) => f.path));
 
@@ -89,17 +94,46 @@ function setupFiles(
     return file.taggedContent as any;
   });
 
-  mockParser.parseSessionFileContent.mockImplementation((content: string) => {
-    const file = tagged.find((f) => f.taggedContent === content);
-    if (!file)
-      return { interactions: 0, modelUsage: {}, modelInteractions: {} };
-    return file.parseResult;
+  // Stateful parser mocks. applyDeltaLines stashes the lines it was given on
+  // the state so aggregateFromState can route to the right fixture by exact
+  // line-array match. Task 3 incremental tests build on this layer.
+  mockParser.createParserState.mockImplementation(() => ({
+    sessionState: Object.create(null),
+  }));
+
+  mockParser.applyDeltaLines.mockImplementation((lines, state) => {
+    const s = state as unknown as { __lines?: string[]; hasReceivedDelta?: boolean };
+    if (!Array.isArray(s.__lines)) s.__lines = [];
+    for (const line of lines) s.__lines.push(line);
+    // Mirror the real parser: flip hasReceivedDelta=true once at least one
+    // line has been applied. Tracker uses this flag to decide whether to
+    // preserve incremental state after a full re-parse — without the flip
+    // it would treat every successful parse as "rejected".
+    if (lines.length > 0) s.hasReceivedDelta = true;
+    return state;
+  });
+
+  mockParser.aggregateFromState.mockImplementation((state) => {
+    const lines = (state as unknown as { __lines?: string[] }).__lines ?? [];
+    for (const f of tagged) {
+      const fLines = f.taggedContent.split(/\r?\n/).filter((l) => l.trim());
+      if (
+        fLines.length === lines.length &&
+        fLines.every((l, i) => l === lines[i])
+      ) {
+        return f.parseResult;
+      }
+    }
+    return { interactions: 0, modelUsage: {}, modelInteractions: {} };
   });
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
-  jest.useFakeTimers();
+  // setImmediate is left real so the tracker's per-file yield resolves
+  // naturally inside awaited scanAll() calls. setInterval/setTimeout remain
+  // faked for the periodic-scanning tests.
+  jest.useFakeTimers({ doNotFake: ['setImmediate'] });
   mockTokenRates.computeCost.mockImplementation((modelId, tokens) =>
     fixtureCost(modelId, tokens) * 100,
   );
@@ -110,7 +144,7 @@ afterEach(() => {
 });
 
 describe('Tracker — initial state', () => {
-  it('returns zero stats before initialize', () => {
+  it('returns zero stats before initialize', async () => {
     const tracker = new Tracker(STUB_STORAGE_URI);
     const stats = tracker.getStats();
     expect(stats.totalTokens).toBe(0);
@@ -124,7 +158,7 @@ describe('Tracker — initial state', () => {
 });
 
 describe('Tracker — baseline computation', () => {
-  it('scans sessions and zeros out delta on initialize', () => {
+  it('scans sessions and zeros out delta on initialize', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -146,7 +180,7 @@ describe('Tracker — baseline computation', () => {
     ]);
 
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
     const stats = tracker.getStats();
 
     expect(stats.totalTokens).toBe(0);
@@ -156,17 +190,17 @@ describe('Tracker — baseline computation', () => {
     tracker.dispose();
   });
 
-  it('handles no session files', () => {
+  it('handles no session files', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
     expect(tracker.getStats().totalTokens).toBe(0);
     tracker.dispose();
   });
 });
 
 describe('Tracker — delta computation', () => {
-  it('computes per-model deltas across all four token buckets', () => {
+  it('computes per-model deltas across all four token buckets', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -188,7 +222,7 @@ describe('Tracker — delta computation', () => {
     ]);
 
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -210,7 +244,7 @@ describe('Tracker — delta computation', () => {
       },
     ]);
 
-    tracker.update();
+    await tracker.update();
     const stats = tracker.getStats();
 
     const expectedTokens = {
@@ -234,7 +268,7 @@ describe('Tracker — delta computation', () => {
     tracker.dispose();
   });
 
-  it('does not fire listener when stats unchanged', () => {
+  it('does not fire listener when stats unchanged', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -253,13 +287,13 @@ describe('Tracker — delta computation', () => {
     const tracker = new Tracker(STUB_STORAGE_URI);
     const listener = jest.fn();
     tracker.onStatsChanged(listener);
-    tracker.initialize();
-    tracker.update();
+    await tracker.initialize();
+    await tracker.update();
     expect(listener).not.toHaveBeenCalled();
     tracker.dispose();
   });
 
-  it('fires listener when totalAiCredits changes', () => {
+  it('fires listener when totalAiCredits changes', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -275,7 +309,7 @@ describe('Tracker — delta computation', () => {
     const tracker = new Tracker(STUB_STORAGE_URI);
     const listener = jest.fn();
     tracker.onStatsChanged(listener);
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -295,7 +329,7 @@ describe('Tracker — delta computation', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
     expect(listener).toHaveBeenCalledTimes(1);
     const stats: TrackingStats = listener.mock.calls[0][0];
     expect(stats.totalAiCredits).toBeCloseTo(200, 6);
@@ -304,7 +338,7 @@ describe('Tracker — delta computation', () => {
 });
 
 describe('Tracker — published-rate billing for "included" models', () => {
-  it('GPT-4.1 contributes cost at the published per-token rate (no zero special-case)', () => {
+  it('GPT-4.1 contributes cost at the published per-token rate (no zero special-case)', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -318,7 +352,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -337,12 +371,12 @@ describe('Tracker — published-rate billing for "included" models', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
     expect(tracker.getStats().models['gpt-4.1'].costAic).toBeCloseTo(200, 6);
     tracker.dispose();
   });
 
-  it('GPT-5 mini contributes cost at the published per-token rate', () => {
+  it('GPT-5 mini contributes cost at the published per-token rate', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -352,7 +386,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -372,7 +406,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
     expect(tracker.getStats().models['gpt-5-mini'].costAic).toBeCloseTo(
       (0.25 + 2.0) * 100,
       6,
@@ -382,7 +416,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
 });
 
 describe('Tracker — mixed-model session', () => {
-  it('aggregates Anthropic + OpenAI side-by-side with independent costs', () => {
+  it('aggregates Anthropic + OpenAI side-by-side with independent costs', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -392,7 +426,7 @@ describe('Tracker — mixed-model session', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -419,7 +453,7 @@ describe('Tracker — mixed-model session', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
     const stats = tracker.getStats();
     const expectedClaude = fixtureCost('claude-sonnet-4.6', {
       input: 500_000,
@@ -441,7 +475,7 @@ describe('Tracker — mixed-model session', () => {
 });
 
 describe('Tracker — totalTokens invariant', () => {
-  it('includes cacheRead + cacheCreation in totalTokens', () => {
+  it('includes cacheRead + cacheCreation in totalTokens', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -451,7 +485,7 @@ describe('Tracker — totalTokens invariant', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -472,14 +506,14 @@ describe('Tracker — totalTokens invariant', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
     expect(tracker.getStats().totalTokens).toBe(100 + 200 + 400 + 50);
     tracker.dispose();
   });
 });
 
 describe('Tracker — restored stats merge', () => {
-  it('adds previousStats values to the live delta', () => {
+  it('adds previousStats values to the live delta', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -503,7 +537,7 @@ describe('Tracker — restored stats merge', () => {
         },
       },
     });
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -524,7 +558,7 @@ describe('Tracker — restored stats merge', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
     const stats = tracker.getStats();
     const sessionDeltaCost = fixtureCost('claude-sonnet-4.6', {
       input: 50,
@@ -545,7 +579,7 @@ describe('Tracker — restored stats merge', () => {
     tracker.dispose();
   });
 
-  it('reset() clears previousStats and resets baseline', () => {
+  it('reset() clears previousStats and resets baseline', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.setPreviousStats({
@@ -559,16 +593,16 @@ describe('Tracker — restored stats merge', () => {
         } as ModelStats,
       },
     });
-    tracker.initialize();
+    await tracker.initialize();
     expect(tracker.getStats().totalAiCredits).toBeCloseTo(0.2, 6);
 
-    tracker.reset();
+    await tracker.reset();
     expect(tracker.getStats().totalAiCredits).toBe(0);
     expect(tracker.getStats().interactions).toBe(0);
     tracker.dispose();
   });
 
-  it('consume() preserves activity that landed since the last update', () => {
+  it('consume() preserves activity that landed since the last update', async () => {
     // Simulates the post-commit window: after update() captures S_update,
     // the hook truncates the file. Before consume() runs, a new Copilot
     // turn lands. A full reset would absorb that turn into the new baseline
@@ -587,7 +621,7 @@ describe('Tracker — restored stats merge', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
 
     setupFiles([
       {
@@ -607,7 +641,7 @@ describe('Tracker — restored stats merge', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
     const consumedStats = tracker.getStats();
     expect(consumedStats.interactions).toBe(2);
     expect(consumedStats.models['gpt-4.1'].inputTokens).toBe(1000);
@@ -633,7 +667,7 @@ describe('Tracker — restored stats merge', () => {
       },
     ]);
 
-    tracker.consume();
+    await tracker.consume();
     const postConsume = tracker.getStats();
     // The 300 input + 100 output that landed after the consumed update
     // must survive into the next delta. A reset()-style rescan would zero
@@ -644,7 +678,7 @@ describe('Tracker — restored stats merge', () => {
     tracker.dispose();
   });
 
-  it('consume() zeros stats when nothing happened after the last update', () => {
+  it('consume() zeros stats when nothing happened after the last update', async () => {
     // The common case: hook fires, truncation poll detects it before any
     // new Copilot activity. consume() should produce the same zero-stats
     // state as reset() would.
@@ -663,10 +697,10 @@ describe('Tracker — restored stats merge', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
-    tracker.update();
+    await tracker.initialize();
+    await tracker.update();
 
-    tracker.consume();
+    await tracker.consume();
     const stats = tracker.getStats();
     expect(stats.totalTokens).toBe(0);
     expect(stats.interactions).toBe(0);
@@ -674,7 +708,7 @@ describe('Tracker — restored stats merge', () => {
     tracker.dispose();
   });
 
-  it('consume() clears previousStats so restored prior-session stats do not leak forward', () => {
+  it('consume() clears previousStats so restored prior-session stats do not leak forward', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(STUB_STORAGE_URI);
     tracker.setPreviousStats({
@@ -688,10 +722,10 @@ describe('Tracker — restored stats merge', () => {
         } as ModelStats,
       },
     });
-    tracker.initialize();
+    await tracker.initialize();
     expect(tracker.getStats().totalAiCredits).toBeCloseTo(0.2, 6);
 
-    tracker.consume();
+    await tracker.consume();
     expect(tracker.getStats().totalAiCredits).toBe(0);
     expect(tracker.getStats().interactions).toBe(0);
     tracker.dispose();
@@ -699,7 +733,7 @@ describe('Tracker — restored stats merge', () => {
 });
 
 describe('Tracker — getFileDiagnostics', () => {
-  it('flags files present at initialize as inBaseline and new files as not', () => {
+  it('flags files present at initialize as inBaseline and new files as not', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -715,7 +749,7 @@ describe('Tracker — getFileDiagnostics', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
 
     // File b appears after initialize — its entire content (including the
     // very first request) should attribute to the session delta, and
@@ -750,7 +784,7 @@ describe('Tracker — getFileDiagnostics', () => {
         },
       },
     ]);
-    tracker.update();
+    await tracker.update();
 
     const diag = tracker.getFileDiagnostics();
     expect(diag).toHaveLength(2);
@@ -768,7 +802,7 @@ describe('Tracker — getFileDiagnostics', () => {
     tracker.dispose();
   });
 
-  it('returns an empty list before initialize', () => {
+  it('returns an empty list before initialize', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(STUB_STORAGE_URI);
     expect(tracker.getFileDiagnostics()).toEqual([]);
@@ -777,7 +811,7 @@ describe('Tracker — getFileDiagnostics', () => {
 });
 
 describe('Tracker — mtime caching', () => {
-  it('skips re-parsing unchanged files', () => {
+  it('skips re-parsing unchanged files', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -793,15 +827,15 @@ describe('Tracker — mtime caching', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
-    tracker.update();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    await tracker.update();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     tracker.dispose();
   });
 
-  it('re-parses when mtime changes', () => {
+  it('re-parses when mtime changes', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -811,8 +845,8 @@ describe('Tracker — mtime caching', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
     setupFiles([
       {
@@ -822,12 +856,12 @@ describe('Tracker — mtime caching', () => {
         parseResult: { interactions: 1, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    tracker.update();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+    await tracker.update();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
     tracker.dispose();
   });
 
-  it('evicts cache entries for deleted files', () => {
+  it('evicts cache entries for deleted files', async () => {
     setupFiles([
       {
         path: '/sessions/a.jsonl',
@@ -843,8 +877,8 @@ describe('Tracker — mtime caching', () => {
       },
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
 
     setupFiles([
       {
@@ -854,17 +888,623 @@ describe('Tracker — mtime caching', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    tracker.update();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+    await tracker.update();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    tracker.dispose();
+  });
+});
+
+describe('Tracker — parser state cache', () => {
+  it('creates a non-null parserState and sets lastOffset to content length on first scan', async () => {
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: {
+          interactions: 1,
+          modelUsage: {
+            'gpt-4.1': { ...emptyTokens(), inputTokens: 100 },
+          },
+          modelInteractions: { 'gpt-4.1': 1 },
+        },
+      },
+    ]);
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    // Tagged content the readFileSync mock returns is `{}\n#file=0\n`.
+    const expectedContent = `{}\n#file=0\n`;
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown; interactions: number }>;
+    }).fileCache;
+    const entry = cache.get('/sessions/a.jsonl');
+    expect(entry).toBeDefined();
+    expect(entry!.parserState).not.toBeNull();
+    expect(entry!.lastOffset).toBe(expectedContent.length);
+    expect(entry!.interactions).toBe(1);
+
+    // Pipeline was driven once: fresh state, lines applied, then aggregated.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    const [linesArg] = mockParser.applyDeltaLines.mock.calls[0];
+    expect(linesArg).toEqual(['{}', '#file=0']);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+
+    tracker.dispose();
+  });
+
+  it('does not re-run the parser when mtime is unchanged on the next scan', async () => {
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
+      },
+    ]);
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+
+    await tracker.update();
+    // Same mtime → cache hit → no parser activity at all.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+
+    tracker.dispose();
+  });
+});
+
+describe('Tracker — incremental parsing', () => {
+  // Build a fresh parser-mock layer that records `applyDeltaLines` calls and
+  // returns queued aggregates per `aggregateFromState` invocation. Lets each
+  // test simulate "file grew" scenarios without the line-matching gymnastics
+  // of setupFiles (which retags every file on every call and breaks once a
+  // parserState is reused across scans).
+  function setupIncrementalParser() {
+    const aggregates: ReturnType<typeof sessionParser.aggregateFromState>[] = [];
+    let aggIdx = 0;
+
+    mockParser.createParserState.mockImplementation(() => ({
+      sessionState: Object.create(null),
+    }));
+    mockParser.applyDeltaLines.mockImplementation((lines, state) => {
+      // Match the real parser's hasReceivedDelta flip so the tracker keeps
+      // the parserState after a successful full re-parse.
+      if (lines.length > 0) {
+        (state as unknown as { hasReceivedDelta?: boolean }).hasReceivedDelta = true;
+      }
+      return state;
+    });
+    mockParser.aggregateFromState.mockImplementation(() => {
+      const next = aggregates[aggIdx] ?? {
+        interactions: 0,
+        modelUsage: {},
+        modelInteractions: {},
+      };
+      aggIdx += 1;
+      return next;
+    });
+
+    return {
+      queue: (r: ReturnType<typeof sessionParser.aggregateFromState>) =>
+        aggregates.push(r),
+    };
+  }
+
+  function queueScan(mtime: number, content: string) {
+    mockFs.statSync.mockReturnValueOnce({ mtimeMs: mtime } as fs.Stats);
+    mockFs.readFileSync.mockReturnValueOnce(content as never);
+  }
+
+  it('passes only the new tail to applyDeltaLines when the file grew', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({
+      interactions: 1,
+      modelUsage: {
+        'gpt-4.1': {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      },
+      modelInteractions: { 'gpt-4.1': 1 },
+    });
+    parser.queue({
+      interactions: 2,
+      modelUsage: {
+        'gpt-4.1': {
+          inputTokens: 200,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      },
+      modelInteractions: { 'gpt-4.1': 2 },
+    });
+    queueScan(1000, 'line1\nline2\n');
+    queueScan(2000, 'line1\nline2\nline3\nline4\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['line1', 'line2']);
+
+    await tracker.update();
+
+    // Incremental: parserState reused (no new create), only the new tail
+    // passed in.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['line3', 'line4']);
+    // Reused state: argument identity matches the one from scan 1.
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).toBe(
+      mockParser.applyDeltaLines.mock.calls[0][1],
+    );
+
+    const stats = tracker.getStats();
+    expect(stats.interactions).toBe(1); // 2 current - 1 baseline
+    expect(stats.models['gpt-4.1'].inputTokens).toBe(100);
+    expect(stats.models['gpt-4.1'].outputTokens).toBe(50);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(
+      'line1\nline2\nline3\nline4\n'.length,
+    );
+    tracker.dispose();
+  });
+
+  it('falls back to full re-parse when the file is truncated', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 3, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'a\nb\nc\n');
+    queueScan(2000, 'a\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+
+    await tracker.update();
+
+    // Full re-parse: a fresh parserState is created and all lines from index 0
+    // are passed in.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['a']);
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).not.toBe(stateBefore);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(2);
+    tracker.dispose();
+  });
+
+  it('falls back to full re-parse on same-size in-place rewrite', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'aaa\n');
+    queueScan(2000, 'bbb\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+
+    await tracker.update();
+
+    // size === lastOffset (4 === 4) with changed mtime → full re-parse, not
+    // incremental.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['bbb']);
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).not.toBe(stateBefore);
+    tracker.dispose();
+  });
+
+  it('holds off parsing a first-scan partial line until its completion arrives', async () => {
+    // Regression: previously the full re-parse path advanced lastOffset to
+    // content.length even when content ended mid-line. The partial line was
+    // fed to applyDeltaLines (silently dropped by JSON.parse), and on the
+    // next scan only the completion *suffix* was parsed — the original
+    // request's tokens were lost. The fix mirrors the incremental branch's
+    // atomicity guarantee: only parse up to the last complete \n.
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    // Scan 1 catches the file mid-write: "good\n" complete, "partial" not.
+    queueScan(1000, 'good\npartial');
+    queueScan(2000, 'good\npartial-completed\nnext\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    // Only the complete "good" line was parsed; the partial trailing line
+    // was held back, not fed to the parser.
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['good']);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number }>;
+    }).fileCache;
+    // lastOffset stops after the last \n, not at content.length.
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe('good\n'.length);
+
+    await tracker.update();
+
+    // Incremental tail starts where scan 1 stopped, so the completion bytes
+    // arrive as one atomic line plus the new "next" line.
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'partial-completed',
+      'next',
+    ]);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(
+      'good\npartial-completed\nnext\n'.length,
+    );
+    tracker.dispose();
+  });
+
+  it('holds off parsing when the appended tail has no trailing newline, then parses on completion', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    // Scan 2 (partial) shouldn't aggregate — no queue entry consumed.
+    parser.queue({ interactions: 2, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'a\n');
+    queueScan(2000, 'a\nbpartial');
+    queueScan(3000, 'a\nbpartial-complete\nmore\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['a']);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; mtime: number }>;
+    }).fileCache;
+    const offsetAfterScan1 = cache.get('/sessions/a.jsonl')!.lastOffset;
+    expect(offsetAfterScan1).toBe(2);
+
+    // Scan 2: appended bytes have no trailing \n. Parser must NOT be called,
+    // lastOffset must NOT advance, and mtime must be bumped so we don't loop.
+    await tracker.update();
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(offsetAfterScan1);
+    expect(cache.get('/sessions/a.jsonl')!.mtime).toBe(2000);
+
+    // Scan 3: completion + more. Now the originally-partial line parses
+    // exactly once (in its completed form) alongside the new line.
+    await tracker.update();
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'bpartial-complete',
+      'more',
+    ]);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(
+      'a\nbpartial-complete\nmore\n'.length,
+    );
+    tracker.dispose();
+  });
+
+  it('keeps parserState across a pending→completed transition', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    // Scan 1: only a pending request is present, no interactions yet.
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    // Scan 2: completion lines flip the request to value=1.
+    parser.queue({
+      interactions: 1,
+      modelUsage: {
+        'gpt-4.1': {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      },
+      modelInteractions: { 'gpt-4.1': 1 },
+    });
+    queueScan(1000, 'pending\n');
+    queueScan(2000, 'pending\nresult\nmodelState\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
+    expect(tracker.getStats().interactions).toBe(0);
+
+    await tracker.update();
+
+    // Same parserState reused for the completion lines.
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).toBe(stateBefore);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'result',
+      'modelState',
+    ]);
+    const stats = tracker.getStats();
+    expect(stats.interactions).toBe(1);
+    expect(stats.models['gpt-4.1'].inputTokens).toBe(100);
+    expect(stats.models['gpt-4.1'].outputTokens).toBe(50);
+    tracker.dispose();
+  });
+
+  it('slices multi-byte content by code-units, not bytes (regression guard)', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 2, modelUsage: {}, modelInteractions: {} });
+
+    // `café 🎉` is 7 UTF-16 code units but 10 UTF-8 bytes. If the tracker
+    // tracked offsets in bytes (e.g. via Buffer.byteLength) and then sliced
+    // the string, the offset would land 3 chars early and corrupt the next
+    // line's JSON envelope, dropping it from the parse.
+    const scan1 = 'café 🎉\nline-one\n';
+    const tailToAppend = '日本語 🚀\nline-two\n';
+    const scan2 = scan1 + tailToAppend;
+    queueScan(1000, scan1);
+    queueScan(2000, scan2);
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(scan1.length);
+
+    await tracker.update();
+
+    // The new tail must equal exactly the appended slice — no surrogate-pair
+    // split, no off-by-3 byte/code-unit mismatch.
+    const expectedNewLines = tailToAppend
+      .slice(0, tailToAppend.lastIndexOf('\n'))
+      .split(/\r?\n/)
+      .filter((l) => l.trim());
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(expectedNewLines);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(scan2.length);
+    tracker.dispose();
+  });
+
+  it('drops parserState and resets lastOffset when full re-parse rejects the batch', async () => {
+    // Regression: after a corrupted first line, the parser leaves
+    // hasReceivedDelta=false. If the tracker still cached the un-primed
+    // parserState and advanced lastOffset past the bad line, the next mtime
+    // change would take the incremental path and feed only the appended
+    // tail. The parser's still-fresh guard would then accept the first
+    // appended kind:1/kind:2 line and fabricate a requests tree. The tracker
+    // must detect rejection and refuse to cache the state.
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+
+    // Scan 1: simulate rejection — applyDeltaLines does NOT flip
+    // hasReceivedDelta. Aggregate is the empty session (parser returned 0).
+    mockParser.applyDeltaLines.mockImplementationOnce((_lines, state) => state);
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'corrupted\n');
+
+    // Scan 2: file appended. Tracker MUST run full re-parse (not incremental)
+    // since scan 1 dropped the parserState. We simulate the corrupted prefix
+    // still rejecting — the parser's first-line guard rejects again because
+    // the first line is still "corrupted". Same rejection behavior expected.
+    mockParser.applyDeltaLines.mockImplementationOnce((_lines, state) => state);
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    queueScan(2000, 'corrupted\nlater-line\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
+    }).fileCache;
+    // After scan 1's rejection: parserState dropped, lastOffset reset.
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(0);
+
+    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    expect(lru).not.toContain('/sessions/a.jsonl');
+
+    await tracker.update();
+
+    // Scan 2 took the full re-parse path again (parserState was null →
+    // canIncremental=false). createParserState fires a second time; the
+    // call gets the FULL content lines, not just the appended tail.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'corrupted',
+      'later-line',
+    ]);
+    // Rejected again — parserState still null, lastOffset still 0.
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(0);
+    tracker.dispose();
+  });
+
+  it('clears prior LRU entry when a subsequent full re-parse rejects', async () => {
+    // First scan accepts (state primed → LRU populated). A later in-place
+    // rewrite gets rejected; the LRU entry must be cleared so the slot is
+    // freed for other actively-incrementing files.
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'good\n');
+    queueScan(2000, 'bad!\n'); // same length → falls to full re-parse branch
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    expect(lru).toContain('/sessions/a.jsonl');
+
+    // Override the second applyDeltaLines call to simulate rejection.
+    mockParser.applyDeltaLines.mockImplementationOnce((_lines, state) => state);
+    await tracker.update();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(0);
+    expect(lru).not.toContain('/sessions/a.jsonl');
+    tracker.dispose();
+  });
+});
+
+describe('Tracker — parserState LRU eviction', () => {
+  function fourFiles(mtime = 1000) {
+    return ['a', 'b', 'c', 'd'].map((n, i) => ({
+      path: `/sessions/${n}.jsonl`,
+      mtime,
+      content: '{}',
+      parseResult: {
+        interactions: i + 1,
+        modelUsage: {
+          'gpt-4.1': { ...emptyTokens(), inputTokens: 100 * (i + 1) },
+        },
+        modelInteractions: { 'gpt-4.1': i + 1 },
+      },
+    }));
+  }
+
+  it('caps parserState retention at 3 entries; oldest evicted, aggregate preserved', async () => {
+    // Files are processed in array order, so a is touched first and becomes
+    // the LRU head. After d is touched, length=4>cap → a evicted.
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<
+        string,
+        { parserState: unknown; interactions: number; modelUsage: any }
+      >;
+    }).fileCache;
+
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/b.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/c.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/d.jsonl')!.parserState).not.toBeNull();
+
+    // Evicted file's aggregate survives eviction unchanged.
+    const a = cache.get('/sessions/a.jsonl')!;
+    expect(a.interactions).toBe(1);
+    expect(a.modelUsage['gpt-4.1'].inputTokens).toBe(100);
+
+    tracker.dispose();
+  });
+
+  it('re-installs parserState via full re-parse when an evicted file changes', async () => {
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { parserState: unknown }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+
+    // Bump a's mtime — full re-parse runs since parserState was evicted.
+    // LRU rotates: a goes to tail, b becomes the new head and gets evicted.
+    const refreshed = fourFiles().map((f) =>
+      f.path === '/sessions/a.jsonl' ? { ...f, mtime: 2000 } : f,
+    );
+    setupFiles(refreshed);
+    await tracker.update();
+
+    expect(cache.get('/sessions/a.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/b.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/c.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/d.jsonl')!.parserState).not.toBeNull();
+
+    // b's aggregate is unchanged after eviction.
+    const b = (cache.get('/sessions/b.jsonl')! as unknown as {
+      interactions: number;
+      modelUsage: any;
+    });
+    expect(b.interactions).toBe(2);
+    expect(b.modelUsage['gpt-4.1'].inputTokens).toBe(200);
+    tracker.dispose();
+  });
+
+  it('preserves getFileDiagnostics() output across LRU eviction', async () => {
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const diag = tracker.getFileDiagnostics();
+    expect(diag).toHaveLength(4);
+
+    const a = diag.find((d) => d.path === '/sessions/a.jsonl')!;
+    expect(a.interactions).toBe(1);
+    expect(a.modelInteractions).toEqual({ 'gpt-4.1': 1 });
+    expect(a.modelUsage['gpt-4.1'].inputTokens).toBe(100);
+    expect(a.inBaseline).toBe(true);
+
+    const d = diag.find((d) => d.path === '/sessions/d.jsonl')!;
+    expect(d.interactions).toBe(4);
+    expect(d.modelUsage['gpt-4.1'].inputTokens).toBe(400);
+    expect(d.inBaseline).toBe(true);
+
+    tracker.dispose();
+  });
+
+  it('drops evicted-file LRU entry when the file is deleted', async () => {
+    // Cover the statSync-fail eviction path: it must also clear parserStateLru
+    // so a later re-creation doesn't end up double-tracked.
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    expect(lru).toEqual(['/sessions/b.jsonl', '/sessions/c.jsonl', '/sessions/d.jsonl']);
+
+    // Delete b: discovery drops it AND statSync throws for that path.
+    mockDiscovery.discoverSessionFiles.mockReturnValue([
+      '/sessions/a.jsonl',
+      '/sessions/c.jsonl',
+      '/sessions/d.jsonl',
+    ]);
+    mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+      if (p.toString() === '/sessions/b.jsonl') throw new Error('ENOENT');
+      return { mtimeMs: 1000 } as fs.Stats;
+    });
+
+    await tracker.update();
+
+    expect(lru).toEqual(['/sessions/c.jsonl', '/sessions/d.jsonl']);
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, unknown>;
+    }).fileCache;
+    expect(cache.has('/sessions/b.jsonl')).toBe(false);
     tracker.dispose();
   });
 });
 
 describe('Tracker — periodic scanning', () => {
-  it('calls update on interval', () => {
+  it('calls update on interval', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.start(60_000);
+    // Await start so the setInterval is installed before we advance fake
+    // timers — start() is async (it awaits the initial scan) and would
+    // otherwise still be in its microtask when advanceTimersByTime runs.
+    await tracker.start(60_000);
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledTimes(1);
 
     jest.advanceTimersByTime(60_000);
@@ -878,7 +1518,7 @@ describe('Tracker — periodic scanning', () => {
 });
 
 describe('Tracker — error handling', () => {
-  it('skips files that fail stat', () => {
+  it('skips files that fail stat', async () => {
     mockDiscovery.discoverSessionFiles.mockReturnValue([
       '/sessions/good.jsonl',
       '/sessions/bad.jsonl',
@@ -888,62 +1528,151 @@ describe('Tracker — error handling', () => {
       return { mtimeMs: 1000 } as fs.Stats;
     });
     mockFs.readFileSync.mockReturnValue('{}' as any);
-    mockParser.parseSessionFileContent.mockReturnValue({
+    mockParser.createParserState.mockReturnValue({ sessionState: {} });
+    mockParser.applyDeltaLines.mockImplementation((lines, state) => {
+      if (lines.length > 0) {
+        (state as unknown as { hasReceivedDelta?: boolean }).hasReceivedDelta = true;
+      }
+      return state;
+    });
+    mockParser.aggregateFromState.mockReturnValue({
       interactions: 0,
       modelUsage: {},
       modelInteractions: {},
     });
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     tracker.dispose();
   });
 
-  it('skips files that fail to read', () => {
+  it('skips files that fail to read', async () => {
     mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
     mockFs.statSync.mockReturnValue({ mtimeMs: 1000 } as fs.Stats);
     mockFs.readFileSync.mockImplementation(() => {
       throw new Error('EACCES');
     });
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
     expect(tracker.getStats().totalTokens).toBe(0);
     tracker.dispose();
   });
 });
 
+describe('Tracker — cache persistence across mtime filter', () => {
+  // Once a file is in the cache it contributed to baseline; if discovery later
+  // filters it out (aged past sessionMaxAgeDays), we must keep scanning it so
+  // its tokens don't silently drop out of `current` and skew the delta.
+  it('keeps scanning a cached file even after discovery stops returning it', async () => {
+    const aFile = '/sessions/a.jsonl';
+    const usage = {
+      'gpt-4.1': {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+    };
+    setupFiles([
+      {
+        path: aFile,
+        mtime: 1000,
+        content: '{}',
+        parseResult: { interactions: 1, modelUsage: usage, modelInteractions: { 'gpt-4.1': 1 } },
+      },
+    ]);
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+
+    // Discovery filters the file out (e.g. it aged past sessionMaxAgeDays),
+    // but the underlying file is still on disk. statSync still resolves.
+    mockDiscovery.discoverSessionFiles.mockReturnValue([]);
+    await tracker.update();
+
+    // Cached file still consulted via statSync — no re-parse since mtime
+    // unchanged, but the file's contribution survives in `current`.
+    expect(mockFs.statSync).toHaveBeenCalledWith(aFile);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    tracker.dispose();
+  });
+
+  it('evicts a cached file from the cache when statSync fails (file deleted)', async () => {
+    const aFile = '/sessions/a.jsonl';
+    setupFiles([
+      {
+        path: aFile,
+        mtime: 1000,
+        content: '{}',
+        parseResult: { interactions: 1, modelUsage: {}, modelInteractions: {} },
+      },
+    ]);
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(tracker.getFileDiagnostics()).toHaveLength(1);
+
+    // File deleted from disk; discovery also drops it.
+    mockDiscovery.discoverSessionFiles.mockReturnValue([]);
+    mockFs.statSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+    await tracker.update();
+
+    expect(tracker.getFileDiagnostics()).toHaveLength(0);
+    tracker.dispose();
+  });
+});
+
 describe('Tracker — dispose', () => {
-  it('clears timer, listeners, and cache', () => {
+  it('clears timer, listeners, and cache', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.start(60_000);
+    await tracker.start(60_000);
     tracker.dispose();
     jest.advanceTimersByTime(120_000);
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledTimes(1);
   });
+
+  it('does not install the poll timer when disposed mid-start', async () => {
+    // dispose() can land between activate() kicking off the fire-and-forget
+    // start() and the initial scan resolving. Without the disposed-flag check
+    // in start(), setInterval would be installed on a disposed tracker and
+    // leak forever.
+    setupEmptyDiscovery();
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    const startPromise = tracker.start(60_000);
+    tracker.dispose();
+    await startPromise;
+
+    const beforeAdvance = mockDiscovery.discoverSessionFiles.mock.calls.length;
+    jest.advanceTimersByTime(180_000);
+    expect(mockDiscovery.discoverSessionFiles.mock.calls.length).toBe(beforeAdvance);
+  });
 });
 
 describe('Tracker — storageUri threading', () => {
-  it('passes the stored storageUri to discoverSessionFiles on scan', () => {
+  it('passes the stored storageUri to discoverSessionFiles on scan', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(STUB_STORAGE_URI);
-    tracker.initialize();
+    await tracker.initialize();
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledWith(STUB_STORAGE_URI);
     tracker.dispose();
   });
 
-  it('passes undefined to discoverSessionFiles when no storageUri given', () => {
+  it('passes undefined to discoverSessionFiles when no storageUri given', async () => {
     setupEmptyDiscovery();
     const tracker = new Tracker(undefined);
-    tracker.initialize();
+    await tracker.initialize();
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledWith(undefined);
     tracker.dispose();
   });
 
-  it('reports zero stats when storageUri is undefined and discovery returns empty', () => {
+  it('reports zero stats when storageUri is undefined and discovery returns empty', async () => {
     mockDiscovery.discoverSessionFiles.mockReturnValue([]);
     const tracker = new Tracker(undefined);
-    tracker.initialize();
+    await tracker.initialize();
     const stats = tracker.getStats();
     expect(stats.interactions).toBe(0);
     expect(stats.totalTokens).toBe(0);
