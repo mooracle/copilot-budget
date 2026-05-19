@@ -949,6 +949,276 @@ describe('Tracker — parser state cache', () => {
   });
 });
 
+describe('Tracker — incremental parsing', () => {
+  // Build a fresh parser-mock layer that records `applyDeltaLines` calls and
+  // returns queued aggregates per `aggregateFromState` invocation. Lets each
+  // test simulate "file grew" scenarios without the line-matching gymnastics
+  // of setupFiles (which retags every file on every call and breaks once a
+  // parserState is reused across scans).
+  function setupIncrementalParser() {
+    const aggregates: ReturnType<typeof sessionParser.aggregateFromState>[] = [];
+    let aggIdx = 0;
+
+    mockParser.createParserState.mockImplementation(() => ({
+      sessionState: Object.create(null),
+    }));
+    mockParser.applyDeltaLines.mockImplementation((_lines, state) => state);
+    mockParser.aggregateFromState.mockImplementation(() => {
+      const next = aggregates[aggIdx] ?? {
+        interactions: 0,
+        modelUsage: {},
+        modelInteractions: {},
+      };
+      aggIdx += 1;
+      return next;
+    });
+
+    return {
+      queue: (r: ReturnType<typeof sessionParser.aggregateFromState>) =>
+        aggregates.push(r),
+    };
+  }
+
+  function queueScan(mtime: number, content: string) {
+    mockFs.statSync.mockReturnValueOnce({ mtimeMs: mtime } as fs.Stats);
+    mockFs.readFileSync.mockReturnValueOnce(content as never);
+  }
+
+  it('passes only the new tail to applyDeltaLines when the file grew', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({
+      interactions: 1,
+      modelUsage: {
+        'gpt-4.1': {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      },
+      modelInteractions: { 'gpt-4.1': 1 },
+    });
+    parser.queue({
+      interactions: 2,
+      modelUsage: {
+        'gpt-4.1': {
+          inputTokens: 200,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      },
+      modelInteractions: { 'gpt-4.1': 2 },
+    });
+    queueScan(1000, 'line1\nline2\n');
+    queueScan(2000, 'line1\nline2\nline3\nline4\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['line1', 'line2']);
+
+    await tracker.update();
+
+    // Incremental: parserState reused (no new create), only the new tail
+    // passed in.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['line3', 'line4']);
+    // Reused state: argument identity matches the one from scan 1.
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).toBe(
+      mockParser.applyDeltaLines.mock.calls[0][1],
+    );
+
+    const stats = tracker.getStats();
+    expect(stats.interactions).toBe(1); // 2 current - 1 baseline
+    expect(stats.models['gpt-4.1'].inputTokens).toBe(100);
+    expect(stats.models['gpt-4.1'].outputTokens).toBe(50);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(
+      'line1\nline2\nline3\nline4\n'.length,
+    );
+    tracker.dispose();
+  });
+
+  it('falls back to full re-parse when the file is truncated', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 3, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'a\nb\nc\n');
+    queueScan(2000, 'a\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+
+    await tracker.update();
+
+    // Full re-parse: a fresh parserState is created and all lines from index 0
+    // are passed in.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['a']);
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).not.toBe(stateBefore);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(2);
+    tracker.dispose();
+  });
+
+  it('falls back to full re-parse on same-size in-place rewrite', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'aaa\n');
+    queueScan(2000, 'bbb\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+
+    await tracker.update();
+
+    // size === lastOffset (4 === 4) with changed mtime → full re-parse, not
+    // incremental.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['bbb']);
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).not.toBe(stateBefore);
+    tracker.dispose();
+  });
+
+  it('holds off parsing when the appended tail has no trailing newline, then parses on completion', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    // Scan 2 (partial) shouldn't aggregate — no queue entry consumed.
+    parser.queue({ interactions: 2, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'a\n');
+    queueScan(2000, 'a\nbpartial');
+    queueScan(3000, 'a\nbpartial-complete\nmore\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['a']);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; mtime: number }>;
+    }).fileCache;
+    const offsetAfterScan1 = cache.get('/sessions/a.jsonl')!.lastOffset;
+    expect(offsetAfterScan1).toBe(2);
+
+    // Scan 2: appended bytes have no trailing \n. Parser must NOT be called,
+    // lastOffset must NOT advance, and mtime must be bumped so we don't loop.
+    await tracker.update();
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(offsetAfterScan1);
+    expect(cache.get('/sessions/a.jsonl')!.mtime).toBe(2000);
+
+    // Scan 3: completion + more. Now the originally-partial line parses
+    // exactly once (in its completed form) alongside the new line.
+    await tracker.update();
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'bpartial-complete',
+      'more',
+    ]);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(
+      'a\nbpartial-complete\nmore\n'.length,
+    );
+    tracker.dispose();
+  });
+
+  it('keeps parserState across a pending→completed transition', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    // Scan 1: only a pending request is present, no interactions yet.
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    // Scan 2: completion lines flip the request to value=1.
+    parser.queue({
+      interactions: 1,
+      modelUsage: {
+        'gpt-4.1': {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      },
+      modelInteractions: { 'gpt-4.1': 1 },
+    });
+    queueScan(1000, 'pending\n');
+    queueScan(2000, 'pending\nresult\nmodelState\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
+    expect(tracker.getStats().interactions).toBe(0);
+
+    await tracker.update();
+
+    // Same parserState reused for the completion lines.
+    expect(mockParser.applyDeltaLines.mock.calls[1][1]).toBe(stateBefore);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'result',
+      'modelState',
+    ]);
+    const stats = tracker.getStats();
+    expect(stats.interactions).toBe(1);
+    expect(stats.models['gpt-4.1'].inputTokens).toBe(100);
+    expect(stats.models['gpt-4.1'].outputTokens).toBe(50);
+    tracker.dispose();
+  });
+
+  it('slices multi-byte content by code-units, not bytes (regression guard)', async () => {
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 2, modelUsage: {}, modelInteractions: {} });
+
+    // `café 🎉` is 7 UTF-16 code units but 10 UTF-8 bytes. If the tracker
+    // tracked offsets in bytes (e.g. via Buffer.byteLength) and then sliced
+    // the string, the offset would land 3 chars early and corrupt the next
+    // line's JSON envelope, dropping it from the parse.
+    const scan1 = 'café 🎉\nline-one\n';
+    const tailToAppend = '日本語 🚀\nline-two\n';
+    const scan2 = scan1 + tailToAppend;
+    queueScan(1000, scan1);
+    queueScan(2000, scan2);
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(scan1.length);
+
+    await tracker.update();
+
+    // The new tail must equal exactly the appended slice — no surrogate-pair
+    // split, no off-by-3 byte/code-unit mismatch.
+    const expectedNewLines = tailToAppend
+      .slice(0, tailToAppend.lastIndexOf('\n'))
+      .split(/\r?\n/)
+      .filter((l) => l.trim());
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(expectedNewLines);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(scan2.length);
+    tracker.dispose();
+  });
+});
+
 describe('Tracker — periodic scanning', () => {
   it('calls update on interval', async () => {
     setupEmptyDiscovery();

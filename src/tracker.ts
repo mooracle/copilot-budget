@@ -262,13 +262,44 @@ export class Tracker {
         continue;
       }
 
+      // Incremental requires a live cached parser state plus a strict size
+      // increase (in JS string code-units — matches lastOffset). Truncation
+      // and same-size in-place rewrites both fall to full re-parse.
+      const canIncremental =
+        cached?.parserState != null && content.length > cached.lastOffset;
+
       let parsed;
       let parserState: ParserState;
+      let nextLastOffset: number;
       try {
-        parserState = createParserState();
-        const lines = content.split(/\r?\n/).filter((l) => l.trim());
-        applyDeltaLines(lines, parserState);
-        parsed = aggregateFromState(parserState);
+        if (canIncremental) {
+          parserState = cached!.parserState!;
+          const newTail = content.slice(cached!.lastOffset);
+          const lastNewline = newTail.lastIndexOf('\n');
+          if (lastNewline < 0) {
+            // Partial trailing line — no \n yet. Hold off on parsing so the
+            // line completes atomically next scan. Bump mtime so we don't
+            // re-enter this branch until the file changes again.
+            cached!.mtime = mtime;
+            totals.interactions += cached!.interactions;
+            mergeModelUsage(totals.modelUsage, cached!.modelUsage);
+            mergeModelInteractions(totals.modelInteractions, cached!.modelInteractions);
+            continue;
+          }
+          const newLines = newTail
+            .slice(0, lastNewline)
+            .split(/\r?\n/)
+            .filter((l) => l.trim());
+          applyDeltaLines(newLines, parserState);
+          nextLastOffset = cached!.lastOffset + lastNewline + 1;
+          parsed = aggregateFromState(parserState);
+        } else {
+          parserState = createParserState();
+          const lines = content.split(/\r?\n/).filter((l) => l.trim());
+          applyDeltaLines(lines, parserState);
+          parsed = aggregateFromState(parserState);
+          nextLastOffset = content.length;
+        }
       } catch {
         log(`scanAll: failed to parse session file: ${file}`);
         continue;
@@ -282,7 +313,7 @@ export class Tracker {
       this.fileCache.set(file, {
         mtime,
         ...entry,
-        lastOffset: content.length,
+        lastOffset: nextLastOffset,
         parserState,
       });
       totals.interactions += entry.interactions;
