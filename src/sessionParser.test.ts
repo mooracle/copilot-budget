@@ -2,7 +2,7 @@ import * as path from 'path';
 import { parseSessionFileContent } from './sessionParser';
 import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
-const FIXTURE_PATH = path.join(__dirname, '__fixtures__', 'models-and-pricing.yml');
+const FIXTURE_PATH = path.join(__dirname, '__fixtures__', 'models-and-pricing.json');
 
 beforeAll(() => {
   resetRateCardForTesting();

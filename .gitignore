@@ -6,3 +6,4 @@ coverage/
 .ralphex/progress/
 .claude/
 plan.md
+src/__fixtures__/models-and-pricing.json

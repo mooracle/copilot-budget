@@ -28,6 +28,15 @@ export interface RestoredStats {
   models: { [model: string]: ModelStats };
 }
 
+export interface FileDiagnostics {
+  path: string;
+  mtime: number;
+  interactions: number;
+  modelInteractions: { [model: string]: number };
+  modelUsage: ModelUsage;
+  inBaseline: boolean;
+}
+
 interface FileCache {
   mtime: number;
   interactions: number;
@@ -110,6 +119,12 @@ export class Tracker {
   // trailer the hook just consumed) is preserved as the next commit's delta.
   private lastSnapshot: Snapshot | null = null;
   private fileCache = new Map<string, FileCache>();
+  // Snapshot of file paths present at the moment baseline was captured.
+  // Used by getFileDiagnostics() to flag which files were already on disk
+  // at session start (and therefore have their existing contents folded
+  // into the baseline) versus files that appeared mid-session (whose
+  // entire contents count toward the session delta).
+  private baselineFiles = new Set<string>();
   private since: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private listeners: StatsListener[] = [];
@@ -285,6 +300,7 @@ export class Tracker {
     const snapshot = this.scanAll();
     this.baseline = snapshot;
     this.lastSnapshot = snapshot;
+    this.baselineFiles = new Set(this.fileCache.keys());
     log(
       `initialize: baseline set at ${snapshot.interactions} interactions across ${Object.keys(snapshot.modelUsage).length} model(s)`,
     );
@@ -330,6 +346,7 @@ export class Tracker {
     const snapshot = this.scanAll();
     this.baseline = snapshot;
     this.lastSnapshot = snapshot;
+    this.baselineFiles = new Set(this.fileCache.keys());
     this.since = new Date().toISOString();
     const stats = this.computeStats(snapshot);
     this.lastStats = stats;
@@ -347,12 +364,34 @@ export class Tracker {
   consume(): void {
     this.previousStats = null;
     this.baseline = this.lastSnapshot ?? this.scanAll();
+    this.baselineFiles = new Set(this.fileCache.keys());
     this.since = new Date().toISOString();
     const current = this.scanAll();
     this.lastSnapshot = current;
     const stats = this.computeStats(current);
     this.lastStats = stats;
     this.notifyListeners(stats);
+  }
+
+  // Per-file breakdown for diagnostics. Reflects the most recent successful
+  // scan of each file (the same data the delta computation consumed), plus
+  // a flag indicating whether the file was already present when the baseline
+  // was captured. New files that appeared mid-session have their entire
+  // contents — including the very first request — attributed to the session
+  // delta, since baseline contributes 0 for them.
+  getFileDiagnostics(): FileDiagnostics[] {
+    const out: FileDiagnostics[] = [];
+    for (const [path, entry] of this.fileCache.entries()) {
+      out.push({
+        path,
+        mtime: entry.mtime,
+        interactions: entry.interactions,
+        modelInteractions: entry.modelInteractions,
+        modelUsage: entry.modelUsage,
+        inBaseline: this.baselineFiles.has(path),
+      });
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path));
   }
 
   getStats(): TrackingStats {
@@ -373,6 +412,7 @@ export class Tracker {
     this.stop();
     this.listeners = [];
     this.fileCache.clear();
+    this.baselineFiles.clear();
     this.previousStats = null;
     this.lastSnapshot = null;
   }

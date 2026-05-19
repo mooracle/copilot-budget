@@ -22,13 +22,13 @@ describe('config', () => {
   });
 
   describe('isCommitHookEnabled', () => {
-    it('returns true by default', () => {
-      expect(isCommitHookEnabled()).toBe(true);
+    it('returns false by default (opt-in)', () => {
+      expect(isCommitHookEnabled()).toBe(false);
     });
 
-    it('returns false when overridden', () => {
-      __configStore['copilot-budget.commitHook.enabled'] = false;
-      expect(isCommitHookEnabled()).toBe(false);
+    it('returns true when overridden', () => {
+      __configStore['copilot-budget.commitHook.enabled'] = true;
+      expect(isCommitHookEnabled()).toBe(true);
     });
   });
 

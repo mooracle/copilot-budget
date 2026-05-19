@@ -669,6 +669,31 @@ describe('trackingFile', () => {
 
       expect(await readTrackingFile()).toEqual({ kind: 'legacy' });
     });
+
+    it('returns absent for a partial write of the current schema (no legacy markers)', async () => {
+      // Simulates a write that was interrupted after the first couple of
+      // lines (power loss, crash, or non-atomic remote FS provider). The
+      // file has content but is missing TOTAL_AI_CREDITS and any MODEL_*
+      // keys, so parseTrackingFileContent returns null. Without positive
+      // legacy markers, the caller must NOT overwrite — that would stomp
+      // a folder's accumulated stats on the next activation.
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue(
+        ['SINCE=2024-01-15T10:30:00Z', 'INTERAC'].join('\n'),
+      );
+
+      expect(await readTrackingFile()).toEqual({ kind: 'absent' });
+    });
+
+    it('returns absent for arbitrary unrelated content (no legacy markers)', async () => {
+      // Defends against a foreign tool writing to <gitdir>/copilot-budget,
+      // or filesystem corruption that yields garbage. Treat as absent so
+      // we don't overwrite something we don't understand.
+      setupWorkspace('/project');
+      mockReadTextFile.mockResolvedValue('hello world\nnot our format\n');
+
+      expect(await readTrackingFile()).toEqual({ kind: 'absent' });
+    });
   });
 
   describe('Tracker integration with legacy-parsed RestoredStats', () => {

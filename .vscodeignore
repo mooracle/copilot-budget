@@ -9,12 +9,13 @@ esbuild.js
 **/*.map
 **/*.ts
 !dist/extension.js
-!dist/models-and-pricing.yml
+!dist/models-and-pricing.json
 .ralphex/**
 plan.md
 coverage/**
 *.vsix
 jest.config.js
+jest.globalSetup.js
 **/*.test.*
 .claude/**
 CLAUDE.md

@@ -11,6 +11,14 @@ import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
+jest.mock('./config', () => ({
+  isCommitHookEnabled: jest.fn().mockReturnValue(true),
+}));
+
+import { isCommitHookEnabled } from './config';
+const mockIsCommitHookEnabled = isCommitHookEnabled as jest.MockedFunction<
+  typeof isCommitHookEnabled
+>;
 
 const mockWindow = vscode.window as any;
 
@@ -65,7 +73,7 @@ function createMockTracker(stats: TrackingStats) {
 
 beforeAll(() => {
   resetRateCardForTesting();
-  loadRateCard(path.join(__dirname, '__fixtures__', 'models-and-pricing.yml'));
+  loadRateCard(path.join(__dirname, '__fixtures__', 'models-and-pricing.json'));
 });
 
 afterAll(() => {
@@ -77,6 +85,7 @@ describe('statusBar', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockIsCommitHookEnabled.mockReturnValue(true);
     createdItem = {
       text: '',
       tooltip: '' as any,
@@ -102,7 +111,7 @@ describe('statusBar', () => {
       expect(createdItem.name).toBe('Copilot Budget');
     });
 
-    it('sets initial text with AIC integer', () => {
+    it('sets initial text with AIC integer (no commit-hook suffix)', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -116,6 +125,22 @@ describe('statusBar', () => {
       createStatusBar(tracker);
 
       expect(createdItem.text).toBe('$(credit-card) 0 AIC');
+    });
+
+    it('does not include commit-hook indicator in status bar text', () => {
+      mockIsCommitHookEnabled.mockReturnValue(false);
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      expect(createdItem.text).not.toContain('Commit-Hook');
+      expect(createdItem.text).not.toContain('circle-slash');
+    });
+
+    it('tooltip does not mention commit-hook status', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).not.toContain('Commit hook');
     });
 
     it('sets tooltip as a MarkdownString with total AIC', () => {
@@ -141,15 +166,13 @@ describe('statusBar', () => {
       expect(value).not.toContain('$');
     });
 
-    it('tooltip includes the heuristic disclosure note', () => {
+    it('tooltip does not include the heuristic disclosure note', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
-      expect(value).toContain('estimate');
-      expect(value).toContain('75%');
-      expect(value).toContain('cached input');
-      expect(value).not.toContain('upper bound');
+      expect(value).not.toContain('75%');
+      expect(value).not.toContain('cached input');
     });
 
     it('subscribes to tracker stats changes', () => {
@@ -283,7 +306,7 @@ describe('statusBar', () => {
       expect(totalItem.label).not.toMatch(/\$\d/);
     });
 
-    it('includes the heuristic disclosure note as an item', async () => {
+    it('does not include the heuristic disclosure note', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
@@ -291,8 +314,58 @@ describe('statusBar', () => {
       const noteItem = items.find((i: any) =>
         i.label?.includes('Estimate note'),
       );
-      expect(noteItem).toBeDefined();
-      expect(noteItem.description).toContain('75%');
+      expect(noteItem).toBeUndefined();
+      const serialized = JSON.stringify(items);
+      expect(serialized).not.toContain('75%');
+    });
+
+    it('includes a Commit-Hook toggle showing ON when enabled', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(true);
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const toggle = items.find((i: any) => i.label?.startsWith('Commit-Hook:'));
+      expect(toggle).toBeDefined();
+      expect(toggle.label).toContain('$(check) ON');
+      expect(toggle.label).not.toContain('OFF');
+    });
+
+    it('shows Commit-Hook toggle as OFF when disabled', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(false);
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const toggle = items.find((i: any) => i.label?.startsWith('Commit-Hook:'));
+      expect(toggle.label).toContain('$(circle-slash) OFF');
+      expect(toggle.label).not.toContain(' ON');
+    });
+
+    it('dispatches toggle command when user picks the Commit-Hook item', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(false);
+      const { tracker } = createMockTracker(makeStats());
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.startsWith('Commit-Hook:')),
+      );
+
+      await showStatsQuickPick(tracker);
+
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'copilot-budget.toggleCommitHook',
+      );
+    });
+
+    it('does not dispatch toggle when user picks a non-toggle item', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(true);
+      const { tracker } = createMockTracker(makeStats());
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.includes('Total')),
+      );
+
+      await showStatsQuickPick(tracker);
+
+      expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
     });
 
     it('passes title and placeHolder to quick pick', async () => {

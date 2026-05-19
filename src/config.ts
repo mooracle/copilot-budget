@@ -11,7 +11,7 @@ export function isEnabled(): boolean {
 }
 
 export function isCommitHookEnabled(): boolean {
-  return cfg().get<boolean>('commitHook.enabled', true);
+  return cfg().get<boolean>('commitHook.enabled', false);
 }
 
 export interface TrailerConfig {

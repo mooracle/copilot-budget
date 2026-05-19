@@ -11,7 +11,7 @@ import {
   resetRateCardForTesting,
 } from './tokenRates';
 
-const FIXTURE_PATH = path.join(__dirname, '__fixtures__', 'models-and-pricing.yml');
+const FIXTURE_PATH = path.join(__dirname, '__fixtures__', 'models-and-pricing.json');
 
 beforeEach(() => {
   resetRateCardForTesting();
@@ -47,20 +47,24 @@ describe('normalizeModelId', () => {
 
 describe('loadRateCard schema robustness', () => {
   it('skips entries missing required keys without crashing', () => {
-    const tmp = path.join(os.tmpdir(), `rate-card-test-${Date.now()}.yml`);
+    const tmp = path.join(os.tmpdir(), `rate-card-test-${Date.now()}.json`);
     fs.writeFileSync(
       tmp,
-      [
-        '- model: Good Model',
-        '  provider: openai',
-        '  input: $1.00',
-        '  cached_input: $0.10',
-        '  output: $5.00',
-        '- model: Missing Input',
-        '  provider: openai',
-        '  cached_input: $0.10',
-        '  output: $5.00',
-      ].join('\n'),
+      JSON.stringify([
+        {
+          model: 'Good Model',
+          provider: 'openai',
+          input: '$1.00',
+          cached_input: '$0.10',
+          output: '$5.00',
+        },
+        {
+          model: 'Missing Input',
+          provider: 'openai',
+          cached_input: '$0.10',
+          output: '$5.00',
+        },
+      ]),
     );
     resetRateCardForTesting();
     const map = loadRateCard(tmp, true);
@@ -69,9 +73,9 @@ describe('loadRateCard schema robustness', () => {
     fs.unlinkSync(tmp);
   });
 
-  it('returns an empty map when the YAML file is missing', () => {
+  it('returns an empty map when the rate card file is missing', () => {
     resetRateCardForTesting();
-    const map = loadRateCard(path.join(os.tmpdir(), 'definitely-not-there.yml'), true);
+    const map = loadRateCard(path.join(os.tmpdir(), 'definitely-not-there.json'), true);
     expect(map.size).toBe(0);
   });
 });

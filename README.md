@@ -2,6 +2,8 @@
 
 Track GitHub Copilot token usage and estimated cost, and optionally append AI budget info to git commit messages.
 
+> **Note:** The commit hook is **disabled by default**. Token tracking and the status bar work out of the box; the `prepare-commit-msg` hook that appends `Copilot-AI-Credits` trailers is opt-in. Enable it via the status bar quick pick (click the `$(credit-card)` item, then pick **Commit-Hook: OFF** to toggle it on) or by setting `copilot-budget.commitHook.enabled` to `true`.
+
 ## Features
 
 - **Token-based cost tracking** — reads server-reported token counts from Copilot's session JSONL (input, output, cache_read, cache_creation) and computes cost in AI Credits against the published per-million-token rate card. Status bar shows estimated cost as `N AIC`.
@@ -46,7 +48,7 @@ AIC cost is `(input × rate.input + cache_read × rate.cached_input + cache_crea
 
 AIC is plan-invariant — accurate across individual, Pro, Business, and Enterprise plans. GitHub Copilot's post-2026-06-01 billing is denominated in AIC directly, so AIC matches what Copilot bills regardless of any negotiated USD pricing.
 
-When per-message cache split (`cacheReadTokens`) is not reported by Copilot, the extension applies a heuristic: turn 1 is treated as 0% cached, turn 2 onward as 75% cached. Real values may be higher or lower. The status bar tooltip notes that cost is estimated.
+When per-message cache split (`cacheReadTokens`) is not reported by Copilot, the extension applies a heuristic: turn 1 is treated as 0% cached, turn 2 onward as 75% cached. Real values may be higher or lower.
 
 ### Example `settings.json`
 

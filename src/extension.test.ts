@@ -111,6 +111,7 @@ beforeEach(async () => {
     dispose: jest.fn(),
     setPreviousStats: jest.fn(),
     getStats: jest.fn().mockReturnValue(SAMPLE_STATS),
+    getFileDiagnostics: jest.fn().mockReturnValue([]),
     onStatsChanged: jest.fn((listener: any) => {
       statsChangedListeners.push(listener);
       return {
@@ -126,6 +127,7 @@ beforeEach(async () => {
 
   const mockStatusBarItem = {
     dispose: jest.fn(),
+    refresh: jest.fn(),
     item: { text: '', dispose: jest.fn() },
   };
   mockCreateStatusBar.mockReturnValue(mockStatusBarItem as any);
@@ -166,6 +168,7 @@ beforeEach(async () => {
   MockTracker.mockImplementation(() => trackerInstance);
   mockCreateStatusBar.mockReturnValue({
     dispose: jest.fn(),
+    refresh: jest.fn(),
     item: { text: '', dispose: jest.fn() },
   } as any);
   mockIsEnabled.mockReturnValue(true);
@@ -212,8 +215,8 @@ describe('extension', () => {
       await activate(ctx);
       expect(MockTracker).not.toHaveBeenCalled();
       expect(mockCreateStatusBar).not.toHaveBeenCalled();
-      // 5 stub commands registered so users get a helpful message
-      expect(ctx.subscriptions.length).toBe(5);
+      // 6 stub commands registered so users get a helpful message
+      expect(ctx.subscriptions.length).toBe(6);
     });
 
     it('writes tracking file when stats change', async () => {
@@ -767,6 +770,7 @@ describe('extension', () => {
       const disposeFn = jest.fn();
       mockCreateStatusBar.mockReturnValue({
         dispose: disposeFn,
+        refresh: jest.fn(),
         item: { text: '', dispose: jest.fn() },
       } as any);
 

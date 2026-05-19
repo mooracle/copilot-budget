@@ -67,6 +67,7 @@ export const commands = {
     __commandCallbacks[command] = callback;
     return { dispose: () => {} };
   }),
+  executeCommand: jest.fn(async () => undefined),
 };
 
 export enum StatusBarAlignment {

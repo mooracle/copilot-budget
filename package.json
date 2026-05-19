@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "1.0.0-beta.4",
+  "version": "1.0.0-beta.8",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -58,6 +58,10 @@
       {
         "command": "copilot-budget.uninstallHook",
         "title": "Copilot Budget: Uninstall Commit Hook"
+      },
+      {
+        "command": "copilot-budget.toggleCommitHook",
+        "title": "Copilot Budget: Toggle Commit Hook"
       },
       {
         "command": "copilot-budget.showDiagnostics",
@@ -118,6 +122,7 @@
     "@types/jest": "^30.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.8.0",
+    "js-yaml": "^4.1.1",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.28.0",
     "eslint": "^10.4.0",
@@ -126,7 +131,5 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.3"
   },
-  "dependencies": {
-    "js-yaml": "^4.1.1"
-  }
+  "dependencies": {}
 }

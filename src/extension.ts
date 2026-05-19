@@ -53,6 +53,7 @@ const ALL_COMMANDS = [
   'copilot-budget.resetTracking',
   'copilot-budget.installHook',
   'copilot-budget.uninstallHook',
+  'copilot-budget.toggleCommitHook',
   'copilot-budget.showDiagnostics',
 ];
 
@@ -78,6 +79,9 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
       }
 
       if (tracker) {
+        // Force a fresh scan so the per-file breakdown reflects what's on
+        // disk right now, not whatever was cached up to ~30s ago.
+        tracker.update();
         const stats = tracker.getStats();
         ch.appendLine('');
         ch.appendLine('Current stats:');
@@ -86,6 +90,36 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
         ch.appendLine(`  AI Credits: ${stats.totalAiCredits.toFixed(2)}`);
         ch.appendLine(`  Since: ${stats.since}`);
         ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
+
+        const perFile = tracker.getFileDiagnostics();
+        ch.appendLine('');
+        ch.appendLine(`Per-file breakdown (${perFile.length} file(s)):`);
+        for (const f of perFile) {
+          ch.appendLine(`  ${f.path}`);
+          ch.appendLine(`    mtime: ${new Date(f.mtime).toISOString()}`);
+          ch.appendLine(
+            `    in baseline: ${f.inBaseline ? 'yes (pre-session content folded into baseline)' : 'no (entire file counts toward session delta)'}`,
+          );
+          ch.appendLine(`    interactions: ${f.interactions}`);
+          const models = Object.entries(f.modelUsage);
+          if (models.length === 0) {
+            ch.appendLine('    models: (none)');
+          } else {
+            for (const [model, tokens] of models) {
+              const total =
+                tokens.inputTokens +
+                tokens.outputTokens +
+                tokens.cacheReadTokens +
+                tokens.cacheCreationTokens;
+              const turns = f.modelInteractions[model] ?? 0;
+              ch.appendLine(
+                `    ${model}: ${total} tokens across ${turns} turn(s) ` +
+                  `(in=${tokens.inputTokens}, out=${tokens.outputTokens}, ` +
+                  `cr=${tokens.cacheReadTokens}, cc=${tokens.cacheCreationTokens})`,
+              );
+            }
+          }
+        }
       }
 
       ch.show();
@@ -211,6 +245,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.uninstallHook', async () => {
       await uninstallHook();
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('copilot-budget.toggleCommitHook', async () => {
+      const newState = !isCommitHookEnabled();
+      await vscode.workspace
+        .getConfiguration('copilot-budget')
+        .update('commitHook.enabled', newState, vscode.ConfigurationTarget.Global);
+      if (newState) {
+        await installHook();
+      } else {
+        await uninstallHook();
+      }
     }),
   );
 

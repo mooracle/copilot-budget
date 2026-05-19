@@ -1,11 +1,7 @@
 import * as vscode from 'vscode';
 import { Tracker, TrackingStats, ModelStats } from './tracker';
 import { getDisplayName } from './tokenRates';
-
-const HEURISTIC_NOTE =
-  "Cost is an estimate. When per-message cache split isn't reported by " +
-  'Copilot, the extension assumes 75% cached input from turn 2 onward ' +
-  '(real value may be higher or lower).';
+import { isCommitHookEnabled } from './config';
 
 function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
@@ -43,10 +39,8 @@ function buildTooltip(stats: TrackingStats): vscode.MarkdownString {
         `- ${getDisplayName(model)}: ${formatAic(usage.costAic)}\n`,
       );
     }
-    md.appendMarkdown('\n');
   }
 
-  md.appendMarkdown(`_${HEURISTIC_NOTE}_`);
   return md;
 }
 
@@ -112,13 +106,21 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
   }
 
   items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
+  const hookEnabled = isCommitHookEnabled();
+  const toggleLabel = `Commit-Hook: ${hookEnabled ? '$(check) ON' : '$(circle-slash) OFF'}`;
   items.push({
-    label: '$(info) Estimate note',
-    description: HEURISTIC_NOTE,
+    label: toggleLabel,
+    description: hookEnabled
+      ? 'Click to disable — stop appending AI Credits trailer to commits'
+      : 'Click to enable — append AI Credits trailer to commits',
   });
 
-  await vscode.window.showQuickPick(items, {
+  const picked = await vscode.window.showQuickPick(items, {
     title: 'Copilot Budget',
     placeHolder: 'Per-model cost breakdown',
   });
+
+  if (picked?.label === toggleLabel) {
+    await vscode.commands.executeCommand('copilot-budget.toggleCommitHook');
+  }
 }

@@ -698,6 +698,84 @@ describe('Tracker — restored stats merge', () => {
   });
 });
 
+describe('Tracker — getFileDiagnostics', () => {
+  it('flags files present at initialize as inBaseline and new files as not', () => {
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: {
+          interactions: 2,
+          modelUsage: {
+            'gpt-4.1': { ...emptyTokens(), inputTokens: 500, outputTokens: 100 },
+          },
+          modelInteractions: { 'gpt-4.1': 2 },
+        },
+      },
+    ]);
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    tracker.initialize();
+
+    // File b appears after initialize — its entire content (including the
+    // very first request) should attribute to the session delta, and
+    // getFileDiagnostics should mark it inBaseline: false.
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: {
+          interactions: 2,
+          modelUsage: {
+            'gpt-4.1': { ...emptyTokens(), inputTokens: 500, outputTokens: 100 },
+          },
+          modelInteractions: { 'gpt-4.1': 2 },
+        },
+      },
+      {
+        path: '/sessions/b.jsonl',
+        mtime: 2000,
+        content: '{}',
+        parseResult: {
+          interactions: 1,
+          modelUsage: {
+            'claude-sonnet-4.6': {
+              ...emptyTokens(),
+              inputTokens: 300,
+              outputTokens: 50,
+            },
+          },
+          modelInteractions: { 'claude-sonnet-4.6': 1 },
+        },
+      },
+    ]);
+    tracker.update();
+
+    const diag = tracker.getFileDiagnostics();
+    expect(diag).toHaveLength(2);
+
+    const a = diag.find((f) => f.path === '/sessions/a.jsonl')!;
+    expect(a.inBaseline).toBe(true);
+    expect(a.interactions).toBe(2);
+    expect(a.modelUsage['gpt-4.1'].inputTokens).toBe(500);
+
+    const b = diag.find((f) => f.path === '/sessions/b.jsonl')!;
+    expect(b.inBaseline).toBe(false);
+    expect(b.interactions).toBe(1);
+    expect(b.modelUsage['claude-sonnet-4.6'].inputTokens).toBe(300);
+
+    tracker.dispose();
+  });
+
+  it('returns an empty list before initialize', () => {
+    setupEmptyDiscovery();
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    expect(tracker.getFileDiagnostics()).toEqual([]);
+    tracker.dispose();
+  });
+});
+
 describe('Tracker — mtime caching', () => {
   it('skips re-parsing unchanged files', () => {
     setupFiles([

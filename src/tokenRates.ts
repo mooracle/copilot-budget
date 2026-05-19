@@ -1,13 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as yaml from 'js-yaml';
 import { log } from './logger';
 import { errorMessage } from './utils';
 
 /**
  * Per-model rate card. All numeric rate fields are AIC per 1M tokens
- * (the raw rate-card YAML is USD per 1M tokens; `loadRateCard` converts
- * to AIC at load time via the fixed 1 AIC = $0.01 identity).
+ * (the bundled rate-card JSON ships USD per 1M tokens — converted from the
+ * upstream YAML at build time; `loadRateCard` converts to AIC at load time
+ * via the fixed 1 AIC = $0.01 identity).
  */
 export interface RateCard {
   input: number;
@@ -27,7 +27,7 @@ export interface TokenCounts {
   cacheCreation: number;
 }
 
-interface YamlEntry {
+interface RawRateEntry {
   model?: unknown;
   provider?: unknown;
   input?: unknown;
@@ -68,7 +68,7 @@ function parsePrice(value: unknown): number | null {
   return null;
 }
 
-function buildRateMap(entries: YamlEntry[]): Map<string, RateCard> {
+function buildRateMap(entries: RawRateEntry[]): Map<string, RateCard> {
   const map = new Map<string, RateCard>();
   for (const entry of entries) {
     if (!entry || typeof entry !== 'object') {
@@ -101,34 +101,35 @@ function buildRateMap(entries: YamlEntry[]): Map<string, RateCard> {
   return map;
 }
 
-function defaultYamlPath(): string {
-  return path.join(__dirname, 'models-and-pricing.yml');
+function defaultRatePath(): string {
+  return path.join(__dirname, 'models-and-pricing.json');
 }
 
 /**
- * Load the rate card from a YAML file. Idempotent — subsequent calls return
- * the cached map unless `force` is true. Returns an empty map if the file is
- * missing or unparseable; the extension still works, costs just resolve to 0.
+ * Load the rate card from a JSON file (pre-converted from the upstream YAML
+ * at build time). Idempotent — subsequent calls return the cached map unless
+ * `force` is true. Returns an empty map if the file is missing or unparseable;
+ * the extension still works, costs just resolve to 0.
  */
-export function loadRateCard(yamlPath: string = defaultYamlPath(), force = false): Map<string, RateCard> {
-  if (rateMap && loadedFromPath === yamlPath && !force) {
+export function loadRateCard(ratePath: string = defaultRatePath(), force = false): Map<string, RateCard> {
+  if (rateMap && loadedFromPath === ratePath && !force) {
     return rateMap;
   }
   try {
-    const raw = fs.readFileSync(yamlPath, 'utf-8');
-    const parsed = yaml.load(raw);
+    const raw = fs.readFileSync(ratePath, 'utf-8');
+    const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      log(`tokenRates: expected YAML array at ${yamlPath}, got ${typeof parsed}`);
+      log(`tokenRates: expected JSON array at ${ratePath}, got ${typeof parsed}`);
       rateMap = new Map();
     } else {
-      rateMap = buildRateMap(parsed as YamlEntry[]);
-      log(`tokenRates: loaded ${rateMap.size} rate cards from ${yamlPath}`);
+      rateMap = buildRateMap(parsed as RawRateEntry[]);
+      log(`tokenRates: loaded ${rateMap.size} rate cards from ${ratePath}`);
     }
   } catch (err: unknown) {
-    log(`tokenRates: failed to load ${yamlPath}: ${errorMessage(err)}`);
+    log(`tokenRates: failed to load ${ratePath}: ${errorMessage(err)}`);
     rateMap = new Map();
   }
-  loadedFromPath = yamlPath;
+  loadedFromPath = ratePath;
   return rateMap;
 }
 

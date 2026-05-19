@@ -161,6 +161,26 @@ export type TrackingFileResult =
   | { kind: 'legacy' }
   | { kind: 'absent' };
 
+// Markers that uniquely identify a known pre-AIC tracking-file schema.
+// If we see one of these in a file that didn't parse as the current schema,
+// the data has no usable representation in the current schema anyway, so
+// overwriting on activation is safe. If NONE of these are present and the
+// parse failed, we can't distinguish "ancient format we've never seen" from
+// "partial/corrupt write of the current schema" — the latter is far more
+// likely, so we fall back to 'absent' rather than stomp on a file that the
+// next normal write cycle would rewrite cleanly.
+const LEGACY_MARKERS: RegExp[] = [
+  /^TOTAL_TOKENS=/m,           // pre-0.6 totals
+  /^TOTAL_COST_USD=/m,         // v0.6.x totals (no TOTAL_AI_CREDITS)
+  /^PREMIUM_REQUESTS=/m,       // pre-0.6 trailer
+  /^MODEL_.+_COST_USD=/m,      // v0.6.x per-model cost
+  /^MODEL \S+\s+\d+\s+\d+/m,   // pre-0.6 space-separated MODEL line
+];
+
+function looksLikeLegacyContent(content: string): boolean {
+  return LEGACY_MARKERS.some((re) => re.test(content));
+}
+
 export async function readTrackingFile(): Promise<TrackingFileResult> {
   const uri = await getTrackingFileUri();
   if (!uri) return { kind: 'absent' };
@@ -174,7 +194,10 @@ export async function readTrackingFile(): Promise<TrackingFileResult> {
   const stats = parseTrackingFileContent(content);
   if (stats) return { kind: 'restored', stats };
 
-  // File has content but didn't parse — almost certainly legacy v0.5.x.
-  // Caller should overwrite to clear stale TR_ lines.
-  return { kind: 'legacy' };
+  // File has content but didn't parse. Only treat as legacy when a known
+  // pre-AIC marker is present; otherwise assume a partial/corrupted write
+  // of the current schema and report 'absent' so activation does not
+  // overwrite it with empty stats.
+  if (looksLikeLegacyContent(content)) return { kind: 'legacy' };
+  return { kind: 'absent' };
 }
