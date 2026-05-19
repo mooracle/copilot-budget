@@ -143,8 +143,8 @@ Cap the number of `parserState` objects kept in the cache. Default 3 — covers 
 - Modify: `CLAUDE.md`
 - Move: this plan to `docs/plans/completed/`
 
-- [ ] update `CLAUDE.md` `tracker.ts` and `sessionParser.ts` sections to describe the stateful parser API and `FileCache`'s new `lastOffset`/`parserState` fields. Note the LRU cap.
-- [ ] move this plan to `docs/plans/completed/20260519-incremental-session-parsing.md`.
+- [x] update `CLAUDE.md` `tracker.ts` and `sessionParser.ts` sections to describe the stateful parser API and `FileCache`'s new `lastOffset`/`parserState` fields. Note the LRU cap.
+- [x] move this plan to `docs/plans/completed/20260519-incremental-session-parsing.md`.
 
 ## Technical Details
 
