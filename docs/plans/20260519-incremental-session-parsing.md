@@ -80,13 +80,13 @@ Carve `parseSessionFileContent` into three pieces so callers can apply deltas in
 
 Make the cache shape carry the new fields without yet using them — pure structural change so it lands cleanly. The scan loop still does full re-parse on mtime change for now; we'll wire incremental in Task 3.
 
-- [ ] extend `FileCache` interface: add `lastOffset: number` (string code-unit index after last complete newline parsed — NOT bytes) and `parserState: import('./sessionParser').ParserState | null` (null = evicted or never created).
-- [ ] on full re-parse path (cache miss or mtime change), populate `lastOffset = content.length` (JS string code-unit count) AND `parserState` built by running `applyDeltaLines(allLines, createParserState())` before aggregating. Aggregate from the state, not from `parseSessionFileContent` — keeps the parser-state cache and aggregate in sync. **Do not use `Buffer.byteLength` anywhere in this path** — mixing byte offsets with `string.slice()` corrupts on any multi-byte character.
-- [ ] full-re-parse path still emits the same `ParsedSession` shape downstream. No behavior change visible to callers.
-- [ ] extend `setupFiles` helper in `tracker.test.ts` to stub the new parser exports (`createParserState`, `applyDeltaLines`, `aggregateFromState`) so Task 3 tests can exercise the stateful path. Existing `parseSessionFileContent` mock stays for back-compat tests.
-- [ ] write tests: cache entries created on first scan have non-null `parserState` and `lastOffset === content.length` (JS string length).
-- [ ] write tests: a second scan with same mtime hits the existing mtime-cache branch (no re-parse) — unchanged behavior.
-- [ ] run `npm test` — must pass before next task.
+- [x] extend `FileCache` interface: add `lastOffset: number` (string code-unit index after last complete newline parsed — NOT bytes) and `parserState: import('./sessionParser').ParserState | null` (null = evicted or never created).
+- [x] on full re-parse path (cache miss or mtime change), populate `lastOffset = content.length` (JS string code-unit count) AND `parserState` built by running `applyDeltaLines(allLines, createParserState())` before aggregating. Aggregate from the state, not from `parseSessionFileContent` — keeps the parser-state cache and aggregate in sync. **Do not use `Buffer.byteLength` anywhere in this path** — mixing byte offsets with `string.slice()` corrupts on any multi-byte character.
+- [x] full-re-parse path still emits the same `ParsedSession` shape downstream. No behavior change visible to callers.
+- [x] extend `setupFiles` helper in `tracker.test.ts` to stub the new parser exports (`createParserState`, `applyDeltaLines`, `aggregateFromState`) so Task 3 tests can exercise the stateful path. Existing `parseSessionFileContent` mock stays for back-compat tests.
+- [x] write tests: cache entries created on first scan have non-null `parserState` and `lastOffset === content.length` (JS string length).
+- [x] write tests: a second scan with same mtime hits the existing mtime-cache branch (no re-parse) — unchanged behavior.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 3: Wire incremental parse on mtime change
 

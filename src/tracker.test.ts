@@ -89,11 +89,32 @@ function setupFiles(
     return file.taggedContent as any;
   });
 
-  mockParser.parseSessionFileContent.mockImplementation((content: string) => {
-    const file = tagged.find((f) => f.taggedContent === content);
-    if (!file)
-      return { interactions: 0, modelUsage: {}, modelInteractions: {} };
-    return file.parseResult;
+  // Stateful parser mocks. applyDeltaLines stashes the lines it was given on
+  // the state so aggregateFromState can route to the right fixture by exact
+  // line-array match. Task 3 incremental tests build on this layer.
+  mockParser.createParserState.mockImplementation(() => ({
+    sessionState: Object.create(null),
+  }));
+
+  mockParser.applyDeltaLines.mockImplementation((lines, state) => {
+    const s = state as unknown as { __lines?: string[] };
+    if (!Array.isArray(s.__lines)) s.__lines = [];
+    for (const line of lines) s.__lines.push(line);
+    return state;
+  });
+
+  mockParser.aggregateFromState.mockImplementation((state) => {
+    const lines = (state as unknown as { __lines?: string[] }).__lines ?? [];
+    for (const f of tagged) {
+      const fLines = f.taggedContent.split(/\r?\n/).filter((l) => l.trim());
+      if (
+        fLines.length === lines.length &&
+        fLines.every((l, i) => l === lines[i])
+      ) {
+        return f.parseResult;
+      }
+    }
+    return { interactions: 0, modelUsage: {}, modelInteractions: {} };
   });
 }
 
@@ -797,10 +818,10 @@ describe('Tracker — mtime caching', () => {
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
     await tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
     await tracker.update();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     tracker.dispose();
   });
 
@@ -815,7 +836,7 @@ describe('Tracker — mtime caching', () => {
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
     await tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
     setupFiles([
       {
@@ -826,7 +847,7 @@ describe('Tracker — mtime caching', () => {
       },
     ]);
     await tracker.update();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
     tracker.dispose();
   });
 
@@ -847,7 +868,7 @@ describe('Tracker — mtime caching', () => {
     ]);
     const tracker = new Tracker(STUB_STORAGE_URI);
     await tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
 
     setupFiles([
       {
@@ -858,7 +879,72 @@ describe('Tracker — mtime caching', () => {
       },
     ]);
     await tracker.update();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(2);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    tracker.dispose();
+  });
+});
+
+describe('Tracker — parser state cache', () => {
+  it('creates a non-null parserState and sets lastOffset to content length on first scan', async () => {
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: {
+          interactions: 1,
+          modelUsage: {
+            'gpt-4.1': { ...emptyTokens(), inputTokens: 100 },
+          },
+          modelInteractions: { 'gpt-4.1': 1 },
+        },
+      },
+    ]);
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    // Tagged content the readFileSync mock returns is `{}\n#file=0`.
+    const expectedContent = `{}\n#file=0`;
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown; interactions: number }>;
+    }).fileCache;
+    const entry = cache.get('/sessions/a.jsonl');
+    expect(entry).toBeDefined();
+    expect(entry!.parserState).not.toBeNull();
+    expect(entry!.lastOffset).toBe(expectedContent.length);
+    expect(entry!.interactions).toBe(1);
+
+    // Pipeline was driven once: fresh state, lines applied, then aggregated.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    const [linesArg] = mockParser.applyDeltaLines.mock.calls[0];
+    expect(linesArg).toEqual(['{}', '#file=0']);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+
+    tracker.dispose();
+  });
+
+  it('does not re-run the parser when mtime is unchanged on the next scan', async () => {
+    setupFiles([
+      {
+        path: '/sessions/a.jsonl',
+        mtime: 1000,
+        content: '{}',
+        parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
+      },
+    ]);
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+
+    await tracker.update();
+    // Same mtime → cache hit → no parser activity at all.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.aggregateFromState).toHaveBeenCalledTimes(1);
+
     tracker.dispose();
   });
 });
@@ -894,14 +980,16 @@ describe('Tracker — error handling', () => {
       return { mtimeMs: 1000 } as fs.Stats;
     });
     mockFs.readFileSync.mockReturnValue('{}' as any);
-    mockParser.parseSessionFileContent.mockReturnValue({
+    mockParser.createParserState.mockReturnValue({ sessionState: {} });
+    mockParser.applyDeltaLines.mockImplementation((_lines, state) => state);
+    mockParser.aggregateFromState.mockReturnValue({
       interactions: 0,
       modelUsage: {},
       modelInteractions: {},
     });
     const tracker = new Tracker(STUB_STORAGE_URI);
     await tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     tracker.dispose();
   });
 
@@ -943,7 +1031,7 @@ describe('Tracker — cache persistence across mtime filter', () => {
 
     const tracker = new Tracker(STUB_STORAGE_URI);
     await tracker.initialize();
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
     // Discovery filters the file out (e.g. it aged past sessionMaxAgeDays),
     // but the underlying file is still on disk. statSync still resolves.
@@ -953,7 +1041,7 @@ describe('Tracker — cache persistence across mtime filter', () => {
     // Cached file still consulted via statSync — no re-parse since mtime
     // unchanged, but the file's contribution survives in `current`.
     expect(mockFs.statSync).toHaveBeenCalledWith(aFile);
-    expect(mockParser.parseSessionFileContent).toHaveBeenCalledTimes(1);
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     tracker.dispose();
   });
 

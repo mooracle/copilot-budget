@@ -1,7 +1,13 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { discoverSessionFiles } from './sessionDiscovery';
-import { parseSessionFileContent, ModelUsage } from './sessionParser';
+import {
+  applyDeltaLines,
+  aggregateFromState,
+  createParserState,
+  ModelUsage,
+  ParserState,
+} from './sessionParser';
 import { computeCost } from './tokenRates';
 import { log } from './logger';
 
@@ -42,6 +48,15 @@ interface FileCache {
   interactions: number;
   modelUsage: ModelUsage;
   modelInteractions: { [model: string]: number };
+  // JS string code-unit index (NOT bytes) into the decoded file content
+  // marking the position immediately after the last \n successfully parsed.
+  // Used as the start of the next incremental slice. Resets on truncation.
+  // Mixing byte offsets with string.slice() corrupts on any multi-byte
+  // character, so this must stay string-indexed end-to-end.
+  lastOffset: number;
+  // Cached parser state allowing incremental delta application. Null when
+  // evicted by LRU (Task 4) or before first parse.
+  parserState: ParserState | null;
 }
 
 type StatsListener = (stats: TrackingStats) => void;
@@ -248,8 +263,12 @@ export class Tracker {
       }
 
       let parsed;
+      let parserState: ParserState;
       try {
-        parsed = parseSessionFileContent(content);
+        parserState = createParserState();
+        const lines = content.split(/\r?\n/).filter((l) => l.trim());
+        applyDeltaLines(lines, parserState);
+        parsed = aggregateFromState(parserState);
       } catch {
         log(`scanAll: failed to parse session file: ${file}`);
         continue;
@@ -260,7 +279,12 @@ export class Tracker {
         modelUsage: parsed.modelUsage,
         modelInteractions: parsed.modelInteractions,
       };
-      this.fileCache.set(file, { mtime, ...entry });
+      this.fileCache.set(file, {
+        mtime,
+        ...entry,
+        lastOffset: content.length,
+        parserState,
+      });
       totals.interactions += entry.interactions;
       mergeModelUsage(totals.modelUsage, entry.modelUsage);
       mergeModelInteractions(totals.modelInteractions, entry.modelInteractions);

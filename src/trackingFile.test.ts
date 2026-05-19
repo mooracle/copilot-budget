@@ -736,7 +736,13 @@ describe('trackingFile', () => {
         () => ({ mtimeMs: 1 }) as fs.Stats,
       );
       (fs.readFileSync as jest.Mock).mockReturnValue('{}');
-      (sessionParser.parseSessionFileContent as jest.Mock).mockReturnValue({
+      (sessionParser.createParserState as jest.Mock).mockReturnValue({
+        sessionState: {},
+      });
+      (sessionParser.applyDeltaLines as jest.Mock).mockImplementation(
+        (_lines, state) => state,
+      );
+      (sessionParser.aggregateFromState as jest.Mock).mockReturnValue({
         interactions: 5,
         modelUsage: {
           'gpt-4.1': {
