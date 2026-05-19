@@ -130,12 +130,12 @@ Cap the number of `parserState` objects kept in the cache. Default 3 — covers 
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] verify all goals from Overview: incremental path takes <20ms on a synthetic 10MB chat (manual benchmark with `console.time` in a one-off test, document result inline).
-- [ ] verify all edge cases handled: pending→completed, truncation, partial line, LRU eviction.
-- [ ] run full test suite: `npm test`
-- [ ] run lint: `npm run lint`
-- [ ] run compile: `npm run compile` (esbuild must succeed; bundle size delta should be negligible).
-- [ ] verify no behavior change in `getFileDiagnostics()` output shape (downstream `showDiagnostics` command depends on it).
+- [x] verify all goals from Overview: incremental path takes <20ms on a synthetic 10MB chat. One-off benchmark synthesized a ~10.0MB JSONL session (10,486,233 chars, ~3300 completed requests). Full from-scratch parse: 82.08ms. Incremental tail parse (3 new requests appended): 12.47ms. Re-runs hovered in the 12–17ms range — comfortably under the 20ms ceiling. Benchmark file removed after recording the result.
+- [x] verify all edge cases handled: pending→completed (`tracker.test.ts:1144`), truncation (`tracker.test.ts:1049`), partial line three-scan sequence (`tracker.test.ts:1130`), in-place rewrite (`tracker.test.ts:1078`), multi-byte content (`tracker.test.ts:1185`), LRU eviction (`tracker.test.ts:1222`, `:1278`, `:1300`).
+- [x] run full test suite: `npm test` — 287 tests, 12 suites, all passing.
+- [x] run lint: `npm run lint` — clean (no warnings or errors).
+- [x] run compile: `npm run compile` — esbuild succeeds, bundle is 54,149 bytes (unchanged class — small delta vs. pre-Task-1 baseline).
+- [x] verify no behavior change in `getFileDiagnostics()` output shape (downstream `showDiagnostics` command depends on it). Per-file shape (`{path, mtime, interactions, modelInteractions, modelUsage, inBaseline}`) is unchanged — `tracker.test.ts` has dedicated tests at `:725` (baseline flag), `:1300` (preserved across LRU eviction), and `:1464` (file-deletion eviction).
 
 ### Task 6: Update CLAUDE.md and complete plan
 
