@@ -102,9 +102,14 @@ function setupFiles(
   }));
 
   mockParser.applyDeltaLines.mockImplementation((lines, state) => {
-    const s = state as unknown as { __lines?: string[] };
+    const s = state as unknown as { __lines?: string[]; hasReceivedDelta?: boolean };
     if (!Array.isArray(s.__lines)) s.__lines = [];
     for (const line of lines) s.__lines.push(line);
+    // Mirror the real parser: flip hasReceivedDelta=true once at least one
+    // line has been applied. Tracker uses this flag to decide whether to
+    // preserve incremental state after a full re-parse — without the flip
+    // it would treat every successful parse as "rejected".
+    if (lines.length > 0) s.hasReceivedDelta = true;
     return state;
   });
 
@@ -967,7 +972,14 @@ describe('Tracker — incremental parsing', () => {
     mockParser.createParserState.mockImplementation(() => ({
       sessionState: Object.create(null),
     }));
-    mockParser.applyDeltaLines.mockImplementation((_lines, state) => state);
+    mockParser.applyDeltaLines.mockImplementation((lines, state) => {
+      // Match the real parser's hasReceivedDelta flip so the tracker keeps
+      // the parserState after a successful full re-parse.
+      if (lines.length > 0) {
+        (state as unknown as { hasReceivedDelta?: boolean }).hasReceivedDelta = true;
+      }
+      return state;
+    });
     mockParser.aggregateFromState.mockImplementation(() => {
       const next = aggregates[aggIdx] ?? {
         interactions: 0,
@@ -1265,6 +1277,90 @@ describe('Tracker — incremental parsing', () => {
     expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(scan2.length);
     tracker.dispose();
   });
+
+  it('drops parserState and resets lastOffset when full re-parse rejects the batch', async () => {
+    // Regression: after a corrupted first line, the parser leaves
+    // hasReceivedDelta=false. If the tracker still cached the un-primed
+    // parserState and advanced lastOffset past the bad line, the next mtime
+    // change would take the incremental path and feed only the appended
+    // tail. The parser's still-fresh guard would then accept the first
+    // appended kind:1/kind:2 line and fabricate a requests tree. The tracker
+    // must detect rejection and refuse to cache the state.
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+
+    // Scan 1: simulate rejection — applyDeltaLines does NOT flip
+    // hasReceivedDelta. Aggregate is the empty session (parser returned 0).
+    mockParser.applyDeltaLines.mockImplementationOnce((_lines, state) => state);
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'corrupted\n');
+
+    // Scan 2: file appended. Tracker MUST run full re-parse (not incremental)
+    // since scan 1 dropped the parserState. We simulate the corrupted prefix
+    // still rejecting — the parser's first-line guard rejects again because
+    // the first line is still "corrupted". Same rejection behavior expected.
+    mockParser.applyDeltaLines.mockImplementationOnce((_lines, state) => state);
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    queueScan(2000, 'corrupted\nlater-line\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
+    }).fileCache;
+    // After scan 1's rejection: parserState dropped, lastOffset reset.
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(0);
+
+    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    expect(lru).not.toContain('/sessions/a.jsonl');
+
+    await tracker.update();
+
+    // Scan 2 took the full re-parse path again (parserState was null →
+    // canIncremental=false). createParserState fires a second time; the
+    // call gets the FULL content lines, not just the appended tail.
+    expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'corrupted',
+      'later-line',
+    ]);
+    // Rejected again — parserState still null, lastOffset still 0.
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(0);
+    tracker.dispose();
+  });
+
+  it('clears prior LRU entry when a subsequent full re-parse rejects', async () => {
+    // First scan accepts (state primed → LRU populated). A later in-place
+    // rewrite gets rejected; the LRU entry must be cleared so the slot is
+    // freed for other actively-incrementing files.
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    queueScan(1000, 'good\n');
+    queueScan(2000, 'bad!\n'); // same length → falls to full re-parse branch
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    expect(lru).toContain('/sessions/a.jsonl');
+
+    // Override the second applyDeltaLines call to simulate rejection.
+    mockParser.applyDeltaLines.mockImplementationOnce((_lines, state) => state);
+    await tracker.update();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(0);
+    expect(lru).not.toContain('/sessions/a.jsonl');
+    tracker.dispose();
+  });
 });
 
 describe('Tracker — parserState LRU eviction', () => {
@@ -1433,7 +1529,12 @@ describe('Tracker — error handling', () => {
     });
     mockFs.readFileSync.mockReturnValue('{}' as any);
     mockParser.createParserState.mockReturnValue({ sessionState: {} });
-    mockParser.applyDeltaLines.mockImplementation((_lines, state) => state);
+    mockParser.applyDeltaLines.mockImplementation((lines, state) => {
+      if (lines.length > 0) {
+        (state as unknown as { hasReceivedDelta?: boolean }).hasReceivedDelta = true;
+      }
+      return state;
+    });
     mockParser.aggregateFromState.mockReturnValue({
       interactions: 0,
       modelUsage: {},

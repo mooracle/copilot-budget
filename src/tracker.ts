@@ -298,7 +298,7 @@ export class Tracker {
         cached?.parserState != null && content.length > cached.lastOffset;
 
       let parsed;
-      let parserState: ParserState;
+      let parserState: ParserState | null;
       let nextLastOffset: number;
       try {
         if (canIncremental) {
@@ -326,7 +326,7 @@ export class Tracker {
           nextLastOffset = cached!.lastOffset + lastNewline + 1;
           parsed = aggregateFromState(parserState);
         } else {
-          parserState = createParserState();
+          const freshState = createParserState();
           // Match the incremental branch's atomicity guarantee: only parse
           // lines that are terminated by a \n we have actually seen. If the
           // file ends mid-write, the partial trailing line stays unparsed and
@@ -335,9 +335,24 @@ export class Tracker {
           const lastNewline = content.lastIndexOf('\n');
           const completePrefix = lastNewline < 0 ? '' : content.slice(0, lastNewline + 1);
           const lines = completePrefix.split(/\r?\n/).filter((l) => l.trim());
-          applyDeltaLines(lines, parserState);
-          parsed = aggregateFromState(parserState);
-          nextLastOffset = lastNewline < 0 ? 0 : lastNewline + 1;
+          applyDeltaLines(lines, freshState);
+          parsed = aggregateFromState(freshState);
+          if (freshState.hasReceivedDelta) {
+            parserState = freshState;
+            nextLastOffset = lastNewline < 0 ? 0 : lastNewline + 1;
+          } else {
+            // The parser refused the entire batch (corrupted first line, or
+            // first line isn't a delta object with numeric kind). Caching the
+            // un-primed parserState would let the next mtime change feed only
+            // the appended tail into the incremental path; the still-fresh
+            // guard would then accept the first appended kind:1/kind:2 line
+            // and fabricate a requests tree from a file `main` would keep
+            // rejecting on every scan. Drop the state and reset lastOffset
+            // so subsequent scans repeat the full re-parse (and keep
+            // rejecting until the bad prefix is rewritten).
+            parserState = null;
+            nextLastOffset = 0;
+          }
         }
       } catch {
         log(`scanAll: failed to parse session file: ${file}`);
@@ -355,7 +370,13 @@ export class Tracker {
         lastOffset: nextLastOffset,
         parserState,
       });
-      this.touchParserStateLru(file);
+      if (parserState !== null) {
+        this.touchParserStateLru(file);
+      } else {
+        // Drop from LRU too — a prior successful parse may have inserted us,
+        // but we no longer hold a state worth keeping warm.
+        this.dropParserStateLru(file);
+      }
       totals.interactions += entry.interactions;
       mergeModelUsage(totals.modelUsage, entry.modelUsage);
       mergeModelInteractions(totals.modelInteractions, entry.modelInteractions);
