@@ -5,13 +5,30 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-05-19
+
+Aligns with GitHub Copilot's usage-based billing model (effective 2026-06-01). Premium-request math is gone; cost is now derived from server-reported token counts against the published per-million-token rate card and displayed in AI Credits (AIC; 1 AIC = $0.01).
 
 ### Changed
 
+- Switched from premium-request math to Copilot's usage-based billing model. Cost is derived from server-reported `result.metadata.promptTokens` / `outputTokens` per model against the per-million-token rate card mirrored from `github/docs:data/tables/copilot/models-and-pricing.yml`. When per-message cache split is missing, a 75%-cached-after-turn-1 heuristic is applied.
+- AI Credits (AIC; 1 AIC = $0.01) is now the sole cost unit in all in-extension surfaces. Status bar shows integer AIC (ceil-rounded, no "Est" suffix); tooltip, quick pick, and diagnostics output show AIC only. USD is removed from every user-facing surface.
+- Rate card USD → AIC conversion happens once at load time in `tokenRates.ts`; `computeCost()` returns AIC directly. The on-disk `data/models-and-pricing.yml` is unchanged (still a byte-identical mirror of upstream USD).
+- Rate card is baked at build time: `esbuild.js` converts `data/models-and-pricing.yml` to `dist/models-and-pricing.json` and `tokenRates.ts` loads via `JSON.parse`. `js-yaml` is dev-only and ships nothing in the runtime bundle.
+- `Copilot-Est-Cost` USD trailer default flipped from on to off. Users who want USD in commit history must explicitly set `copilot-budget.commitHook.trailers.estimatedCost`. When enabled, the USD value is derived inline from AIC ÷ 100 at trailer-write time.
+- Tracking file (`<gitdir>/copilot-budget`) schema replaced. New schema records `SINCE`, `INTERACTIONS`, `TOTAL_AI_CREDITS`, and per-model `MODEL_<name>_{INPUT,OUTPUT,CACHE_READ,CACHE_CREATION}_TOKENS` plus `_COST_AIC` lines. `TOTAL_COST_USD` and per-model `_COST_USD` keys are removed.
 - Session discovery is now window-scoped. Each VS Code window scans only its own `workspaceStorage/<hash>/chatSessions/` (derived from `context.storageUri`) instead of every VS Code variant and every workspace globally. Single-window users see no change; multi-window users stop double-counting the same chats across windows.
-- Empty windows (no folder open) now render a `$(circle-slash) Copilot Budget` status bar with a "no workspace" tooltip. No session scanning is performed, no tracking file is written, and the commit hook is not auto-installed. The five commands stay registered: `showDiagnostics` still prints platform/path info; the other four surface an "open a folder" info message.
+- Empty windows (no folder open) render a `$(circle-slash) Copilot Budget` status bar with a "no workspace" tooltip. No session scanning is performed, no tracking file is written, and the commit hook is not auto-installed. Commands stay registered: `showDiagnostics` still prints platform/path info; the others surface an "open a folder" info message.
+- Polling interval dropped from 120s to 30s so per-commit attribution reflects recent activity without waiting on the next cycle.
+- Both status bar items now carry a stable id (`copilot-budget.statusBar`) and display name (`Copilot Budget`) so VS Code's status bar visibility menu shows a labeled entry.
+- Tooltip and quick pick no longer carry the heuristic-estimate disclosure line; the breakdown speaks for itself.
 - `getDiscoveryDiagnostics()` output shape changed: the old `candidatePaths` list is replaced with `storageUri` and `chatSessionsDir` fields (both `null` in the empty-window state).
+
+### Added
+
+- `Copilot-AI-Credits` git trailer (default-on) — the plan-invariant metric, equal to the AIC cost computed from tokens × per-model rate.
+- `Copilot-AI-Credits-Models` git trailer (opt-in) — per-model AI Credits breakdown, sorted by descending credits, using display names from the upstream rate card.
+- `Copilot Budget: Toggle Commit Hook` command — the quick pick exposes a single `Commit-Hook: ON|OFF` row that flips `copilot-budget.commitHook.enabled` and installs/uninstalls the hook in one click.
 
 ### Fixed
 
@@ -19,41 +36,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Premium-request tracking and the `Copilot-Premium-Requests` trailer (no compatibility shim).
+- Per-model `Copilot-Model` trailer.
+- `copilot-budget.plan` setting and GitHub Copilot plan auto-detection (no longer needed under usage-based billing).
+- Character-based token estimation (`tokenEstimators.json`); tokens are now read from session JSONL metadata directly.
+- USD from status bar text, tooltip, quick pick, diagnostics output, and tracking file. USD survives only as the opt-in `Copilot-Est-Cost` trailer.
 - SQLite/vscdb session reader. VS Code now writes all chat sessions to JSONL files; reading them is sufficient. The `sql.js` dependency and `sql-wasm.wasm` binary are gone, reducing bundle size by ~500 KB. Sessions that exist only in legacy `state.vscdb interactive.sessions` (never migrated to JSONL) are no longer attributed; on current VS Code installs these are months-old duplicates of JSONL sessions, so per-commit attribution is unaffected.
+- Runtime `js-yaml` dependency (moved to devDependencies; YAML → JSON conversion happens at build time).
+
+### Breaking
+
+- Upgrading from 0.5.x discards the previous tracking file. The counter starts fresh on first launch; pre-1.0 tracking data (premium requests, $0.04/request cost) is not convertible to AIC and is intentionally not migrated.
+- The `commitHook.trailers.premiumRequests` and `commitHook.trailers.model` settings are removed.
+- The `commitHook.trailers.estimatedCost` setting now defaults to `false`. Users relying on the `Copilot-Est-Cost` trailer in CI/scripts must explicitly enable it by setting the value to `"Copilot-Est-Cost"` (or any custom trailer name).
 
 ### Upgrade Notes
 
 - Same-repo dual-window still has last-writer-wins on `<gitdir>/copilot-budget` (two windows on the same folder share a `workspaceStorage` hash, so they share a `chatSessions/` directory and tracking-file path). Pre-existing risk, out of scope for window-scoping.
 - Existing `<gitdir>/copilot-budget` files written by the pre-fix global scanner are restored on first activation and may carry inflated numbers from cross-window pollution. Run *Copilot Budget: Reset Tracking* to zero them if accuracy matters for the next commit.
-
-## [0.6.0] - 2026-05-14
-
-### Changed
-
-- Switched from premium-request math to GitHub Copilot's usage-based billing model (effective 2026-06-01). Cost is now derived from server-reported `result.metadata.promptTokens` / `outputTokens` per model against the published per-million-token rate card mirrored from `github/docs:data/tables/copilot/models-and-pricing.yml`. When per-message cache split is missing, a 75%-cached-after-turn-1 heuristic is applied.
-- AI Credits (AIC; 1 AIC = $0.01) is now the sole cost unit in all in-extension surfaces. Status bar shows integer AIC (ceil-rounded, no "Est" suffix); tooltip, quick pick, and diagnostics output show AIC only. USD is removed from every user-facing surface.
-- Rate card USD → AIC conversion happens once at load time in `tokenRates.ts`; `computeCost()` returns AIC directly. The on-disk `data/models-and-pricing.yml` is unchanged (still a byte-identical mirror of upstream USD).
-- `Copilot-Est-Cost` USD trailer default flipped from on to off. Users who want USD in commit history must explicitly set `copilot-budget.commitHook.trailers.estimatedCost`. When enabled, the USD value is derived inline from AIC ÷ 100 at trailer-write time.
-- Tracking file (`<gitdir>/copilot-budget`) schema replaced. New schema records `SINCE`, `INTERACTIONS`, `TOTAL_AI_CREDITS`, and per-model `MODEL_<name>_{INPUT,OUTPUT,CACHE_READ,CACHE_CREATION}_TOKENS` plus `_COST_AIC` lines. `TOTAL_COST_USD` and per-model `_COST_USD` keys are removed; pre-flip 0.6.x dev-host tracking files are tolerated on parse (legacy USD keys are silently ignored and cost is re-derived from tokens on the next scan).
-
-### Added
-
-- `Copilot-AI-Credits` git trailer (default-on) — the plan-invariant metric, equal to the AIC cost computed from tokens × per-model rate.
-- `Copilot-AI-Credits-Models` git trailer (opt-in) — per-model AI Credits breakdown, sorted by descending credits, using display names from the upstream rate card.
-
-### Removed
-
-- Premium-request tracking and `Copilot-Premium-Requests` trailer (no compatibility shim).
-- Per-model `Copilot-Model` trailer.
-- `copilot-budget.plan` setting and GitHub Copilot plan auto-detection (no longer needed under usage-based billing).
-- Character-based token estimation (`tokenEstimators.json`); tokens are now read from the session JSONL metadata directly.
-- USD from status bar text, tooltip, quick pick, diagnostics output, and tracking file. USD survives only as the opt-in `Copilot-Est-Cost` trailer.
-
-### Breaking
-
-- Upgrading from 0.5.x discards the previous tracking file. The counter starts fresh on first launch; pre-0.6 tracking data (premium requests, $0.04/request cost) is not convertible to AIC and is intentionally not migrated.
-- The `commitHook.trailers.premiumRequests` and `commitHook.trailers.model` settings are removed.
-- The `commitHook.trailers.estimatedCost` setting now defaults to `false`. Users relying on the `Copilot-Est-Cost` trailer in CI/scripts must explicitly enable it by setting the value to `"Copilot-Est-Cost"` (or any custom trailer name).
 
 ## [0.5.3] - 2026-03-03
 
