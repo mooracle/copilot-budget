@@ -5,27 +5,21 @@ jest.mock('./commitHook');
 jest.mock('./config');
 jest.mock('./logger');
 jest.mock('./sessionDiscovery');
-jest.mock('./sqliteReader');
-jest.mock('./planDetector');
 
 import * as vscode from 'vscode';
-import { __commandCallbacks } from './__mocks__/vscode';
+import { __commandCallbacks, createMockExtensionContext } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
 import { Tracker } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
-import { writeTrackingFile, readTrackingFile } from './trackingFile';
+import {
+  writeTrackingFile,
+  readTrackingFile,
+  isTrackingFileTruncated,
+} from './trackingFile';
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
 import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
 import { getDiscoveryDiagnostics } from './sessionDiscovery';
 import { getOutputChannel, disposeLogger } from './logger';
-import { initSqlite, disposeSqlite } from './sqliteReader';
-import {
-  detectPlan,
-  getPlanInfo,
-  onPlanChanged,
-  startPeriodicRefresh,
-  disposePlanDetector,
-} from './planDetector';
 
 const MockTracker = Tracker as jest.MockedClass<typeof Tracker>;
 const mockCreateStatusBar = createStatusBar as jest.MockedFunction<
@@ -39,6 +33,9 @@ const mockWriteTrackingFile = writeTrackingFile as jest.MockedFunction<
 >;
 const mockReadTrackingFile = readTrackingFile as jest.MockedFunction<
   typeof readTrackingFile
+>;
+const mockIsTrackingFileTruncated = isTrackingFileTruncated as jest.MockedFunction<
+  typeof isTrackingFileTruncated
 >;
 const mockInstallHook = installHook as jest.MockedFunction<typeof installHook>;
 const mockUninstallHook = uninstallHook as jest.MockedFunction<
@@ -63,29 +60,39 @@ const mockGetOutputChannel = getOutputChannel as jest.MockedFunction<
 const mockDisposeLogger = disposeLogger as jest.MockedFunction<
   typeof disposeLogger
 >;
-const mockInitSqlite = initSqlite as jest.MockedFunction<typeof initSqlite>;
-const _mockDisposeSqlite = disposeSqlite as jest.MockedFunction<
-  typeof disposeSqlite
->;
-const mockDetectPlan = detectPlan as jest.MockedFunction<typeof detectPlan>;
-const mockGetPlanInfo = getPlanInfo as jest.MockedFunction<typeof getPlanInfo>;
-const mockOnPlanChanged = onPlanChanged as jest.MockedFunction<typeof onPlanChanged>;
-const mockStartPeriodicRefresh = startPeriodicRefresh as jest.MockedFunction<typeof startPeriodicRefresh>;
-const mockDisposePlanDetector = disposePlanDetector as jest.MockedFunction<typeof disposePlanDetector>;
 
 function makeContext(): vscode.ExtensionContext {
-  return {
-    subscriptions: [],
-    extensionPath: '/test',
-    globalState: { get: () => undefined, update: async () => {} },
-    workspaceState: { get: () => undefined, update: async () => {} },
-    extensionUri: { fsPath: '/test' },
-  } as any;
+  return createMockExtensionContext({
+    storageUri: vscode.Uri.file(
+      '/test/workspaceStorage/abc123/mooracle.copilot-budget',
+    ),
+  }) as vscode.ExtensionContext;
+}
+
+function makeEmptyWindowContext(): vscode.ExtensionContext {
+  return createMockExtensionContext({}) as vscode.ExtensionContext;
 }
 
 let trackerInstance: any;
 let statsChangedListeners: Array<(stats: any) => void>;
 let configChangedCallback: ((e: any) => void) | null;
+
+const SAMPLE_STATS = {
+  since: '2024-01-01T00:00:00Z',
+  lastUpdated: '2024-01-01T01:00:00Z',
+  models: {
+    'gpt-4o': {
+      inputTokens: 100,
+      outputTokens: 200,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costAic: 1.0,
+    },
+  },
+  totalTokens: 300,
+  interactions: 5,
+  totalAiCredits: 1.0,
+};
 
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -99,19 +106,12 @@ beforeEach(async () => {
     start: jest.fn(),
     stop: jest.fn(),
     reset: jest.fn(),
+    consume: jest.fn(),
     update: jest.fn(),
     dispose: jest.fn(),
-    setPlanInfoProvider: jest.fn(),
     setPreviousStats: jest.fn(),
-    getStats: jest.fn().mockReturnValue({
-      since: '2024-01-01T00:00:00Z',
-      lastUpdated: '2024-01-01T01:00:00Z',
-      models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 1 } },
-      totalTokens: 300,
-      interactions: 5,
-      premiumRequests: 1,
-      estimatedCost: 0.04,
-    }),
+    getStats: jest.fn().mockReturnValue(SAMPLE_STATS),
+    getFileDiagnostics: jest.fn().mockReturnValue([]),
     onStatsChanged: jest.fn((listener: any) => {
       statsChangedListeners.push(listener);
       return {
@@ -127,12 +127,14 @@ beforeEach(async () => {
 
   const mockStatusBarItem = {
     dispose: jest.fn(),
+    refresh: jest.fn(),
     item: { text: '', dispose: jest.fn() },
   };
   mockCreateStatusBar.mockReturnValue(mockStatusBarItem as any);
   mockShowStatsQuickPick.mockResolvedValue(undefined);
   mockWriteTrackingFile.mockResolvedValue(true);
-  mockReadTrackingFile.mockResolvedValue(null);
+  mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
+  mockIsTrackingFileTruncated.mockResolvedValue(false);
   mockInstallHook.mockResolvedValue(true);
   mockUninstallHook.mockResolvedValue(true);
   mockIsHookInstalled.mockResolvedValue(false);
@@ -145,12 +147,9 @@ beforeEach(async () => {
   mockGetDiscoveryDiagnostics.mockReturnValue({
     platform: 'darwin',
     homedir: '/home/test',
-    candidatePaths: [
-      { path: '/home/test/.config/Code/User', exists: true },
-      { path: '/home/test/.config/Code - Insiders/User', exists: false },
-    ],
-    filesFound: ['/home/test/.config/Code/User/globalStorage/github.copilot-chat/sessions/test.json'],
-    vscdbFilesFound: [],
+    storageUri: '/home/test/.config/Code/User/workspaceStorage/abc123/mooracle.copilot-budget',
+    chatSessionsDir: '/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions',
+    filesFound: ['/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions/test.jsonl'],
   });
   mockGetOutputChannel.mockReturnValue({
     appendLine: jest.fn(),
@@ -161,18 +160,6 @@ beforeEach(async () => {
     dispose: jest.fn(),
     name: 'Copilot Budget',
   } as any);
-  mockInitSqlite.mockResolvedValue(true);
-  mockDetectPlan.mockResolvedValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockGetPlanInfo.mockReturnValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockOnPlanChanged.mockImplementation(() => ({ dispose: jest.fn() }));
 
   // Reset module-level state by calling deactivate
   await deactivate();
@@ -181,6 +168,7 @@ beforeEach(async () => {
   MockTracker.mockImplementation(() => trackerInstance);
   mockCreateStatusBar.mockReturnValue({
     dispose: jest.fn(),
+    refresh: jest.fn(),
     item: { text: '', dispose: jest.fn() },
   } as any);
   mockIsEnabled.mockReturnValue(true);
@@ -190,20 +178,9 @@ beforeEach(async () => {
     return { dispose: jest.fn() };
   });
   mockWriteTrackingFile.mockResolvedValue(true);
-  mockReadTrackingFile.mockResolvedValue(null);
+  mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
+  mockIsTrackingFileTruncated.mockResolvedValue(false);
   mockIsHookInstalled.mockResolvedValue(false);
-  mockInitSqlite.mockResolvedValue(true);
-  mockDetectPlan.mockResolvedValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockGetPlanInfo.mockReturnValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  });
-  mockOnPlanChanged.mockImplementation(() => ({ dispose: jest.fn() }));
   trackerInstance.onStatsChanged = jest.fn((listener: any) => {
     statsChangedListeners = [];
     statsChangedListeners.push(listener);
@@ -214,15 +191,7 @@ beforeEach(async () => {
       },
     };
   });
-  trackerInstance.getStats.mockReturnValue({
-    since: '2024-01-01T00:00:00Z',
-    lastUpdated: '2024-01-01T01:00:00Z',
-    models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 1 } },
-    totalTokens: 300,
-    interactions: 5,
-    premiumRequests: 1,
-    estimatedCost: 0.04,
-  });
+  trackerInstance.getStats.mockReturnValue(SAMPLE_STATS);
 });
 
 describe('extension', () => {
@@ -246,8 +215,8 @@ describe('extension', () => {
       await activate(ctx);
       expect(MockTracker).not.toHaveBeenCalled();
       expect(mockCreateStatusBar).not.toHaveBeenCalled();
-      // 5 stub commands registered so users get a helpful message
-      expect(ctx.subscriptions.length).toBe(5);
+      // 6 stub commands registered so users get a helpful message
+      expect(ctx.subscriptions.length).toBe(6);
     });
 
     it('writes tracking file when stats change', async () => {
@@ -260,8 +229,84 @@ describe('extension', () => {
         totalTokens: 500,
         interactions: 3,
       };
+      trackerInstance.getStats.mockReturnValue(stats);
       statsChangedListeners[0](stats);
+      // checkCommitReset → then → writeTrackingFile; flush microtasks
+      await Promise.resolve();
+      await Promise.resolve();
       expect(mockWriteTrackingFile).toHaveBeenCalledWith(stats);
+    });
+
+    it('listener writes the fresh tracker.getStats() post-await, not the closure-captured stats', async () => {
+      // If the user resets (or the tracker otherwise updates) while
+      // checkCommitReset is suspended on its stat probe, the listener must
+      // write the current state, not the stale snapshot it was originally
+      // called with. Re-reading tracker.getStats() post-await is what makes
+      // this safe — no separate reset fence required.
+      let resolveTruncated: (val: boolean) => void = () => {};
+      mockIsTrackingFileTruncated.mockImplementation(
+        () => new Promise<boolean>((resolve) => { resolveTruncated = resolve; }),
+      );
+
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+
+      const stale = {
+        since: '2024-01-01', lastUpdated: '2024-01-01',
+        models: {}, totalTokens: 999, interactions: 99,
+      };
+      const fresh = {
+        since: '2024-02-01', lastUpdated: '2024-02-01',
+        models: {}, totalTokens: 0, interactions: 0,
+      };
+      trackerInstance.getStats.mockReturnValue(stale);
+      statsChangedListeners[0](stale);
+      await Promise.resolve();
+
+      // Reset lands while checkCommitReset is awaiting. Tracker now returns
+      // fresh stats; release the probe.
+      trackerInstance.getStats.mockReturnValue(fresh);
+      resolveTruncated(false);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(fresh);
+      expect(mockWriteTrackingFile).not.toHaveBeenCalledWith(stale);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+    });
+
+    it('rebases tracker via consume() and skips stale write when stats change after hook truncation', async () => {
+      // After the hook truncates the file, the next stats-change must rebase
+      // the tracker (so the consumed cumulative cost is dropped from the
+      // baseline) and must NOT write the pre-rebase stats back over the
+      // freshly written post-rebase file — otherwise the next commit gets a
+      // duplicate trailer. consume() (not reset()) preserves any post-commit
+      // activity in the new delta instead of absorbing it into the baseline.
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+
+      const staleStats = {
+        since: '2024-01-01',
+        lastUpdated: '2024-01-01',
+        models: {},
+        totalTokens: 500,
+        interactions: 3,
+      };
+      statsChangedListeners[0](staleStats);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.reset).not.toHaveBeenCalled();
+      // checkCommitReset writes the fresh post-rebase stats once; the
+      // listener must NOT additionally write `staleStats`.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalledWith(staleStats);
     });
 
     it('periodically re-writes tracking file even when stats unchanged', async () => {
@@ -270,13 +315,132 @@ describe('extension', () => {
       await activate(ctx);
       mockWriteTrackingFile.mockClear();
 
-      // Advance past one 120s interval
-      jest.advanceTimersByTime(120_000);
+      // Advance past one 5s interval (the truncation-detect / refresh poll)
+      jest.advanceTimersByTime(5_000);
+      // Drain microtasks chained behind the timer's async callback
+      await Promise.resolve();
+      await Promise.resolve();
       expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
 
       // Clean up: dispose subscriptions to clear the interval
       for (const sub of ctx.subscriptions) sub.dispose();
       jest.useRealTimers();
+    });
+
+    it('rebases tracker via consume() on the 5s poll when truncation is detected', async () => {
+      jest.useFakeTimers();
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+      trackerInstance.consume.mockClear();
+      trackerInstance.reset.mockClear();
+
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.reset).not.toHaveBeenCalled();
+      // checkCommitReset writes the post-rebase stats; the timer's own write
+      // must be skipped (wasReset=true).
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(1);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('serializes overlapping truncation checks so a concurrent caller cannot write pre-consume stats', async () => {
+      // Race scenario: a stats-change listener starts checkCommitReset and
+      // suspends on isTrackingFileTruncated. While suspended, the 5s poll
+      // fires a second checkCommitReset. With a boolean guard, the second
+      // call would return false immediately and write `tracker.getStats()`
+      // (still pre-consume at that microtask point), racing the first call's
+      // post-consume write. The promise-cached check makes both callers
+      // share the same in-flight result so consume() runs exactly once and
+      // no pre-consume snapshot is written.
+      jest.useFakeTimers();
+      let resolveTruncated: (val: boolean) => void = () => {};
+      mockIsTrackingFileTruncated.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveTruncated = resolve;
+          }),
+      );
+
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+      trackerInstance.consume.mockClear();
+
+      // Fire the stats-change listener first — this kicks off checkCommitReset
+      // which suspends awaiting isTrackingFileTruncated.
+      const staleStats = {
+        since: '2024-01-01',
+        lastUpdated: '2024-01-01',
+        models: {},
+        totalTokens: 500,
+        interactions: 3,
+      };
+      statsChangedListeners[0](staleStats);
+      await Promise.resolve();
+
+      // Now advance the 5s timer while the first check is still suspended.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+
+      // Release the truncation check.
+      resolveTruncated(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // consume() must run exactly once across both overlapping checks.
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      // Neither overlapping caller may write its captured snapshot — both
+      // share the in-flight check's result (wasReset=true) and skip.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalledWith(staleStats);
+      // Only the single post-rebase write from inside checkCommitReset
+      // reaches the filesystem.
+      expect(mockWriteTrackingFile).toHaveBeenCalledTimes(1);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('overwrites the tracking file on activation when it contains legacy v0.5.x content', async () => {
+      mockReadTrackingFile.mockResolvedValue({ kind: 'legacy' });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
+    });
+
+    it('does NOT overwrite the tracking file on activation when read returns absent (could be transient I/O error)', async () => {
+      mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      // The onStatsChanged listener may still fire later; the activation
+      // path itself must not synchronously write zeros.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+    });
+
+    it('does NOT overwrite the tracking file on activation when read succeeds with valid stats', async () => {
+      mockReadTrackingFile.mockResolvedValue({
+        kind: 'restored',
+        stats: {
+          since: '2024-01-01T00:00:00Z',
+          interactions: 5,
+          models: {},
+        },
+      });
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
     });
 
     it('auto-installs hook when commitHook.enabled is true and workspace exists', async () => {
@@ -316,97 +480,21 @@ describe('extension', () => {
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
     });
 
-    it('calls initSqlite before starting tracker', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockInitSqlite).toHaveBeenCalledTimes(1);
-      // initSqlite should be called before tracker.start
-      const initOrder = mockInitSqlite.mock.invocationCallOrder[0];
-      const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
-      expect(initOrder).toBeLessThan(startOrder);
-    });
-
-    it('does not call initSqlite when disabled', async () => {
-      mockIsEnabled.mockReturnValue(false);
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockInitSqlite).not.toHaveBeenCalled();
-    });
-
-    it('continues when initSqlite returns false', async () => {
-      mockInitSqlite.mockResolvedValue(false);
-      const ctx = makeContext();
-      await activate(ctx);
-      // Tracker should still be created and started
-      expect(MockTracker).toHaveBeenCalledTimes(1);
-      expect(trackerInstance.start).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls detectPlan before tracker.start', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockDetectPlan).toHaveBeenCalledTimes(1);
-      const detectOrder = mockDetectPlan.mock.invocationCallOrder[0];
-      const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
-      expect(detectOrder).toBeLessThan(startOrder);
-    });
-
-    it('sets plan info provider on tracker', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(trackerInstance.setPlanInfoProvider).toHaveBeenCalledWith(mockGetPlanInfo);
-    });
-
-    it('starts periodic plan refresh', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockStartPeriodicRefresh).toHaveBeenCalledTimes(1);
-    });
-
-    it('subscribes to plan changes', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockOnPlanChanged).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls tracker.update when plan changes', async () => {
-      let planChangeListener: (() => void) | null = null;
-      mockOnPlanChanged.mockImplementation((listener: any) => {
-        planChangeListener = listener;
-        return { dispose: jest.fn() };
-      });
-
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(planChangeListener).not.toBeNull();
-
-      planChangeListener!();
-      expect(trackerInstance.update).toHaveBeenCalledTimes(1);
-    });
-
-    it('re-detects plan on config change', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      mockDetectPlan.mockClear();
-
-      configChangedCallback!({} as any);
-      expect(mockDetectPlan).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not call detectPlan when disabled', async () => {
-      mockIsEnabled.mockReturnValue(false);
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockDetectPlan).not.toHaveBeenCalled();
-    });
-
     it('restores previous stats from tracking file', async () => {
       const restored = {
         since: '2024-01-01T00:00:00Z',
         interactions: 5,
-        models: { 'gpt-4o': { inputTokens: 100, outputTokens: 200, premiumRequests: 5 } },
+        models: {
+          'gpt-4o': {
+            inputTokens: 100,
+            outputTokens: 200,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costAic: 0,
+          },
+        },
       };
-      mockReadTrackingFile.mockResolvedValue(restored);
+      mockReadTrackingFile.mockResolvedValue({ kind: 'restored', stats: restored });
 
       const ctx = makeContext();
       await activate(ctx);
@@ -415,8 +503,8 @@ describe('extension', () => {
       expect(trackerInstance.setPreviousStats).toHaveBeenCalledWith(restored);
     });
 
-    it('does not call setPreviousStats when readTrackingFile returns null', async () => {
-      mockReadTrackingFile.mockResolvedValue(null);
+    it('does not call setPreviousStats when readTrackingFile returns absent', async () => {
+      mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
 
       const ctx = makeContext();
       await activate(ctx);
@@ -425,17 +513,159 @@ describe('extension', () => {
       expect(trackerInstance.setPreviousStats).not.toHaveBeenCalled();
     });
 
-    it('calls readTrackingFile after setPlanInfoProvider and before start', async () => {
-      mockReadTrackingFile.mockResolvedValue(null);
+    it('calls readTrackingFile before tracker.start', async () => {
+      mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
 
       const ctx = makeContext();
       await activate(ctx);
 
-      const providerOrder = trackerInstance.setPlanInfoProvider.mock.invocationCallOrder[0];
       const readOrder = mockReadTrackingFile.mock.invocationCallOrder[0];
       const startOrder = trackerInstance.start.mock.invocationCallOrder[0];
-      expect(providerOrder).toBeLessThan(readOrder);
       expect(readOrder).toBeLessThan(startOrder);
+    });
+
+    it('passes context.storageUri to the Tracker constructor', async () => {
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(MockTracker).toHaveBeenCalledWith(ctx.storageUri);
+    });
+  });
+
+  describe('empty-window activation (storageUri undefined)', () => {
+    it('does not construct a Tracker', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(MockTracker).not.toHaveBeenCalled();
+    });
+
+    it('does not call readTrackingFile or writeTrackingFile', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(mockReadTrackingFile).not.toHaveBeenCalled();
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+    });
+
+    it('does not call createStatusBar (uses a static status bar instead)', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(mockCreateStatusBar).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-install the commit hook even if enabled', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(true);
+      (vscode as any).workspace.workspaceFolders = [
+        { uri: vscode.Uri.file('/project'), name: 'test', index: 0 },
+      ];
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+      expect(mockInstallHook).not.toHaveBeenCalled();
+    });
+
+    it('registers a static status bar item with the no-workspace text/tooltip', async () => {
+      const createStatusBarItem = jest.spyOn(vscode.window, 'createStatusBarItem');
+      const fakeItem: any = {
+        text: '',
+        tooltip: '',
+        command: '',
+        name: '',
+        show: jest.fn(),
+        hide: jest.fn(),
+        dispose: jest.fn(),
+      };
+      createStatusBarItem.mockReturnValue(fakeItem);
+
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      expect(createStatusBarItem).toHaveBeenCalledWith(
+        'copilot-budget.statusBar',
+        vscode.StatusBarAlignment.Right,
+        100,
+      );
+      expect(fakeItem.name).toBe('Copilot Budget');
+      expect(fakeItem.text).toBe('$(circle-slash) Copilot Budget');
+      expect(fakeItem.tooltip).toBe(
+        'No workspace open — open a folder to track Copilot usage.',
+      );
+      expect(fakeItem.command).toBe('copilot-budget.showDiagnostics');
+      expect(fakeItem.show).toHaveBeenCalled();
+      expect(ctx.subscriptions).toContain(fakeItem);
+
+      createStatusBarItem.mockRestore();
+    });
+
+    it('registers all 5 commands; non-diagnostics ones surface an info message', async () => {
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      for (const cmd of [
+        'copilot-budget.showStats',
+        'copilot-budget.resetTracking',
+        'copilot-budget.installHook',
+        'copilot-budget.uninstallHook',
+        'copilot-budget.showDiagnostics',
+      ]) {
+        expect(typeof __commandCallbacks[cmd]).toBe('function');
+      }
+
+      const showInfo = vscode.window.showInformationMessage as jest.Mock;
+      showInfo.mockClear();
+      __commandCallbacks['copilot-budget.showStats']();
+      __commandCallbacks['copilot-budget.resetTracking']();
+      __commandCallbacks['copilot-budget.installHook']();
+      __commandCallbacks['copilot-budget.uninstallHook']();
+      expect(showInfo).toHaveBeenCalledTimes(4);
+      for (const call of showInfo.mock.calls) {
+        expect(call[0]).toMatch(/no workspace open/i);
+      }
+      expect(mockInstallHook).not.toHaveBeenCalled();
+      expect(mockUninstallHook).not.toHaveBeenCalled();
+      expect(mockShowStatsQuickPick).not.toHaveBeenCalled();
+    });
+
+    it('showDiagnostics works in empty-window mode and passes undefined storageUri', async () => {
+      mockGetDiscoveryDiagnostics.mockReturnValueOnce({
+        platform: 'darwin',
+        homedir: '/home/test',
+        storageUri: null,
+        chatSessionsDir: null,
+        filesFound: [],
+      });
+
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      const mockChannel = mockGetOutputChannel();
+      __commandCallbacks['copilot-budget.showDiagnostics']();
+
+      expect(mockGetDiscoveryDiagnostics).toHaveBeenCalledWith(undefined);
+      const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
+        (c: any[]) => c[0],
+      );
+      expect(appendCalls).toContain('Storage URI: (none — empty window)');
+      expect(appendCalls).toContain('Chat sessions dir: (none — empty window)');
+      expect(mockChannel.show).toHaveBeenCalled();
+    });
+
+    it('disposes the empty-window status bar on deactivate', async () => {
+      const createStatusBarItem = jest.spyOn(vscode.window, 'createStatusBarItem');
+      const dispose = jest.fn();
+      createStatusBarItem.mockReturnValue({
+        text: '',
+        tooltip: '',
+        command: '',
+        show: jest.fn(),
+        hide: jest.fn(),
+        dispose,
+      } as any);
+
+      const ctx = makeEmptyWindowContext();
+      await activate(ctx);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      expect(dispose).toHaveBeenCalled();
+
+      createStatusBarItem.mockRestore();
     });
   });
 
@@ -479,12 +709,12 @@ describe('extension', () => {
       const mockChannel = mockGetOutputChannel();
       __commandCallbacks['copilot-budget.showDiagnostics']();
 
-      expect(mockGetDiscoveryDiagnostics).toHaveBeenCalled();
+      expect(mockGetDiscoveryDiagnostics).toHaveBeenCalledWith(ctx.storageUri);
       expect(mockChannel.appendLine).toHaveBeenCalled();
       expect(mockChannel.show).toHaveBeenCalled();
     });
 
-    it('showDiagnostics command displays premium requests and estimated cost', async () => {
+    it('showDiagnostics command displays AI credits without USD cost', async () => {
       const ctx = makeContext();
       await activate(ctx);
 
@@ -494,16 +724,13 @@ describe('extension', () => {
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
         (c: any[]) => c[0],
       );
-      expect(appendCalls).toContain('  Premium requests: 1.00');
-      expect(appendCalls).toContain('  Estimated cost: $0.04');
+      for (const line of appendCalls) {
+        expect(line).not.toMatch(/Total cost:/);
+      }
+      expect(appendCalls).toContain('  AI Credits: 1.00');
     });
 
-    it('showDiagnostics command displays plan info', async () => {
-      mockGetPlanInfo.mockReturnValue({
-        planName: 'pro',
-        costPerRequest: 10 / 300,
-        source: 'api',
-      });
+    it('showDiagnostics does not display plan info', async () => {
       const ctx = makeContext();
       await activate(ctx);
 
@@ -513,32 +740,13 @@ describe('extension', () => {
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
         (c: any[]) => c[0],
       );
-      expect(appendCalls).toContain('Plan detection:');
-      expect(appendCalls).toContain('  Plan: pro');
-      expect(appendCalls).toContain(`  Cost per request: $${(10 / 300).toFixed(4)}`);
-      expect(appendCalls).toContain('  Source: api');
+      expect(appendCalls).not.toContain('Plan detection:');
+      for (const line of appendCalls) {
+        expect(line).not.toMatch(/Premium requests/);
+        expect(line).not.toMatch(/Estimated cost/);
+      }
     });
 
-    it('showDiagnostics command displays vscdb file info', async () => {
-      mockGetDiscoveryDiagnostics.mockReturnValue({
-        platform: 'darwin',
-        homedir: '/home/test',
-        candidatePaths: [],
-        filesFound: [],
-        vscdbFilesFound: ['/path/to/state.vscdb'],
-      });
-      const ctx = makeContext();
-      await activate(ctx);
-
-      const mockChannel = mockGetOutputChannel();
-      __commandCallbacks['copilot-budget.showDiagnostics']();
-
-      const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
-        (c: any[]) => c[0],
-      );
-      expect(appendCalls).toContain('Vscdb files found: 1');
-      expect(appendCalls).toContain('  /path/to/state.vscdb');
-    });
   });
 
   describe('deactivate', () => {
@@ -562,6 +770,7 @@ describe('extension', () => {
       const disposeFn = jest.fn();
       mockCreateStatusBar.mockReturnValue({
         dispose: disposeFn,
+        refresh: jest.fn(),
         item: { text: '', dispose: jest.fn() },
       } as any);
 
@@ -588,14 +797,6 @@ describe('extension', () => {
       await activate(ctx);
       await deactivate();
       expect(mockDisposeLogger).toHaveBeenCalled();
-    });
-
-    it('calls disposePlanDetector on deactivate', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      mockDisposePlanDetector.mockClear();
-      await deactivate();
-      expect(mockDisposePlanDetector).toHaveBeenCalledTimes(1);
     });
 
   });

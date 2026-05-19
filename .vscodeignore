@@ -8,12 +8,14 @@ tsconfig.json
 esbuild.js
 **/*.map
 **/*.ts
-!dist/**
+!dist/extension.js
+!dist/models-and-pricing.json
 .ralphex/**
 plan.md
 coverage/**
 *.vsix
 jest.config.js
+jest.globalSetup.js
 **/*.test.*
 .claude/**
 CLAUDE.md
@@ -21,3 +23,6 @@ CLAUDE.md
 eslint.config.mjs
 .nvmrc
 assets/icon.svg
+docs/**
+scripts/**
+data/**

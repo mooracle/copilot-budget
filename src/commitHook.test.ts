@@ -89,7 +89,6 @@ describe('commitHook', () => {
       expect(content).toContain(MARKER);
       expect(content).toContain('#!/bin/sh');
       expect(content).toContain('TRACKING_FILE=');
-      expect(content).toContain('PREMIUM_REQUESTS=');
       expect(content).toContain("grep '^TR_'");
       expect(content).toContain("sed 's/^TR_");
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
@@ -278,23 +277,31 @@ describe('commitHook', () => {
       expect(writtenContent).not.toContain('CURRENT_');
     });
 
-    it('reads premium requests for skip check', () => {
-      expect(writtenContent).toContain("grep '^PREMIUM_REQUESTS=' \"$TRACKING_FILE\"");
-      expect(writtenContent).not.toContain("grep '^ESTIMATED_COST=' \"$TRACKING_FILE\"");
-    });
-
     it('reads TR_ lines for trailer output', () => {
       expect(writtenContent).toContain("grep '^TR_' \"$TRACKING_FILE\"");
       expect(writtenContent).not.toContain("grep '^MODEL ' \"$TRACKING_FILE\"");
+      expect(writtenContent).not.toContain('PREMIUM_REQUESTS');
     });
 
     it('skips appending when no TR_ lines exist', () => {
       expect(writtenContent).toContain("TR_LINES=$(grep '^TR_' \"$TRACKING_FILE\") || true");
-      expect(writtenContent).toContain("case \"$TR_LINES\" in '') : > \"$TRACKING_FILE\"; exit 0");
+      expect(writtenContent).toContain("case \"$TR_LINES\" in '') exit 0");
     });
 
-    it('skips when no premium requests', () => {
-      expect(writtenContent).toContain("case \"$PREMIUM\" in ''|0|0.00) exit 0");
+    it('gates entirely on TR_ presence (no PREMIUM_REQUESTS gate)', () => {
+      expect(writtenContent).not.toContain('PREMIUM_REQUESTS=');
+      expect(writtenContent).not.toContain("case \"$PREMIUM\"");
+    });
+
+    it('appends a properly formatted git trailer block', () => {
+      // sed converts each `TR_<name>=<value>` line to `<name>: <value>`
+      expect(writtenContent).toContain("sed 's/^TR_\\([^=]*\\)=/\\1: /'");
+      // blank-line separator before trailers
+      expect(writtenContent).toContain("printf '\\n\\n'");
+    });
+
+    it('truncates the tracking file after appending trailers', () => {
+      expect(writtenContent).toContain(': > "$TRACKING_FILE"');
     });
   });
 });

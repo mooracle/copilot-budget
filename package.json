@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "0.5.3",
+  "version": "1.0.0-beta.8",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -60,6 +60,10 @@
         "title": "Copilot Budget: Uninstall Commit Hook"
       },
       {
+        "command": "copilot-budget.toggleCommitHook",
+        "title": "Copilot Budget: Toggle Commit Hook"
+      },
+      {
         "command": "copilot-budget.showDiagnostics",
         "title": "Copilot Budget: Show Diagnostics"
       }
@@ -77,74 +81,55 @@
           "default": false,
           "description": "Automatically install the prepare-commit-msg hook to append AI budget info to commits"
         },
-        "copilot-budget.commitHook.trailers.premiumRequests": {
-          "type": [
-            "string",
-            "boolean"
-          ],
-          "default": "Copilot-Premium-Requests",
-          "markdownDescription": "Git trailer key for premium request count. Set to `false` to disable."
-        },
         "copilot-budget.commitHook.trailers.estimatedCost": {
           "type": [
             "string",
             "boolean"
           ],
-          "default": "Copilot-Est-Cost",
-          "markdownDescription": "Git trailer key for estimated cost. Set to `false` to disable."
+          "default": false,
+          "markdownDescription": "Opt-in git trailer key for estimated USD cost (e.g. `\"Copilot-Est-Cost\"`). Disabled by default; enable for users who want USD in commit history. AI Credits is the primary unit."
         },
-        "copilot-budget.commitHook.trailers.model": {
+        "copilot-budget.commitHook.trailers.aiCredits": {
+          "type": [
+            "string",
+            "boolean"
+          ],
+          "default": "Copilot-AI-Credits",
+          "markdownDescription": "Git trailer key for total AI Credits (1 AIC = $0.01, plan-invariant). Set to `false` to disable."
+        },
+        "copilot-budget.commitHook.trailers.aiCreditsPerModel": {
           "type": [
             "string",
             "boolean"
           ],
           "default": false,
-          "markdownDescription": "Git trailer key for per-model breakdown. Set to `false` to disable."
-        },
-        "copilot-budget.plan": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "free",
-            "pro",
-            "pro+",
-            "business",
-            "enterprise"
-          ],
-          "default": "auto",
-          "enumDescriptions": [
-            "Auto-detect plan via GitHub API (falls back to overage rate $0.04/request if unavailable)",
-            "Free plan — 50 included requests/month ($0.00/request)",
-            "Pro plan — 300 included requests/month ($0.0333/request)",
-            "Pro+ plan — 1500 included requests/month ($0.0260/request)",
-            "Business plan — 300 included requests/month ($0.0633/request)",
-            "Enterprise plan — 1000 included requests/month ($0.0390/request)"
-          ],
-          "description": "GitHub Copilot plan for cost calculation. Set to 'auto' to detect via API, or manually select your plan for accurate cost attribution."
+          "markdownDescription": "Git trailer key for per-model AI Credits breakdown. Set to a string (e.g. `\"Copilot-AI-Credits-Models\"`) to enable."
         }
       }
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "lint": "eslint src/",
     "test": "node --experimental-vm-modules node_modules/.bin/jest",
-    "package": "npx @vscode/vsce package"
+    "package": "npx @vscode/vsce package",
+    "update-rates": "bash scripts/update-rates.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/jest": "^29.5.0",
-    "@types/node": "^20.11.0",
+    "@types/jest": "^30.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.8.0",
+    "js-yaml": "^4.1.1",
     "@types/vscode": "^1.85.0",
-    "esbuild": "^0.25.0",
-    "eslint": "^10.0.2",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.1.0",
-    "typescript": "^5.3.0",
-    "typescript-eslint": "^8.56.1"
+    "esbuild": "^0.28.0",
+    "eslint": "^10.4.0",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.9",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.3"
   },
-  "dependencies": {
-    "sql.js": "^1.14.0"
-  }
+  "dependencies": {}
 }

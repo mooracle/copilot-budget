@@ -1,31 +1,44 @@
 import * as fs from 'fs';
-import { discoverSessionFiles, discoverVscdbFiles } from './sessionDiscovery';
+import * as vscode from 'vscode';
+import { discoverSessionFiles } from './sessionDiscovery';
 import { parseSessionFileContent, ModelUsage } from './sessionParser';
-import { readSessionsFromVscdb, isSqliteReady } from './sqliteReader';
-import { estimateTokensFromText, getPremiumMultiplier } from './tokenEstimator';
-import { DEFAULT_COST_PER_REQUEST, PlanInfo } from './planDetector';
+import { computeCost } from './tokenRates';
 import { log } from './logger';
-import { sanitizeModelName } from './utils';
+
+export interface ModelStats {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costAic: number;
+}
 
 export interface TrackingStats {
   since: string;
   lastUpdated: string;
-  models: { [model: string]: { inputTokens: number; outputTokens: number; premiumRequests: number } };
+  models: { [model: string]: ModelStats };
   totalTokens: number;
   interactions: number;
-  premiumRequests: number;
-  estimatedCost: number;
+  totalAiCredits: number;
 }
 
 export interface RestoredStats {
   since: string;
   interactions: number;
-  models: { [model: string]: { inputTokens: number; outputTokens: number; premiumRequests: number } };
+  models: { [model: string]: ModelStats };
+}
+
+export interface FileDiagnostics {
+  path: string;
+  mtime: number;
+  interactions: number;
+  modelInteractions: { [model: string]: number };
+  modelUsage: ModelUsage;
+  inBaseline: boolean;
 }
 
 interface FileCache {
   mtime: number;
-  tokens: number;
   interactions: number;
   modelUsage: ModelUsage;
   modelInteractions: { [model: string]: number };
@@ -33,13 +46,33 @@ interface FileCache {
 
 type StatsListener = (stats: TrackingStats) => void;
 
+function emptyModelTokens() {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  };
+}
+
+function emptyModelStats(): ModelStats {
+  return {
+    ...emptyModelTokens(),
+    costAic: 0,
+  };
+}
+
 function mergeModelUsage(target: ModelUsage, source: ModelUsage): void {
   for (const [model, usage] of Object.entries(source)) {
-    if (!target[model]) {
-      target[model] = { inputTokens: 0, outputTokens: 0 };
+    let entry = target[model];
+    if (!entry) {
+      entry = emptyModelTokens();
+      target[model] = entry;
     }
-    target[model].inputTokens += usage.inputTokens;
-    target[model].outputTokens += usage.outputTokens;
+    entry.inputTokens += usage.inputTokens;
+    entry.outputTokens += usage.outputTokens;
+    entry.cacheReadTokens += usage.cacheReadTokens;
+    entry.cacheCreationTokens += usage.cacheCreationTokens;
   }
 }
 
@@ -52,47 +85,56 @@ function mergeModelInteractions(
   }
 }
 
-function accumulateModel(
-  models: { [key: string]: { inputTokens: number; outputTokens: number; premiumRequests: number } },
+function accumulateModelStats(
+  models: { [key: string]: ModelStats },
   key: string,
-  input: number,
-  output: number,
-  premium: number,
+  contrib: ModelStats,
 ): void {
-  if (models[key]) {
-    models[key].inputTokens += input;
-    models[key].outputTokens += output;
-    models[key].premiumRequests += premium;
-  } else {
-    models[key] = { inputTokens: input, outputTokens: output, premiumRequests: premium };
+  let entry = models[key];
+  if (!entry) {
+    entry = emptyModelStats();
+    models[key] = entry;
   }
+  entry.inputTokens += contrib.inputTokens;
+  entry.outputTokens += contrib.outputTokens;
+  entry.cacheReadTokens += contrib.cacheReadTokens;
+  entry.cacheCreationTokens += contrib.cacheCreationTokens;
+  entry.costAic += contrib.costAic;
 }
 
+type Snapshot = {
+  interactions: number;
+  modelUsage: ModelUsage;
+  modelInteractions: { [model: string]: number };
+};
+
 export class Tracker {
-  private baseline: {
-    tokens: number;
-    interactions: number;
-    modelUsage: ModelUsage;
-    modelInteractions: { [model: string]: number };
-  } = { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {} };
+  private baseline: Snapshot = {
+    interactions: 0,
+    modelUsage: {},
+    modelInteractions: {},
+  };
+  // The scan that produced lastStats. consume() uses this as the new baseline
+  // so any activity not yet reflected in lastStats (and therefore not in the
+  // trailer the hook just consumed) is preserved as the next commit's delta.
+  private lastSnapshot: Snapshot | null = null;
   private fileCache = new Map<string, FileCache>();
+  // Snapshot of file paths present at the moment baseline was captured.
+  // Used by getFileDiagnostics() to flag which files were already on disk
+  // at session start (and therefore have their existing contents folded
+  // into the baseline) versus files that appeared mid-session (whose
+  // entire contents count toward the session delta).
+  private baselineFiles = new Set<string>();
   private since: string;
   private timer: ReturnType<typeof setInterval> | null = null;
   private listeners: StatsListener[] = [];
   private lastStats: TrackingStats | null = null;
-  private planInfoProvider: () => PlanInfo = () => ({
-    planName: 'unknown',
-    costPerRequest: DEFAULT_COST_PER_REQUEST,
-    source: 'default' as const,
-  });
   private previousStats: RestoredStats | null = null;
+  private readonly storageUri: vscode.Uri | undefined;
 
-  constructor() {
+  constructor(storageUri: vscode.Uri | undefined) {
     this.since = new Date().toISOString();
-  }
-
-  setPlanInfoProvider(provider: () => PlanInfo): void {
-    this.planInfoProvider = provider;
+    this.storageUri = storageUri;
   }
 
   setPreviousStats(restored: RestoredStats): void {
@@ -110,202 +152,139 @@ export class Tracker {
     };
   }
 
-  private processFileWithCache(
-    file: string,
-    parseFn: () => Omit<FileCache, 'mtime'> | null,
-    totals: { tokens: number; interactions: number; modelUsage: ModelUsage; modelInteractions: { [model: string]: number } },
-  ): void {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      return;
-    }
-
-    const mtime = stat.mtimeMs;
-    const cached = this.fileCache.get(file);
-
-    if (cached && cached.mtime === mtime) {
-      totals.tokens += cached.tokens;
-      totals.interactions += cached.interactions;
-      mergeModelUsage(totals.modelUsage, cached.modelUsage);
-      mergeModelInteractions(totals.modelInteractions, cached.modelInteractions);
-      return;
-    }
-
-    const result = parseFn();
-    if (!result) return;
-
-    this.fileCache.set(file, { mtime, ...result });
-    totals.tokens += result.tokens;
-    totals.interactions += result.interactions;
-    mergeModelUsage(totals.modelUsage, result.modelUsage);
-    mergeModelInteractions(totals.modelInteractions, result.modelInteractions);
-  }
-
   private scanAll(): {
-    tokens: number;
     interactions: number;
     modelUsage: ModelUsage;
     modelInteractions: { [model: string]: number };
   } {
-    const files = discoverSessionFiles();
-    const vscdbFiles = isSqliteReady() ? discoverVscdbFiles() : [];
-    log(`scanAll: discovered ${files.length} session file(s), ${vscdbFiles.length} vscdb file(s)`);
+    const files = discoverSessionFiles(this.storageUri);
+    log(`scanAll: discovered ${files.length} session file(s)`);
 
-    const currentFiles = new Set([...files, ...vscdbFiles]);
+    const currentFiles = new Set(files);
     const totals = {
-      tokens: 0,
       interactions: 0,
       modelUsage: {} as ModelUsage,
       modelInteractions: {} as { [model: string]: number },
     };
 
-    // Evict cache entries for files that no longer exist
     for (const cached of this.fileCache.keys()) {
       if (!currentFiles.has(cached)) {
         this.fileCache.delete(cached);
       }
     }
 
-    // Process JSON/JSONL files
     for (const file of files) {
-      this.processFileWithCache(file, () => {
-        let content: string;
-        try {
-          content = fs.readFileSync(file, 'utf-8');
-        } catch {
-          return null;
-        }
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        continue;
+      }
 
-        try {
-          const result = parseSessionFileContent(file, content, estimateTokensFromText);
-          return {
-            tokens: result.tokens,
-            interactions: result.interactions,
-            modelUsage: result.modelUsage,
-            modelInteractions: result.modelInteractions,
-          };
-        } catch {
-          log(`scanAll: failed to parse session file: ${file}`);
-          return null;
-        }
-      }, totals);
+      const mtime = stat.mtimeMs;
+      const cached = this.fileCache.get(file);
+
+      if (cached && cached.mtime === mtime) {
+        totals.interactions += cached.interactions;
+        mergeModelUsage(totals.modelUsage, cached.modelUsage);
+        mergeModelInteractions(totals.modelInteractions, cached.modelInteractions);
+        continue;
+      }
+
+      let content: string;
+      try {
+        content = fs.readFileSync(file, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      let parsed;
+      try {
+        parsed = parseSessionFileContent(content);
+      } catch {
+        log(`scanAll: failed to parse session file: ${file}`);
+        continue;
+      }
+
+      const entry = {
+        interactions: parsed.interactions,
+        modelUsage: parsed.modelUsage,
+        modelInteractions: parsed.modelInteractions,
+      };
+      this.fileCache.set(file, { mtime, ...entry });
+      totals.interactions += entry.interactions;
+      mergeModelUsage(totals.modelUsage, entry.modelUsage);
+      mergeModelInteractions(totals.modelInteractions, entry.modelInteractions);
     }
 
-    // Process vscdb files
-    for (const vscdbFile of vscdbFiles) {
-      this.processFileWithCache(vscdbFile, () => {
-        const jsonStrings = readSessionsFromVscdb(vscdbFile);
-        let fileTokens = 0;
-        let fileInteractions = 0;
-        const fileModelUsage: ModelUsage = {};
-        const fileModelInteractions: { [model: string]: number } = {};
-
-        for (const jsonStr of jsonStrings) {
-          let sessions: unknown[];
-          try {
-            const parsed = JSON.parse(jsonStr);
-            sessions = Array.isArray(parsed) ? parsed : [parsed];
-          } catch {
-            continue;
-          }
-
-          for (const session of sessions) {
-            if (typeof session !== 'object' || session === null) {
-              continue;
-            }
-            const sessionContent = JSON.stringify(session);
-            try {
-              const result = parseSessionFileContent(vscdbFile, sessionContent, estimateTokensFromText);
-              fileTokens += result.tokens;
-              fileInteractions += result.interactions;
-              mergeModelUsage(fileModelUsage, result.modelUsage);
-              mergeModelInteractions(fileModelInteractions, result.modelInteractions);
-            } catch {
-              continue;
-            }
-          }
-        }
-
-        return {
-          tokens: fileTokens,
-          interactions: fileInteractions,
-          modelUsage: fileModelUsage,
-          modelInteractions: fileModelInteractions,
-        };
-      }, totals);
-    }
-
-    log(`scanAll: total ${totals.tokens} tokens, ${totals.interactions} interactions`);
+    log(
+      `scanAll: total ${totals.interactions} interactions across ${Object.keys(totals.modelUsage).length} model(s)`,
+    );
 
     return totals;
   }
 
   private computeStats(current: {
-    tokens: number;
     interactions: number;
     modelUsage: ModelUsage;
     modelInteractions: { [model: string]: number };
   }): TrackingStats {
     const baseline = this.baseline;
 
-    const deltaModels: {
-      [model: string]: { inputTokens: number; outputTokens: number; premiumRequests: number };
-    } = {};
-
-    // Compute per-model delta interactions for premium request calculation
-    const deltaModelInteractions: { [model: string]: number } = {};
-    for (const [model, count] of Object.entries(current.modelInteractions)) {
-      const baseCount = baseline.modelInteractions[model] || 0;
-      const delta = Math.max(0, count - baseCount);
-      if (delta > 0) {
-        deltaModelInteractions[model] = delta;
-      }
-    }
+    const deltaModels: { [model: string]: ModelStats } = {};
 
     for (const [model, usage] of Object.entries(current.modelUsage)) {
-      const base = baseline.modelUsage[model] || {
-        inputTokens: 0,
-        outputTokens: 0,
-      };
+      const base = baseline.modelUsage[model] ?? emptyModelTokens();
       const deltaInput = Math.max(0, usage.inputTokens - base.inputTokens);
       const deltaOutput = Math.max(0, usage.outputTokens - base.outputTokens);
-      const modelPremium = (deltaModelInteractions[model] || 0) * getPremiumMultiplier(model);
-      if (deltaInput > 0 || deltaOutput > 0 || modelPremium > 0) {
-        accumulateModel(deltaModels, sanitizeModelName(model), deltaInput, deltaOutput, modelPremium);
+      const deltaCacheRead = Math.max(0, usage.cacheReadTokens - base.cacheReadTokens);
+      const deltaCacheCreation = Math.max(
+        0,
+        usage.cacheCreationTokens - base.cacheCreationTokens,
+      );
+
+      if (
+        deltaInput === 0 &&
+        deltaOutput === 0 &&
+        deltaCacheRead === 0 &&
+        deltaCacheCreation === 0
+      ) {
+        continue;
       }
+
+      const costAic = computeCost(model, {
+        input: deltaInput,
+        output: deltaOutput,
+        cacheRead: deltaCacheRead,
+        cacheCreation: deltaCacheCreation,
+      });
+
+      accumulateModelStats(deltaModels, model, {
+        inputTokens: deltaInput,
+        outputTokens: deltaOutput,
+        cacheReadTokens: deltaCacheRead,
+        cacheCreationTokens: deltaCacheCreation,
+        costAic,
+      });
     }
 
-    // Also handle models with interactions but no token usage
-    for (const [model, delta] of Object.entries(deltaModelInteractions)) {
-      const key = sanitizeModelName(model);
-      if (!deltaModels[key] && delta > 0) {
-        accumulateModel(deltaModels, key, 0, 0, delta * getPremiumMultiplier(model));
-      }
-    }
-
-    // Merge previousStats (restored from prior session) into delta
     if (this.previousStats) {
       for (const [model, prev] of Object.entries(this.previousStats.models)) {
-        accumulateModel(deltaModels, model, prev.inputTokens, prev.outputTokens, prev.premiumRequests);
+        accumulateModelStats(deltaModels, model, prev);
       }
     }
 
-    const totalTokens = Object.values(deltaModels).reduce(
-      (sum, m) => sum + m.inputTokens + m.outputTokens,
-      0,
-    );
-    const interactions = Math.max(
-      0,
-      current.interactions - baseline.interactions,
-    ) + (this.previousStats ? this.previousStats.interactions : 0);
-    const premiumRequests = Object.values(deltaModels).reduce(
-      (sum, m) => sum + m.premiumRequests,
-      0,
-    );
-    const costPerRequest = this.planInfoProvider().costPerRequest;
-    const estimatedCost = premiumRequests * costPerRequest;
+    let totalTokens = 0;
+    let totalAiCredits = 0;
+    for (const m of Object.values(deltaModels)) {
+      totalTokens +=
+        m.inputTokens + m.outputTokens + m.cacheReadTokens + m.cacheCreationTokens;
+      totalAiCredits += m.costAic;
+    }
+
+    const interactions =
+      Math.max(0, current.interactions - baseline.interactions) +
+      (this.previousStats ? this.previousStats.interactions : 0);
 
     return {
       since: this.since,
@@ -313,15 +292,18 @@ export class Tracker {
       models: deltaModels,
       totalTokens,
       interactions,
-      premiumRequests,
-      estimatedCost,
+      totalAiCredits,
     };
   }
 
   initialize(): void {
     const snapshot = this.scanAll();
     this.baseline = snapshot;
-    log(`initialize: baseline set at ${snapshot.tokens} tokens, ${snapshot.interactions} interactions`);
+    this.lastSnapshot = snapshot;
+    this.baselineFiles = new Set(this.fileCache.keys());
+    log(
+      `initialize: baseline set at ${snapshot.interactions} interactions across ${Object.keys(snapshot.modelUsage).length} model(s)`,
+    );
     this.lastStats = this.computeStats(snapshot);
   }
 
@@ -334,20 +316,20 @@ export class Tracker {
   update(): void {
     const current = this.scanAll();
     const stats = this.computeStats(current);
+    this.lastSnapshot = current;
 
     if (
       !this.lastStats ||
       stats.totalTokens !== this.lastStats.totalTokens ||
       stats.interactions !== this.lastStats.interactions ||
-      stats.premiumRequests !== this.lastStats.premiumRequests ||
-      stats.estimatedCost !== this.lastStats.estimatedCost
+      stats.totalAiCredits !== this.lastStats.totalAiCredits
     ) {
       this.lastStats = stats;
       this.notifyListeners(stats);
     }
   }
 
-  start(intervalMs: number = 120_000): void {
+  start(intervalMs: number = 30_000): void {
     this.initialize();
     this.timer = setInterval(() => this.update(), intervalMs);
   }
@@ -363,10 +345,53 @@ export class Tracker {
     this.previousStats = null;
     const snapshot = this.scanAll();
     this.baseline = snapshot;
+    this.lastSnapshot = snapshot;
+    this.baselineFiles = new Set(this.fileCache.keys());
     this.since = new Date().toISOString();
     const stats = this.computeStats(snapshot);
     this.lastStats = stats;
     this.notifyListeners(stats);
+  }
+
+  // Hook-truncate handler. Unlike reset(), which zeros everything by
+  // rebaselining to the current scan, consume() rebases to the snapshot that
+  // produced the stats the hook just appended as trailers. Anything beyond
+  // that snapshot — pre-commit activity that hadn't been written yet, plus
+  // any post-commit Copilot usage that landed before we noticed the
+  // truncation — survives as the next commit's delta. Without this, a 5s
+  // detection window would silently absorb that activity into a fresh
+  // baseline and the next commit would underreport.
+  consume(): void {
+    this.previousStats = null;
+    this.baseline = this.lastSnapshot ?? this.scanAll();
+    this.baselineFiles = new Set(this.fileCache.keys());
+    this.since = new Date().toISOString();
+    const current = this.scanAll();
+    this.lastSnapshot = current;
+    const stats = this.computeStats(current);
+    this.lastStats = stats;
+    this.notifyListeners(stats);
+  }
+
+  // Per-file breakdown for diagnostics. Reflects the most recent successful
+  // scan of each file (the same data the delta computation consumed), plus
+  // a flag indicating whether the file was already present when the baseline
+  // was captured. New files that appeared mid-session have their entire
+  // contents — including the very first request — attributed to the session
+  // delta, since baseline contributes 0 for them.
+  getFileDiagnostics(): FileDiagnostics[] {
+    const out: FileDiagnostics[] = [];
+    for (const [path, entry] of this.fileCache.entries()) {
+      out.push({
+        path,
+        mtime: entry.mtime,
+        interactions: entry.interactions,
+        modelInteractions: entry.modelInteractions,
+        modelUsage: entry.modelUsage,
+        inBaseline: this.baselineFiles.has(path),
+      });
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path));
   }
 
   getStats(): TrackingStats {
@@ -377,8 +402,7 @@ export class Tracker {
         models: {},
         totalTokens: 0,
         interactions: 0,
-        premiumRequests: 0,
-        estimatedCost: 0,
+        totalAiCredits: 0,
       };
     }
     return this.lastStats;
@@ -388,6 +412,8 @@ export class Tracker {
     this.stop();
     this.listeners = [];
     this.fileCache.clear();
+    this.baselineFiles.clear();
     this.previousStats = null;
+    this.lastSnapshot = null;
   }
 }

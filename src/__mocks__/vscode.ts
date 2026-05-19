@@ -67,6 +67,7 @@ export const commands = {
     __commandCallbacks[command] = callback;
     return { dispose: () => {} };
   }),
+  executeCommand: jest.fn(async () => undefined),
 };
 
 export enum StatusBarAlignment {
@@ -128,6 +129,29 @@ export class Uri {
   }
 }
 
+export class MarkdownString {
+  value: string;
+  isTrusted: boolean;
+  supportHtml: boolean;
+  constructor(value: string = '', supportHtml: boolean = false) {
+    this.value = value;
+    this.isTrusted = false;
+    this.supportHtml = supportHtml;
+  }
+  appendText(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+  appendMarkdown(value: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+  appendCodeblock(value: string, _language?: string): MarkdownString {
+    this.value += value;
+    return this;
+  }
+}
+
 export class Disposable {
   static from(...disposables: { dispose: () => any }[]) {
     return {
@@ -175,3 +199,22 @@ export const tasks = {
   executeTask: jest.fn(async () => undefined),
   onDidEndTaskProcess: jest.fn(() => ({ dispose: () => {} })),
 };
+
+export interface MockExtensionContextOverrides {
+  storageUri?: Uri;
+  globalStorageUri?: Uri;
+}
+
+export function createMockExtensionContext(
+  overrides: MockExtensionContextOverrides = {},
+): any {
+  return {
+    subscriptions: [],
+    extensionPath: '/test',
+    extensionUri: Uri.file('/test'),
+    globalState: { get: () => undefined, update: async () => {} },
+    workspaceState: { get: () => undefined, update: async () => {} },
+    storageUri: overrides.storageUri,
+    globalStorageUri: overrides.globalStorageUri ?? Uri.file('/test/global'),
+  };
+}

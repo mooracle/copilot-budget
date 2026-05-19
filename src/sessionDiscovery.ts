@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as vscode from 'vscode';
 import { log } from './logger';
 
 /** Known non-session filename patterns to exclude */
@@ -13,230 +14,92 @@ const NON_SESSION_PATTERNS = [
   'config',
 ];
 
-/** VS Code editor variants to scan */
-const VSCODE_VARIANTS = [
-  'Code',               // Stable
-  'Code - Insiders',    // Insiders
-  'Code - Exploration', // Exploration builds
-  'VSCodium',           // VSCodium
-  'Cursor',             // Cursor editor
-];
-
 function isNonSessionFile(filename: string): boolean {
   const lower = filename.toLowerCase();
   return NON_SESSION_PATTERNS.some((p) => lower.includes(p));
 }
 
-/**
- * Returns VS Code User directories for all variants on the current platform.
- */
-export function getVSCodeUserPaths(): string[] {
-  const platform = os.platform();
-  const home = os.homedir();
-  const paths: string[] = [];
-
-  if (platform === 'win32') {
-    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-    for (const v of VSCODE_VARIANTS) {
-      paths.push(path.join(appData, v, 'User'));
-    }
-  } else if (platform === 'darwin') {
-    for (const v of VSCODE_VARIANTS) {
-      paths.push(path.join(home, 'Library', 'Application Support', v, 'User'));
-    }
-  } else {
-    const xdg = process.env.XDG_CONFIG_HOME || path.join(home, '.config');
-    for (const v of VSCODE_VARIANTS) {
-      paths.push(path.join(xdg, v, 'User'));
-    }
-  }
-
-  // Remote / server paths (Codespaces, WSL, SSH)
-  paths.push(
-    path.join(home, '.vscode-server', 'data', 'User'),
-    path.join(home, '.vscode-server-insiders', 'data', 'User'),
-    path.join(home, '.vscode-remote', 'data', 'User'),
-  );
-
-  return paths;
-}
-
-/**
- * If `dirPath` exists, scan it for session files and log the count.
- * Silently ignores missing or inaccessible paths.
- */
-function scanPathSafe(dirPath: string, label: string, files: string[]): void {
-  try {
-    if (fs.existsSync(dirPath)) {
-      const before = files.length;
-      scanDirectory(dirPath, files);
-      log(`  ${label}: ${files.length - before} files`);
-    }
-  } catch {
-    // skip inaccessible paths
-  }
-}
-
-/**
- * Recursively scan a directory for .json / .jsonl session files,
- * excluding known non-session files.
- */
-function scanDirectory(dir: string, out: string[]): void {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      scanDirectory(full, out);
-    } else if (
-      (entry.name.endsWith('.json') || entry.name.endsWith('.jsonl')) &&
-      !isNonSessionFile(entry.name)
-    ) {
-      try {
-        if (fs.statSync(full).size > 0) {
-          out.push(full);
-        }
-      } catch {
-        // skip inaccessible files
-      }
-    }
-  }
-}
-
 export interface DiscoveryDiagnostics {
   platform: string;
   homedir: string;
-  candidatePaths: { path: string; exists: boolean }[];
+  storageUri: string | null;
+  chatSessionsDir: string | null;
   filesFound: string[];
-  vscdbFilesFound: string[];
 }
 
 /**
- * Discover state.vscdb files in workspaceStorage directories.
- * Returns an array of unique absolute paths to state.vscdb files.
+ * Resolve the chatSessions directory for the current window from the extension's
+ * per-workspace storageUri. `storageUri` points at the extension's subfolder
+ * inside `<workspaceStorage>/<hash>/`; the sibling `chatSessions/` directory is
+ * one `..` away.
  */
-export function discoverVscdbFiles(): string[] {
+function resolveChatSessionsDir(storageUri: vscode.Uri): string {
+  return vscode.Uri.joinPath(storageUri, '..', 'chatSessions').fsPath;
+}
+
+/**
+ * Discover Copilot session files for the current window only.
+ * When `storageUri` is undefined (empty window) returns `[]`.
+ */
+export function discoverSessionFiles(storageUri: vscode.Uri | undefined): string[] {
+  if (!storageUri) {
+    log('Session discovery skipped: no storageUri (empty window)');
+    return [];
+  }
+
+  const chatSessionsDir = resolveChatSessionsDir(storageUri);
+  log(`Session discovery scanning: ${chatSessionsDir}`);
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(chatSessionsDir, { withFileTypes: true });
+  } catch {
+    log(`  MISSING or unreadable: ${chatSessionsDir}`);
+    return [];
+  }
+
   const files: string[] = [];
-  const userPaths = getVSCodeUserPaths();
-
-  log(`Vscdb discovery starting on platform=${os.platform()}`);
-
-  for (const userPath of userPaths) {
-    const wsStorage = path.join(userPath, 'workspaceStorage');
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.endsWith('.jsonl')) continue;
+    if (isNonSessionFile(entry.name)) continue;
+    const full = path.join(chatSessionsDir, entry.name);
     try {
-      if (!fs.existsSync(wsStorage)) continue;
-      for (const wsDir of fs.readdirSync(wsStorage)) {
-        const vscdbPath = path.join(wsStorage, wsDir, 'state.vscdb');
-        try {
-          if (fs.existsSync(vscdbPath) && fs.statSync(vscdbPath).size > 0) {
-            files.push(vscdbPath);
-          }
-        } catch {
-          // skip inaccessible files
-        }
+      if (fs.statSync(full).size > 0) {
+        files.push(full);
       }
     } catch {
-      // skip inaccessible workspace dirs
+      // skip inaccessible files
     }
   }
 
-  const unique = [...new Set(files)];
-  log(`Vscdb discovery complete: ${unique.length} files found`);
-  return unique;
+  log(`Discovery complete: ${files.length} files`);
+  return files;
 }
 
 /**
- * Discover all Copilot session files from standard locations on disk.
- * Returns an array of unique absolute file paths.
+ * Returns diagnostic information about session discovery for the current window.
  */
-export function discoverSessionFiles(): string[] {
-  const files: string[] = [];
-  const userPaths = getVSCodeUserPaths();
-
-  log(`Session discovery starting on platform=${os.platform()}, home=${os.homedir()}`);
-  log(`Candidate user paths: ${userPaths.length}`);
-
-  // Filter to paths that actually exist
-  const existing = userPaths.filter((p) => {
-    try {
-      const exists = fs.existsSync(p);
-      log(`  ${exists ? 'EXISTS' : 'MISSING'}: ${p}`);
-      return exists;
-    } catch {
-      log(`  ERROR checking: ${p}`);
-      return false;
-    }
-  });
-
-  log(`Found ${existing.length} existing user paths`);
-
-  for (const userPath of existing) {
-    // 1-3. workspaceStorage/*/chatSessions/, github.copilot-chat/, github.copilot/
-    const wsStorage = path.join(userPath, 'workspaceStorage');
-    const wsSubdirs = ['chatSessions', 'github.copilot-chat', 'github.copilot'];
-    try {
-      if (fs.existsSync(wsStorage)) {
-        for (const wsDir of fs.readdirSync(wsStorage)) {
-          for (const sub of wsSubdirs) {
-            const subPath = path.join(wsStorage, wsDir, sub);
-            try {
-              if (fs.existsSync(subPath)) {
-                const before = files.length;
-                scanDirectory(subPath, files);
-                log(`  workspaceStorage ${sub} (${wsDir}): ${files.length - before} files`);
-              }
-            } catch {
-              // skip inaccessible workspace dirs
-            }
-          }
-        }
-      }
-    } catch {
-      // skip
-    }
-
-    // 4-6. globalStorage subdirectories
-    const globalDirs = [
-      ['emptyWindowChatSessions', 'globalStorage/emptyWindowChatSessions'],
-      ['github.copilot-chat', 'globalStorage/github.copilot-chat'],
-      ['github.copilot', 'globalStorage/github.copilot'],
-    ] as const;
-    for (const [sub, label] of globalDirs) {
-      scanPathSafe(path.join(userPath, 'globalStorage', sub), label, files);
-    }
+export function getDiscoveryDiagnostics(
+  storageUri: vscode.Uri | undefined,
+): DiscoveryDiagnostics {
+  const platform = os.platform();
+  const homedir = os.homedir();
+  if (!storageUri) {
+    return {
+      platform,
+      homedir,
+      storageUri: null,
+      chatSessionsDir: null,
+      filesFound: [],
+    };
   }
-
-  // Deduplicate using a Set
-  const unique = [...new Set(files)];
-  log(`Discovery complete: ${unique.length} unique files (${files.length} before dedup)`);
-
-  return unique;
-}
-
-/**
- * Returns diagnostic information about session discovery.
- */
-export function getDiscoveryDiagnostics(): DiscoveryDiagnostics {
-  const userPaths = getVSCodeUserPaths();
-  const candidatePaths = userPaths.map((p) => {
-    let exists = false;
-    try {
-      exists = fs.existsSync(p);
-    } catch {
-      // treat errors as missing
-    }
-    return { path: p, exists };
-  });
-
+  const chatSessionsDir = resolveChatSessionsDir(storageUri);
   return {
-    platform: os.platform(),
-    homedir: os.homedir(),
-    candidatePaths,
-    filesFound: discoverSessionFiles(),
-    vscdbFilesFound: discoverVscdbFiles(),
+    platform,
+    homedir,
+    storageUri: storageUri.fsPath,
+    chatSessionsDir,
+    filesFound: discoverSessionFiles(storageUri),
   };
 }

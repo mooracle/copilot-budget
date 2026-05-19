@@ -17,13 +17,8 @@ GIT_DIR="$(git rev-parse --git-dir)"
 TRACKING_FILE="$GIT_DIR/copilot-budget"
 [ -f "$TRACKING_FILE" ] || exit 0
 
-PREMIUM=$(grep '^PREMIUM_REQUESTS=' "$TRACKING_FILE" | cut -d= -f2)
-
-# Skip if no premium requests
-case "$PREMIUM" in ''|0|0.00) exit 0 ;; esac
-
 TR_LINES=$(grep '^TR_' "$TRACKING_FILE") || true
-case "$TR_LINES" in '') : > "$TRACKING_FILE"; exit 0 ;; esac
+case "$TR_LINES" in '') exit 0 ;; esac
 
 {
 printf '\\n\\n'
@@ -60,7 +55,7 @@ async function makeExecutable(uri: vscode.Uri): Promise<void> {
   const task = new vscode.Task(
     { type: 'copilot-budget', task: 'chmod' }, vscode.TaskScope.Workspace,
     'chmod-hook', 'copilot-budget',
-    new vscode.ShellExecution('chmod', ['+x', uri.path]),
+    new vscode.ShellExecution('chmod', ['+x', uri.fsPath]),
   );
   task.presentationOptions = { reveal: vscode.TaskRevealKind.Silent };
   let disposable: vscode.Disposable | undefined;

@@ -1,19 +1,24 @@
-import { createStatusBar, showStatsQuickPick } from './statusBar';
+import {
+  createStatusBar,
+  formatAicShort,
+  showStatsQuickPick,
+} from './statusBar';
 import { Tracker, TrackingStats } from './tracker';
 import * as vscode from 'vscode';
-import { getPlanInfo } from './planDetector';
+import * as path from 'path';
+import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
-jest.mock('./planDetector', () => ({
-  getPlanInfo: jest.fn().mockReturnValue({
-    planName: 'unknown',
-    costPerRequest: 0.04,
-    source: 'default',
-  }),
+jest.mock('./config', () => ({
+  isCommitHookEnabled: jest.fn().mockReturnValue(true),
 }));
-jest.mock('fs');
+
+import { isCommitHookEnabled } from './config';
+const mockIsCommitHookEnabled = isCommitHookEnabled as jest.MockedFunction<
+  typeof isCommitHookEnabled
+>;
 
 const mockWindow = vscode.window as any;
 
@@ -22,13 +27,24 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
     since: '2024-01-15T10:30:00Z',
     lastUpdated: '2024-01-15T12:00:00Z',
     models: {
-      'gpt-4o': { inputTokens: 1500, outputTokens: 800, premiumRequests: 10 },
-      'claude-sonnet-4': { inputTokens: 500, outputTokens: 300, premiumRequests: 5 },
+      'gpt-4.1': {
+        inputTokens: 1500,
+        outputTokens: 800,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costAic: 0.94,
+      },
+      'claude-sonnet-4.6': {
+        inputTokens: 500,
+        outputTokens: 300,
+        cacheReadTokens: 1200,
+        cacheCreationTokens: 0,
+        costAic: 0.786,
+      },
     },
-    totalTokens: 3100,
+    totalTokens: 4300,
     interactions: 15,
-    premiumRequests: 15,
-    estimatedCost: 0.60,
+    totalAiCredits: 1.726,
     ...overrides,
   };
 }
@@ -55,14 +71,24 @@ function createMockTracker(stats: TrackingStats) {
   };
 }
 
+beforeAll(() => {
+  resetRateCardForTesting();
+  loadRateCard(path.join(__dirname, '__fixtures__', 'models-and-pricing.json'));
+});
+
+afterAll(() => {
+  resetRateCardForTesting();
+});
+
 describe('statusBar', () => {
   let createdItem: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockIsCommitHookEnabled.mockReturnValue(true);
     createdItem = {
       text: '',
-      tooltip: '',
+      tooltip: '' as any,
       command: '',
       show: jest.fn(),
       hide: jest.fn(),
@@ -73,32 +99,80 @@ describe('statusBar', () => {
   });
 
   describe('createStatusBar', () => {
-    it('creates a right-aligned status bar item', () => {
+    it('creates a right-aligned status bar item with a stable id, name, and priority 100', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
       expect(mockWindow.createStatusBarItem).toHaveBeenCalledWith(
+        'copilot-budget.statusBar',
         vscode.StatusBarAlignment.Right,
         100,
       );
+      expect(createdItem.name).toBe('Copilot Budget');
     });
 
-    it('sets initial text with premium requests and cost', () => {
+    it('sets initial text with AIC integer (no commit-hook suffix)', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('15 PR');
-      expect(createdItem.text).toContain('$0.6');
+      expect(createdItem.text).toBe('$(credit-card) 2 AIC');
     });
 
-    it('shows zero for empty stats', () => {
+    it('shows 0 AIC for empty stats', () => {
       const { tracker } = createMockTracker(
-        makeStats({ premiumRequests: 0, estimatedCost: 0, models: {} }),
+        makeStats({ totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('0 PR');
-      expect(createdItem.text).toContain('$0.0');
+      expect(createdItem.text).toBe('$(credit-card) 0 AIC');
+    });
+
+    it('does not include commit-hook indicator in status bar text', () => {
+      mockIsCommitHookEnabled.mockReturnValue(false);
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      expect(createdItem.text).not.toContain('Commit-Hook');
+      expect(createdItem.text).not.toContain('circle-slash');
+    });
+
+    it('tooltip does not mention commit-hook status', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).not.toContain('Commit hook');
+    });
+
+    it('sets tooltip as a MarkdownString with total AIC', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      expect(createdItem.tooltip).toBeInstanceOf(vscode.MarkdownString);
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('Total:');
+      expect(value).toContain('1.73 AIC');
+      expect(value).not.toContain('$');
+    });
+
+    it('tooltip lists per-model rows with AIC only', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('GPT-4.1');
+      expect(value).toContain('0.94 AIC');
+      expect(value).toContain('Claude Sonnet 4.6');
+      expect(value).toContain('0.79 AIC');
+      expect(value).not.toContain('$');
+    });
+
+    it('tooltip does not include the heuristic disclosure note', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).not.toContain('75%');
+      expect(value).not.toContain('cached input');
     });
 
     it('subscribes to tracker stats changes', () => {
@@ -108,18 +182,20 @@ describe('statusBar', () => {
       expect(tracker.onStatsChanged).toHaveBeenCalled();
     });
 
-    it('updates text when stats change', () => {
+    it('updates text and tooltip when stats change', () => {
       const { tracker, fireStatsChanged } = createMockTracker(
-        makeStats({ premiumRequests: 0, estimatedCost: 0 }),
+        makeStats({ totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('0 PR');
+      expect(createdItem.text).toBe('$(credit-card) 0 AIC');
 
-      fireStatsChanged(makeStats({ premiumRequests: 25.50, estimatedCost: 1.02 }));
+      fireStatsChanged(makeStats({ totalAiCredits: 123.4, models: {} }));
 
-      expect(createdItem.text).toContain('26 PR');
-      expect(createdItem.text).toContain('$1.0');
+      expect(createdItem.text).toBe('$(credit-card) 124 AIC');
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('123.40 AIC');
+      expect(value).not.toContain('$1.23');
     });
 
     it('disposes item and subscription on dispose', () => {
@@ -136,30 +212,26 @@ describe('statusBar', () => {
       expect(subDispose).toHaveBeenCalled();
     });
 
-    it('formats premium requests as integers and cost with one decimal', () => {
-      const { tracker } = createMockTracker(
-        makeStats({ premiumRequests: 12.25, estimatedCost: 0.49 }),
-      );
+    it('wires showStats command', () => {
+      const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.text).toContain('12 PR');
-      expect(createdItem.text).toContain('$0.5');
+      expect(createdItem.command).toBe('copilot-budget.showStats');
     });
   });
 
   describe('showStatsQuickPick', () => {
-    it('shows premium requests and estimated cost in header', async () => {
+    it('shows total AIC in header', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
       expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(1);
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const prItem = items.find((i: any) =>
-        i.label?.includes('Premium Requests'),
-      );
-      expect(prItem).toBeDefined();
-      expect(prItem.label).toContain('15');
-      expect(prItem.description).toContain('$0.6');
+      const totalItem = items.find((i: any) => i.label?.includes('Total'));
+      expect(totalItem).toBeDefined();
+      expect(totalItem.label).toContain('1.73 AIC');
+      expect(totalItem.label).not.toMatch(/\$\d/);
+      expect(totalItem.description).toBeUndefined();
     });
 
     it('shows tracking since timestamp', async () => {
@@ -173,31 +245,35 @@ describe('statusBar', () => {
       expect(sinceItem).toBeDefined();
     });
 
-    it('shows per-model premium requests and cost', async () => {
+    it('shows per-model AIC, with all four token buckets in detail', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const gptItem = items.find((i: any) =>
-        i.label?.includes('gpt-4o'),
+      const claudeItem = items.find((i: any) =>
+        i.label?.includes('Claude Sonnet 4.6'),
       );
-      expect(gptItem).toBeDefined();
-      expect(gptItem.description).toContain('10 PR');
-      expect(gptItem.description).toContain('$0.4');
+      expect(claudeItem).toBeDefined();
+      expect(claudeItem.description).toBe('0.79 AIC');
+      expect(claudeItem.description).not.toContain('$');
+      expect(claudeItem.detail).toContain('in:');
+      expect(claudeItem.detail).toContain('cache_read:');
+      expect(claudeItem.detail).toContain('cache_creation:');
+      expect(claudeItem.detail).toContain('out:');
+      expect(claudeItem.detail).toContain('500');
+      expect(claudeItem.detail).toContain('1,200');
+      expect(claudeItem.detail).toContain('300');
+      expect(claudeItem.detail).toContain('2,000');
     });
 
-    it('shows tokens in detail line', async () => {
+    it('does not include premium-request column anywhere', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const gptItem = items.find((i: any) =>
-        i.label?.includes('gpt-4o'),
-      );
-      expect(gptItem).toBeDefined();
-      expect(gptItem.detail).toContain('2,300');
-      expect(gptItem.detail).toContain('1,500');
-      expect(gptItem.detail).toContain('800');
+      const serialized = JSON.stringify(items);
+      expect(serialized).not.toMatch(/\bPR\b/);
+      expect(serialized.toLowerCase()).not.toContain('premium request');
     });
 
     it('includes a separator before models', async () => {
@@ -205,21 +281,91 @@ describe('statusBar', () => {
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const separator = items.find(
+      const separators = items.filter(
         (i: any) => i.kind === vscode.QuickPickItemKind.Separator,
       );
-      expect(separator).toBeDefined();
+      expect(separators.length).toBeGreaterThanOrEqual(1);
     });
 
     it('handles empty models gracefully', async () => {
       const { tracker } = createMockTracker(
-        makeStats({ models: {}, totalTokens: 0, interactions: 0, premiumRequests: 0, estimatedCost: 0 }),
+        makeStats({
+          models: {},
+          totalTokens: 0,
+          interactions: 0,
+          totalAiCredits: 0,
+        }),
       );
       await showStatsQuickPick(tracker);
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      // Should have premium requests header and since, but no separator or model items
-      expect(items.length).toBe(2);
+      const modelItems = items.filter((i: any) => i.label?.includes('$(hubot)'));
+      expect(modelItems).toHaveLength(0);
+      const totalItem = items.find((i: any) => i.label?.includes('Total'));
+      expect(totalItem.label).toContain('0.00 AIC');
+      expect(totalItem.label).not.toMatch(/\$\d/);
+    });
+
+    it('does not include the heuristic disclosure note', async () => {
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const noteItem = items.find((i: any) =>
+        i.label?.includes('Estimate note'),
+      );
+      expect(noteItem).toBeUndefined();
+      const serialized = JSON.stringify(items);
+      expect(serialized).not.toContain('75%');
+    });
+
+    it('includes a Commit-Hook toggle showing ON when enabled', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(true);
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const toggle = items.find((i: any) => i.label?.startsWith('Commit-Hook:'));
+      expect(toggle).toBeDefined();
+      expect(toggle.label).toContain('$(check) ON');
+      expect(toggle.label).not.toContain('OFF');
+    });
+
+    it('shows Commit-Hook toggle as OFF when disabled', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(false);
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const toggle = items.find((i: any) => i.label?.startsWith('Commit-Hook:'));
+      expect(toggle.label).toContain('$(circle-slash) OFF');
+      expect(toggle.label).not.toContain(' ON');
+    });
+
+    it('dispatches toggle command when user picks the Commit-Hook item', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(false);
+      const { tracker } = createMockTracker(makeStats());
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.startsWith('Commit-Hook:')),
+      );
+
+      await showStatsQuickPick(tracker);
+
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        'copilot-budget.toggleCommitHook',
+      );
+    });
+
+    it('does not dispatch toggle when user picks a non-toggle item', async () => {
+      mockIsCommitHookEnabled.mockReturnValue(true);
+      const { tracker } = createMockTracker(makeStats());
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.includes('Total')),
+      );
+
+      await showStatsQuickPick(tracker);
+
+      expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
     });
 
     it('passes title and placeHolder to quick pick', async () => {
@@ -227,63 +373,29 @@ describe('statusBar', () => {
       await showStatsQuickPick(tracker);
 
       const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toContain('Copilot Budget');
+      expect(options.title).toBe('Copilot Budget');
       expect(options.placeHolder).toBeTruthy();
     });
+  });
 
-    it('shows plan name in title when plan is detected via api', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'pro',
-        costPerRequest: 10 / 300,
-        source: 'api',
+  describe('formatAicShort', () => {
+    const cases: Array<[number, string]> = [
+      [0, '0 AIC'],
+      [1e-6, '1 AIC'],
+      [0.0001, '1 AIC'],
+      [0.4, '1 AIC'],
+      [0.5, '1 AIC'],
+      [1.0, '1 AIC'],
+      [14.5, '15 AIC'],
+      [15.0, '15 AIC'],
+      [-1, '0 AIC'],
+      [-0.0001, '0 AIC'],
+    ];
+
+    for (const [input, expected] of cases) {
+      it(`formats ${input} as ${expected}`, () => {
+        expect(formatAicShort(input)).toBe(expected);
       });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toBe('Copilot Budget - Premium Requests (pro plan)');
-    });
-
-    it('shows plan name in title when plan is from config', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'enterprise',
-        costPerRequest: 0.039,
-        source: 'config',
-      });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toBe('Copilot Budget - Premium Requests (enterprise plan)');
-    });
-
-    it('does not show plan name when source is default', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'unknown',
-        costPerRequest: 0.04,
-        source: 'default',
-      });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toBe('Copilot Budget - Premium Requests');
-    });
-
-    it('uses plan cost per request for per-model cost', async () => {
-      (getPlanInfo as jest.Mock).mockReturnValue({
-        planName: 'pro',
-        costPerRequest: 10 / 300,
-        source: 'api',
-      });
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const gptItem = items.find((i: any) => i.label?.includes('gpt-4o'));
-      expect(gptItem).toBeDefined();
-      // 10 PR * (10/300) = $0.33, displayed as $0.3
-      expect(gptItem.description).toContain('$0.3');
-    });
+    }
   });
 });

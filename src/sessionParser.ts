@@ -1,39 +1,74 @@
+import { normalizeModelId as canonicalizeRateName } from './tokenRates';
+
+export interface ModelTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
 export interface ModelUsage {
-    [model: string]: { inputTokens: number; outputTokens: number };
+  [model: string]: ModelTokens;
+}
+
+export interface ParsedSession {
+  interactions: number;
+  modelUsage: ModelUsage;
+  modelInteractions: { [model: string]: number };
 }
 
 type JsonObject = Record<string, unknown>;
 
 function isObject(value: unknown): value is JsonObject {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isSafePathSegment(seg: string): boolean {
-	// Prevent prototype pollution and other surprising behavior.
-	if (typeof seg !== 'string') {
-		return false;
-	}
-	const forbidden = ['__proto__', 'prototype', 'constructor', 'hasOwnProperty'];
-	return !forbidden.includes(seg) && !seg.startsWith('__');
+  // Prevent prototype pollution and other surprising behavior.
+  if (typeof seg !== 'string') {
+    return false;
+  }
+  const forbidden = ['__proto__', 'prototype', 'constructor', 'hasOwnProperty'];
+  return !forbidden.includes(seg) && !seg.startsWith('__');
 }
 
 function isArrayIndexSegment(seg: string): boolean {
-	return /^\d+$/.test(seg);
+  return /^\d+$/.test(seg);
 }
 
-function normalizeModelId(model: unknown, defaultModel: string): string {
-	if (typeof model !== 'string') {
-		return defaultModel;
-	}
-	const trimmed = model.trim();
-	if (!trimmed) {
-		return defaultModel;
-	}
-	return trimmed.startsWith('copilot/') ? trimmed.substring('copilot/'.length) : trimmed;
+const KNOWN_PREFIXES = ['copilot/', 'copilotcli/', 'claude-code/'];
+
+function stripModelPrefix(id: string): string {
+  for (const prefix of KNOWN_PREFIXES) {
+    if (id.startsWith(prefix)) {
+      return id.slice(prefix.length);
+    }
+  }
+  return id;
+}
+
+const DEFAULT_MODEL = 'unknown';
+
+function normalizeModelFromRequest(model: unknown): string {
+  if (typeof model !== 'string') {
+    return DEFAULT_MODEL;
+  }
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return DEFAULT_MODEL;
+  }
+  return canonicalizeRateName(stripModelPrefix(trimmed));
+}
+
+function clampNonNegInt(n: unknown): number {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) {
+    return 0;
+  }
+  return Math.floor(n);
 }
 
 /**
- * Apply a delta to reconstruct session state from delta-based JSONL
+ * Apply a delta to reconstruct session state from delta-based JSONL.
  * VS Code Insiders uses this format where:
  * - kind: 0 = initial state (full replacement)
  * - kind: 1 = update at key path
@@ -51,7 +86,6 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 	const v = (delta as any).v;
 
 	if (kind === 0) {
-		// Initial state - full replacement
 		return v;
 	}
 
@@ -79,7 +113,6 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 		return existing;
 	};
 
-	// Traverse to the parent of the target location
 	for (let i = 0; i < path.length - 1; i++) {
 		const seg = path[i];
 		const nextSeg = path[i + 1];
@@ -103,25 +136,22 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 
 	const lastSeg = path[path.length - 1];
 	if (kind === 1) {
-		// Set value at key path
 		if (Array.isArray(current) && isArrayIndexSegment(lastSeg)) {
 			current[Number(lastSeg)] = v;
 			return root;
 		}
 		if (isObject(current)) {
-			// Use Object.defineProperty for safe assignment, preventing prototype pollution
 			Object.defineProperty(current, lastSeg, {
 				value: v,
 				writable: true,
 				enumerable: true,
-				configurable: true
+				configurable: true,
 			});
 		}
 		return root;
 	}
 
 	if (kind === 2) {
-		// Append value(s) to array at key path
 		let target: any;
 		if (Array.isArray(current) && isArrayIndexSegment(lastSeg)) {
 			const idx = Number(lastSeg);
@@ -131,12 +161,11 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 			target = current[idx];
 		} else if (isObject(current)) {
 			if (!Array.isArray((current as any)[lastSeg])) {
-				// Use Object.defineProperty for safe assignment
 				Object.defineProperty(current, lastSeg, {
 					value: [],
 					writable: true,
 					enumerable: true,
-					configurable: true
+					configurable: true,
 				});
 			}
 			target = (current as any)[lastSeg];
@@ -157,204 +186,161 @@ function applyDelta(state: unknown, delta: unknown): unknown {
 	return root;
 }
 
-/**
- * Extract text content from response items, separating thinking text.
- */
-function extractResponseAndThinkingText(response: unknown): { responseText: string; thinkingText: string } {
-	if (!Array.isArray(response)) {
-		return { responseText: '', thinkingText: '' };
-	}
-	let responseText = '';
-	let thinkingText = '';
-	for (const item of response) {
-		if (!isObject(item)) {
-			continue;
-		}
-		// Separate thinking items from regular response text
-		if ((item as any).kind === 'thinking') {
-			const value = (item as any).value;
-			if (typeof value === 'string' && value) {
-				thinkingText += value;
-			}
-			continue;
-		}
-		const contentValue = isObject((item as any).content) ? (item as any).content.value : undefined;
-		const value = (item as any).value;
-		// Prefer content.value when present to avoid double-counting wrapper text.
-		if (typeof contentValue === 'string' && contentValue) {
-			responseText += contentValue;
-			continue;
-		}
-		if (typeof value === 'string' && value) {
-			responseText += value;
-		}
-	}
-	return { responseText, thinkingText };
+interface RequestTokens {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
 }
 
-export function parseSessionFileContent(
-	sessionFilePath: string,
-	fileContent: string,
-	estimateTokensFromText: (text: string, model?: string) => number,
-) {
-	const modelUsage: ModelUsage = {};
-	const modelInteractions: { [model: string]: number } = {};
-	let interactions = 0;
-	let totalInputTokens = 0;
-	let totalOutputTokens = 0;
-	let totalThinkingTokens = 0;
+/**
+ * Read server-reported token counts from a request's `result.metadata` block.
+ * Returns null when the request is pending (no result/metadata, or
+ * modelState.value !== 1) so the caller can skip it without counting an
+ * interaction. When `cacheReadTokens` is absent, applies a turn-based heuristic
+ * (turn 1 = 0% cached, turn ≥ 2 = 75% cached) — the resulting cost is lower
+ * than treating all input as fresh, but the heuristic is a midpoint estimate,
+ * not an upper bound.
+ */
+function extractRequestTokens(request: unknown, turnIndex: number): RequestTokens | null {
+  if (!isObject(request)) {
+    return null;
+  }
+  const result = (request as any).result;
+  if (!isObject(result)) {
+    return null;
+  }
+  const metadata = (result as any).metadata;
+  if (!isObject(metadata)) {
+    return null;
+  }
 
-	const defaultModel = 'gpt-4o';
+  // A pending request reports modelState.value !== 1 (in-flight or errored).
+  const modelState = (request as any).modelState;
+  if (
+    isObject(modelState) &&
+    typeof (modelState as any).value === 'number' &&
+    (modelState as any).value !== 1
+  ) {
+    return null;
+  }
 
-	const ensureModel = (m?: string) => (typeof m === 'string' && m ? m : defaultModel);
+  const promptTokens = clampNonNegInt((metadata as any).promptTokens);
+  const outputTokens = clampNonNegInt((metadata as any).outputTokens);
 
-	const addTokens = (model: string, text: string, kind: 'inputTokens' | 'outputTokens') => {
-		const m = ensureModel(model);
-		if (!modelUsage[m]) {modelUsage[m] = { inputTokens: 0, outputTokens: 0 };}
-		const t = estimateTokensFromText(text, m);
-		modelUsage[m][kind] += t;
-		if (kind === 'inputTokens') {
-			totalInputTokens += t;
-		} else {
-			totalOutputTokens += t;
-		}
-	};
+  const rawCacheCreation = (metadata as any).cacheCreationTokens;
+  const cacheCreationTokens =
+    rawCacheCreation === undefined || rawCacheCreation === null
+      ? 0
+      : clampNonNegInt(rawCacheCreation);
 
-	// Handle delta-based JSONL format (VS Code Insiders)
-	if (sessionFilePath.endsWith('.jsonl')) {
-		const lines = fileContent.split(/\r?\n/).filter(l => l.trim());
+  const rawCacheRead = (metadata as any).cacheReadTokens;
+  let cacheReadTokens: number;
+  if (rawCacheRead === undefined) {
+    // Field absent entirely → fall back to the heuristic. Apply 75% over the
+    // remaining prompt budget after cache_creation, so the three buckets never
+    // sum above promptTokens when only one cache field is reported. An
+    // explicit `null` is treated as a serialized zero (clampNonNegInt below),
+    // not as missing data — otherwise we'd over-discount requests where the
+    // server reported "no cache reads happened".
+    const remaining = Math.max(0, promptTokens - cacheCreationTokens);
+    cacheReadTokens = turnIndex >= 2 ? Math.floor(remaining * 0.75) : 0;
+  } else {
+    cacheReadTokens = clampNonNegInt(rawCacheRead);
+  }
 
-		// Check if this is delta-based format (has "kind" field)
-		let isDeltaBased = false;
-		if (lines.length > 0) {
-			try {
-				const first = JSON.parse(lines[0]);
-				if (first && typeof first.kind === 'number') {
-					isDeltaBased = true;
-				}
-			} catch {
-				// Not delta format
-			}
-		}
+  const inputTokens = Math.max(
+    0,
+    promptTokens - cacheReadTokens - cacheCreationTokens,
+  );
 
-		if (isDeltaBased) {
-			// Reconstruct session state from deltas
-			let sessionState: unknown = Object.create(null);
-			for (const line of lines) {
-				try {
-					const delta = JSON.parse(line);
-					sessionState = applyDelta(sessionState, delta);
-				} catch {
-					// Skip invalid lines
-				}
-			}
+  return { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens };
+}
 
-			// Now process the reconstructed session state
-			const requests = isObject(sessionState) && Array.isArray((sessionState as any).requests)
-				? ((sessionState as any).requests as unknown[])
-				: [];
-			if (requests.length > 0) {
-				for (const request of requests) {
-					if (!isObject(request)) {
-						continue;
-					}
-					// Per-request model (user can select different model for each request)
-					const model = normalizeModelId(
-						(request as any).modelId ?? (request as any).selectedModel?.identifier ?? (request as any).model,
-						defaultModel
-					);
+function getRequestModelId(request: unknown): unknown {
+  if (!isObject(request)) {
+    return undefined;
+  }
+  const r = request as any;
+  return r.modelId ?? r.selectedModel?.identifier ?? r.model;
+}
 
-					// Extract user message text and count interaction per model
-					const message = (request as any).message;
-					if (isObject(message) && typeof (message as any).text === 'string') {
-						if ((message as any).text.trim()) {
-							interactions++;
-							modelInteractions[model] = (modelInteractions[model] || 0) + 1;
-						}
-						addTokens(model, (message as any).text, 'inputTokens');
-					}
+function processRequests(requests: unknown[]): ParsedSession {
+  const modelUsage: ModelUsage = {};
+  const modelInteractions: { [model: string]: number } = {};
+  let interactions = 0;
+  let turnIndex = 0;
 
-					// Extract response text (separating thinking text)
-					const { responseText, thinkingText } = extractResponseAndThinkingText((request as any).response);
-					if (responseText) {
-						addTokens(model, responseText, 'outputTokens');
-					}
-					if (thinkingText) {
-						const thinkT = estimateTokensFromText(thinkingText, model);
-						totalThinkingTokens += thinkT;
-						const tm = ensureModel(model);
-						if (!modelUsage[tm]) {modelUsage[tm] = { inputTokens: 0, outputTokens: 0 };}
-						modelUsage[tm].outputTokens += thinkT;
-					}
-				}
-			}
+  for (const request of requests) {
+    if (!isObject(request)) {
+      continue;
+    }
+    turnIndex += 1;
 
-			return {
-				tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens,
-				interactions,
-				modelUsage,
-				modelInteractions,
-				thinkingTokens: totalThinkingTokens
-			};
-		}
-	}
+    const tokens = extractRequestTokens(request, turnIndex);
+    if (!tokens) {
+      continue;
+    }
 
-	// JSON format: plain .json files or non-delta .jsonl files
-	let sessionJson: any;
-	try {
-		sessionJson = JSON.parse(fileContent);
-	} catch {
-		return { tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 };
-	}
+    const model = normalizeModelFromRequest(getRequestModelId(request));
 
-	const requests = Array.isArray(sessionJson.requests) ? sessionJson.requests : (Array.isArray(sessionJson.history) ? sessionJson.history : []);
-	for (const request of requests) {
-		const model = normalizeModelId(request?.model || defaultModel, defaultModel);
-		if (!modelUsage[model]) {modelUsage[model] = { inputTokens: 0, outputTokens: 0 };}
+    interactions += 1;
+    modelInteractions[model] = (modelInteractions[model] || 0) + 1;
 
-		// Count interaction per model
-		const isInteraction = request?.message?.text?.trim() || request?.message?.parts?.some((p: any) => p?.text?.trim());
-		if (isInteraction) {
-			interactions++;
-			modelInteractions[model] = (modelInteractions[model] || 0) + 1;
-		}
+    let entry = modelUsage[model];
+    if (!entry) {
+      entry = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      };
+      modelUsage[model] = entry;
+    }
+    entry.inputTokens += tokens.inputTokens;
+    entry.outputTokens += tokens.outputTokens;
+    entry.cacheReadTokens += tokens.cacheReadTokens;
+    entry.cacheCreationTokens += tokens.cacheCreationTokens;
+  }
 
-		if (request?.message?.parts) {
-			for (const part of request.message.parts) {
-				if (typeof part?.text === 'string' && part.text) {
-					addTokens(model, part.text, 'inputTokens');
-				}
-			}
-		} else if (typeof request?.message?.text === 'string') {
-			addTokens(model, request.message.text, 'inputTokens');
-		}
+  return { interactions, modelUsage, modelInteractions };
+}
 
-		const responses = Array.isArray(request?.response) ? request.response : (Array.isArray(request?.responses) ? request.responses : []);
-		for (const responseItem of responses) {
-			// Separate thinking tokens
-			if (responseItem?.kind === 'thinking' && typeof responseItem?.value === 'string' && responseItem.value) {
-				const thinkT = estimateTokensFromText(responseItem.value, model);
-				totalThinkingTokens += thinkT;
-				modelUsage[model].outputTokens += thinkT;
-				continue;
-			}
-			if (typeof responseItem?.value === 'string' && responseItem.value) {
-				addTokens(model, responseItem.value, 'outputTokens');
-			} else if (responseItem?.message?.parts) {
-				for (const p of responseItem.message.parts) {
-					if (typeof p?.text === 'string' && p.text) {
-						addTokens(model, p.text, 'outputTokens');
-					}
-				}
-			}
-		}
-	}
+const EMPTY_SESSION: ParsedSession = {
+  interactions: 0,
+  modelUsage: {},
+  modelInteractions: {},
+};
 
-	return {
-		tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens,
-		interactions,
-		modelUsage,
-		modelInteractions,
-		thinkingTokens: totalThinkingTokens
-	};
+export function parseSessionFileContent(fileContent: string): ParsedSession {
+  const lines = fileContent.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) {
+    return EMPTY_SESSION;
+  }
+
+  let first: unknown;
+  try {
+    first = JSON.parse(lines[0]);
+  } catch {
+    return EMPTY_SESSION;
+  }
+  if (!isObject(first) || typeof (first as any).kind !== 'number') {
+    return EMPTY_SESSION;
+  }
+
+  let sessionState: unknown = Object.create(null);
+  for (const line of lines) {
+    try {
+      const delta = JSON.parse(line);
+      sessionState = applyDelta(sessionState, delta);
+    } catch {
+      // Skip invalid lines
+    }
+  }
+
+  const requests =
+    isObject(sessionState) && Array.isArray((sessionState as any).requests)
+      ? ((sessionState as any).requests as unknown[])
+      : [];
+  return processRequests(requests);
 }

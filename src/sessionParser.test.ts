@@ -1,399 +1,549 @@
+import * as path from 'path';
 import { parseSessionFileContent } from './sessionParser';
+import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
-// Simple estimator: 1 token per 4 characters (ratio 0.25), ceil
-const mockEstimate = (text: string, _model?: string): number => Math.ceil(text.length * 0.25);
+const FIXTURE_PATH = path.join(__dirname, '__fixtures__', 'models-and-pricing.json');
 
-describe('sessionParser', () => {
-  describe('parseSessionFileContent - JSON format', () => {
-    it('returns zero stats for empty JSON', () => {
-      const result = parseSessionFileContent('session.json', '{}', mockEstimate);
-      expect(result).toEqual({
-        tokens: 0,
-        interactions: 0,
-        modelUsage: {},
-        modelInteractions: {},
-        thinkingTokens: 0,
-      });
-    });
+beforeAll(() => {
+  resetRateCardForTesting();
+  loadRateCard(FIXTURE_PATH);
+});
 
-    it('returns zero stats for invalid JSON', () => {
-      const result = parseSessionFileContent('session.json', 'not json', mockEstimate);
-      expect(result).toEqual({
-        tokens: 0,
-        interactions: 0,
-        modelUsage: {},
-        modelInteractions: {},
-        thinkingTokens: 0,
-      });
-    });
+afterAll(() => {
+  resetRateCardForTesting();
+});
 
-    it('parses session with requests using message.text', () => {
-      const session = {
-        requests: [
-          {
-            model: 'gpt-4o',
-            message: { text: 'Hello world!' }, // 12 chars -> 3 tokens
-            response: [{ value: 'Hi there!' }], // 9 chars -> 3 tokens
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.interactions).toBe(1);
-      expect(result.tokens).toBe(6); // 3 input + 3 output
-      expect(result.modelUsage['gpt-4o']).toEqual({ inputTokens: 3, outputTokens: 3 });
-      expect(result.thinkingTokens).toBe(0);
-    });
+function makeRequest(opts: {
+  model?: string;
+  selectedModelId?: string;
+  promptTokens?: number | string | null;
+  outputTokens?: number | string | null;
+  cacheReadTokens?: number | string | null;
+  cacheCreationTokens?: number | string | null;
+  noResult?: boolean;
+  noMetadata?: boolean;
+  modelStateValue?: number;
+}): any {
+  const request: any = {};
+  if (opts.model !== undefined) request.modelId = opts.model;
+  if (opts.selectedModelId !== undefined) {
+    request.selectedModel = { identifier: opts.selectedModelId };
+  }
+  if (opts.modelStateValue !== undefined) {
+    request.modelState = { value: opts.modelStateValue };
+  }
+  if (opts.noResult) return request;
+  const result: any = {};
+  if (!opts.noMetadata) {
+    const metadata: any = {};
+    if (opts.promptTokens !== undefined) metadata.promptTokens = opts.promptTokens;
+    if (opts.outputTokens !== undefined) metadata.outputTokens = opts.outputTokens;
+    if (opts.cacheReadTokens !== undefined) metadata.cacheReadTokens = opts.cacheReadTokens;
+    if (opts.cacheCreationTokens !== undefined) metadata.cacheCreationTokens = opts.cacheCreationTokens;
+    result.metadata = metadata;
+  }
+  request.result = result;
+  return request;
+}
 
-    it('parses session with requests using message.parts', () => {
-      const session = {
-        requests: [
-          {
-            model: 'claude-sonnet-4',
-            message: { parts: [{ text: 'Part one' }, { text: 'Part two' }] }, // 8+8=16 chars -> 4 tokens
-            response: [{ value: 'Response text here' }], // 18 chars -> 5 tokens
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.interactions).toBe(1);
-      expect(result.tokens).toBe(9);
-      expect(result.modelUsage['claude-sonnet-4']).toEqual({ inputTokens: 4, outputTokens: 5 });
-    });
+// Wraps a requests[] array as a single-line kind:0 delta — equivalent to the
+// initial snapshot VS Code writes at the top of a JSONL session.
+function deltaSession(requests: any[], extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({ kind: 0, v: { requests, ...extra } });
+}
 
-    it('parses session with history array (alternative format)', () => {
-      const session = {
-        history: [
-          {
-            model: 'gpt-4o',
-            message: { text: 'test' }, // 4 chars -> 1 token
-            response: [{ value: 'ok!!' }], // 4 chars -> 1 token
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.interactions).toBe(1);
-      expect(result.tokens).toBe(2);
-    });
-
-    it('handles multiple models in one session', () => {
-      const session = {
-        requests: [
-          {
-            model: 'gpt-4o',
-            message: { text: 'aaaa' }, // 4 -> 1
-            response: [{ value: 'bbbb' }], // 4 -> 1
-          },
-          {
-            model: 'claude-sonnet-4',
-            message: { text: 'cccc' }, // 4 -> 1
-            response: [{ value: 'dddd' }], // 4 -> 1
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.interactions).toBe(2);
-      expect(result.tokens).toBe(4);
-      expect(Object.keys(result.modelUsage)).toHaveLength(2);
-      expect(result.modelUsage['gpt-4o']).toEqual({ inputTokens: 1, outputTokens: 1 });
-      expect(result.modelUsage['claude-sonnet-4']).toEqual({ inputTokens: 1, outputTokens: 1 });
-    });
-
-    it('defaults to gpt-4o when model is missing', () => {
-      const session = {
-        requests: [
-          {
-            message: { text: 'test' },
-            response: [{ value: 'resp' }],
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.modelUsage['gpt-4o']).toBeDefined();
-    });
-
-    it('separates thinking tokens from output', () => {
-      const session = {
-        requests: [
-          {
-            model: 'claude-sonnet-4',
-            message: { text: 'test' }, // 4 -> 1
-            response: [
-              { kind: 'thinking', value: 'internal reasoning here!!' }, // 25 -> 7
-              { value: 'visible answer' }, // 14 -> 4
-            ],
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.thinkingTokens).toBe(7);
-      expect(result.modelUsage['claude-sonnet-4'].outputTokens).toBe(11); // output (4) + thinking (7) attributed to model
-      expect(result.tokens).toBe(1 + 4 + 7); // input + output + thinking
-    });
-
-    it('handles response with message.parts', () => {
-      const session = {
-        requests: [
-          {
-            model: 'gpt-4o',
-            message: { text: 'test' },
-            response: [{ message: { parts: [{ text: 'part response' }] } }], // 13 -> 4
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.modelUsage['gpt-4o'].outputTokens).toBe(4);
-    });
-
-    it('strips copilot/ prefix from model names', () => {
-      const session = {
-        requests: [
-          {
-            model: 'copilot/gpt-4o',
-            message: { text: 'test' },
-            response: [],
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.modelUsage['gpt-4o']).toBeDefined();
-      expect(result.modelUsage['copilot/gpt-4o']).toBeUndefined();
+describe('parseSessionFileContent — JSONL session reads', () => {
+  it('returns zero stats for empty content', () => {
+    expect(parseSessionFileContent('')).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
     });
   });
 
-  describe('parseSessionFileContent - JSONL delta format', () => {
-    it('reconstructs session from delta-based JSONL', () => {
-      // kind 0 = initial state, kind 1 = update, kind 2 = append
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [] } }),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'gpt-4o',
-          message: { text: 'hello world!' }, // 12 -> 3
-          response: [{ value: 'hi back!!!' }], // 10 -> 3
-        }}),
-      ];
-      const content = lines.join('\n');
-      const result = parseSessionFileContent('session.jsonl', content, mockEstimate);
-      expect(result.interactions).toBe(1);
-      expect(result.tokens).toBe(6);
-      expect(result.modelUsage['gpt-4o']).toEqual({ inputTokens: 3, outputTokens: 3 });
+  it('returns zero stats for unparseable first line', () => {
+    expect(parseSessionFileContent('not json')).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
     });
+  });
 
-    it('handles multiple delta appends', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [] } }),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'gpt-4o',
-          message: { text: 'aaaa' },
-          response: [{ value: 'bbbb' }],
-        }}),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'claude-sonnet-4',
-          message: { text: 'cccc' },
-          response: [{ value: 'dddd' }],
-        }}),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(result.interactions).toBe(2);
-      expect(Object.keys(result.modelUsage)).toHaveLength(2);
+  it('returns zero stats when first line is JSON but lacks kind', () => {
+    expect(parseSessionFileContent(JSON.stringify({ requests: [] }))).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
     });
+  });
 
-    it('handles delta kind 1 (update at path)', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [{ modelId: 'gpt-4o', message: { text: 'old' }, response: [] }] } }),
-        // Update the response of the first request
-        JSON.stringify({ kind: 1, k: ['requests', '0', 'response'], v: [{ value: 'new response!' }] }),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(result.interactions).toBe(1);
-      // Output: "new response!" = 13 chars -> 4 tokens
-      expect(result.modelUsage['gpt-4o'].outputTokens).toBe(4);
+  it('returns zero for unparseable later lines but keeps earlier state', () => {
+    expect(parseSessionFileContent('garbage\nnot json')).toEqual({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
     });
+  });
 
-    it('handles thinking tokens in delta format', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [] } }),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'claude-sonnet-4',
-          message: { text: 'test' },
-          response: [
-            { kind: 'thinking', value: 'reasoning!!' }, // 11 -> 3
-            { value: 'answer' }, // 6 -> 2
+  it('reads server tokens straight from result.metadata', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 200,
+          cacheReadTokens: 800,
+          cacheCreationTokens: 100,
+        }),
+      ]),
+    );
+    expect(result.interactions).toBe(1);
+    expect(result.modelUsage['claude-sonnet-4.6']).toEqual({
+      inputTokens: 100, // 1000 - 800 - 100
+      outputTokens: 200,
+      cacheReadTokens: 800,
+      cacheCreationTokens: 100,
+    });
+    expect(result.modelInteractions).toEqual({ 'claude-sonnet-4.6': 1 });
+  });
+
+  it('aggregates multiple requests for the same model', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 500,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+        }),
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 700,
+          outputTokens: 150,
+          cacheReadTokens: 600,
+        }),
+      ]),
+    );
+    expect(result.interactions).toBe(2);
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 600, // 500 + (700 - 600)
+      outputTokens: 250,
+      cacheReadTokens: 600,
+      cacheCreationTokens: 0,
+    });
+    expect(result.modelInteractions).toEqual({ 'gpt-4.1': 2 });
+  });
+
+  it('keeps mixed-model sessions separated by canonical id (full version preserved)', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: 800,
+        }),
+        makeRequest({
+          model: 'gpt-5.3-codex',
+          promptTokens: 500,
+          outputTokens: 50,
+          cacheReadTokens: 100,
+        }),
+      ]),
+    );
+    expect(Object.keys(result.modelUsage).sort()).toEqual([
+      'claude-sonnet-4.6',
+      'gpt-5.3-codex',
+    ]);
+    expect(result.modelUsage['claude-sonnet-4.6'].cacheReadTokens).toBe(800);
+    expect(result.modelUsage['gpt-5.3-codex'].cacheReadTokens).toBe(100);
+  });
+
+  it('skips requests missing result.metadata entirely (no interaction increment)', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({ model: 'gpt-4.1', noResult: true }),
+        makeRequest({ model: 'gpt-4.1', noMetadata: true }),
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+        }),
+      ]),
+    );
+    expect(result.interactions).toBe(1);
+    expect(result.modelInteractions).toEqual({ 'gpt-4.1': 1 });
+    expect(result.modelUsage['gpt-4.1'].inputTokens).toBe(100);
+  });
+
+  it('clamps malformed token values to 0 but still counts the interaction', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 'abc' as any,
+          outputTokens: -100 as any,
+          cacheReadTokens: null,
+        }),
+      ]),
+    );
+    expect(result.interactions).toBe(1);
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it('treats explicit cacheReadTokens=null as 0, not as missing data triggering the heuristic', () => {
+    // Two requests in one session — the heuristic would normally kick in on
+    // turn 2+. An explicit null says "no cache reads happened", so the input
+    // bucket must keep the full promptTokens instead of getting 75% diverted
+    // to cache_read.
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: null,
+        }),
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: null,
+        }),
+      ]),
+    );
+    expect(result.interactions).toBe(2);
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 2000,
+      outputTokens: 200,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it('skips pending requests (modelState.value !== 1) — no tokens, no interaction', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'gpt-4.1',
+          modelStateValue: 2,
+          promptTokens: 500,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+        }),
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+        }),
+      ]),
+    );
+    expect(result.interactions).toBe(1);
+    expect(result.modelUsage['gpt-4.1'].inputTokens).toBe(100);
+  });
+
+  it('defaults to "unknown" when model id missing', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({ promptTokens: 100, outputTokens: 50, cacheReadTokens: 0 }),
+      ]),
+    );
+    expect(result.modelUsage['unknown']).toBeDefined();
+  });
+
+  it('strips copilot/, copilotcli/, claude-code/ prefixes', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'copilot/gpt-4.1',
+          promptTokens: 10,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+        }),
+        makeRequest({
+          model: 'copilotcli/claude-opus-4.6',
+          promptTokens: 10,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+        }),
+        makeRequest({
+          model: 'claude-code/claude-sonnet-4.6',
+          promptTokens: 10,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+        }),
+      ]),
+    );
+    expect(result.modelUsage['gpt-4.1']).toBeDefined();
+    expect(result.modelUsage['claude-opus-4.6']).toBeDefined();
+    expect(result.modelUsage['claude-sonnet-4.6']).toBeDefined();
+  });
+
+  it('uses selectedModel.identifier when modelId absent', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          selectedModelId: 'claude-opus-4.6',
+          promptTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+        }),
+      ]),
+    );
+    expect(result.modelUsage['claude-opus-4.6']).toBeDefined();
+  });
+});
+
+describe('cache-split heuristic', () => {
+  it('does NOT fire when cacheReadTokens is explicitly present', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: 200, // explicit
+        }),
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: 800, // explicit
+        }),
+      ]),
+    );
+    expect(result.modelUsage['claude-sonnet-4.6']).toEqual({
+      inputTokens: 1000, // (1000-200) + (1000-800) = 800 + 200
+      outputTokens: 200,
+      cacheReadTokens: 1000, // 200 + 800
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it('turn 1 has 0% cache; turn 2+ has 75% cache when cacheReadTokens absent', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        // Turn 1: no cache field; expect 0% cached
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 1000,
+          outputTokens: 100,
+        }),
+        // Turn 2: no cache field; expect 75% cached (floor(2000 * 0.75) = 1500)
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 2000,
+          outputTokens: 200,
+        }),
+      ]),
+    );
+    // Turn 1: input=1000, cacheRead=0
+    // Turn 2: cacheRead = floor(2000 * 0.75) = 1500, input = 2000 - 1500 = 500
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 1500, // 1000 + 500
+      outputTokens: 300,
+      cacheReadTokens: 1500, // 0 + 1500
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it('heuristic caps at the remaining prompt budget when cacheCreationTokens is reported alone', () => {
+    // Defensive: if upstream ever ships cacheCreationTokens without
+    // cacheReadTokens, the heuristic must not push the three buckets above
+    // promptTokens (would double-count tokens at higher rates).
+    const result = parseSessionFileContent(
+      deltaSession([
+        // Turn 1
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 100,
+          outputTokens: 10,
+        }),
+        // Turn 2: cacheCreation reported, cacheRead absent. Without the cap,
+        // heuristic would set cacheRead = floor(1000 * 0.75) = 750 and the
+        // sum (750 + 800 + 0 input) = 1550 > promptTokens.
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheCreationTokens: 800,
+        }),
+      ]),
+    );
+    const usage = result.modelUsage['claude-sonnet-4.6'];
+    // Turn 2: remaining = 1000 - 800 = 200; cacheRead = floor(200 * 0.75) = 150;
+    // input = 1000 - 150 - 800 = 50. Sum = 1000 (matches promptTokens).
+    expect(usage.cacheReadTokens).toBe(150); // 0 (turn 1) + 150 (turn 2)
+    expect(usage.cacheCreationTokens).toBe(800);
+    // Turn 1 input=100, Turn 2 input=50
+    expect(usage.inputTokens).toBe(150);
+    // No bucket overshoot vs sum of promptTokens across both turns (100 + 1000)
+    expect(
+      usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
+    ).toBeLessThanOrEqual(1100);
+  });
+
+  it('counts pending requests against turn index so heuristic still aligns with array position', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        // Turn 1: pending — skipped, but turnIndex advances to 1
+        makeRequest({
+          model: 'gpt-4.1',
+          modelStateValue: 2,
+          promptTokens: 9999,
+        }),
+        // Turn 2: complete, no cache field → heuristic applies (75%)
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 1000,
+          outputTokens: 100,
+        }),
+      ]),
+    );
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 250, // 1000 - 750
+      outputTokens: 100,
+      cacheReadTokens: 750, // floor(1000 * 0.75)
+      cacheCreationTokens: 0,
+    });
+  });
+});
+
+describe('parseSessionFileContent — multi-line delta reconstruction', () => {
+  it('reconstructs session from kind:0 + kind:2 deltas', () => {
+    const lines = [
+      JSON.stringify({ kind: 0, v: { requests: [] } }),
+      JSON.stringify({
+        kind: 2,
+        k: ['requests'],
+        v: makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 500,
+          outputTokens: 100,
+          cacheReadTokens: 0,
+        }),
+      }),
+    ];
+    const result = parseSessionFileContent(lines.join('\n'));
+    expect(result.interactions).toBe(1);
+    expect(result.modelUsage['gpt-4.1'].inputTokens).toBe(500);
+  });
+
+  it('applies kind:1 path update writing metadata under requests[0].result.metadata', () => {
+    const lines = [
+      JSON.stringify({
+        kind: 0,
+        v: {
+          requests: [
+            {
+              modelId: 'claude-sonnet-4.6',
+              result: {},
+            },
           ],
-        }}),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(result.thinkingTokens).toBe(3);
-      expect(result.modelUsage['claude-sonnet-4'].outputTokens).toBe(5); // output (2) + thinking (3) attributed to model
-    });
-
-    it('falls back to JSON parse for non-delta JSONL', () => {
-      // A .jsonl file that contains a plain JSON object (not delta format)
-      const session = {
-        requests: [
-          {
-            model: 'gpt-4o',
-            message: { text: 'test' },
-            response: [{ value: 'resp' }],
-          },
-        ],
-      };
-      const result = parseSessionFileContent('session.jsonl', JSON.stringify(session), mockEstimate);
-      expect(result.interactions).toBe(1);
-      expect(result.tokens).toBeGreaterThan(0);
-    });
-
-    it('returns zero for unparseable JSONL', () => {
-      const result = parseSessionFileContent('session.jsonl', 'garbage data\nnot json', mockEstimate);
-      expect(result).toEqual({ tokens: 0, interactions: 0, modelUsage: {}, modelInteractions: {}, thinkingTokens: 0 });
+        },
+      }),
+      JSON.stringify({
+        kind: 1,
+        k: ['requests', '0', 'result', 'metadata'],
+        v: {
+          promptTokens: 800,
+          outputTokens: 150,
+          cacheReadTokens: 600,
+          cacheCreationTokens: 0,
+        },
+      }),
+    ];
+    const result = parseSessionFileContent(lines.join('\n'));
+    expect(result.interactions).toBe(1);
+    expect(result.modelUsage['claude-sonnet-4.6']).toEqual({
+      inputTokens: 200, // 800 - 600
+      outputTokens: 150,
+      cacheReadTokens: 600,
+      cacheCreationTokens: 0,
     });
   });
 
-  describe('prototype pollution prevention', () => {
-    it('rejects __proto__ in delta key paths', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: {} }),
-        JSON.stringify({ kind: 1, k: ['__proto__', 'polluted'], v: true }),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      // Should not pollute Object.prototype
-      expect(({} as any).polluted).toBeUndefined();
-      expect(result.tokens).toBe(0);
-    });
+  it('handles multiple delta appends with mixed models', () => {
+    const lines = [
+      JSON.stringify({ kind: 0, v: { requests: [] } }),
+      JSON.stringify({
+        kind: 2,
+        k: ['requests'],
+        v: makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+        }),
+      }),
+      JSON.stringify({
+        kind: 2,
+        k: ['requests'],
+        v: makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 200,
+          outputTokens: 30,
+          cacheReadTokens: 0,
+        }),
+      }),
+    ];
+    const result = parseSessionFileContent(lines.join('\n'));
+    expect(result.interactions).toBe(2);
+    expect(Object.keys(result.modelUsage).sort()).toEqual([
+      'claude-sonnet-4.6',
+      'gpt-4.1',
+    ]);
+  });
+});
 
-    it('rejects constructor in delta key paths', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: {} }),
-        JSON.stringify({ kind: 1, k: ['constructor', 'prototype'], v: { evil: true } }),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(({} as any).evil).toBeUndefined();
-      expect(result.tokens).toBe(0);
-    });
-
-    it('rejects prototype in delta key paths', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: {} }),
-        JSON.stringify({ kind: 1, k: ['prototype', 'injected'], v: 'bad' }),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(({} as any).injected).toBeUndefined();
-      expect(result.tokens).toBe(0);
-    });
-
-    it('rejects keys starting with double underscore', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: {} }),
-        JSON.stringify({ kind: 1, k: ['__custom', 'data'], v: 'bad' }),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(result.tokens).toBe(0);
-    });
+describe('prototype pollution prevention', () => {
+  it('rejects __proto__ in delta key paths', () => {
+    const lines = [
+      JSON.stringify({ kind: 0, v: {} }),
+      JSON.stringify({ kind: 1, k: ['__proto__', 'polluted'], v: true }),
+    ];
+    const result = parseSessionFileContent(lines.join('\n'));
+    expect(({} as any).polluted).toBeUndefined();
+    expect(result.interactions).toBe(0);
   });
 
-  describe('response extraction with content.value', () => {
-    it('prefers content.value over value in delta response items', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [] } }),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'gpt-4o',
-          message: { text: 'test' },
-          response: [
-            { value: 'wrapper', content: { value: 'actual content!!' } }, // 16 chars -> 4 tokens
-          ],
-        }}),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      // Should use "actual content!!" (16 chars -> 4) not "wrapper" (7 chars -> 2)
-      expect(result.modelUsage['gpt-4o'].outputTokens).toBe(4);
-    });
+  it('rejects constructor in delta key paths', () => {
+    const lines = [
+      JSON.stringify({ kind: 0, v: {} }),
+      JSON.stringify({
+        kind: 1,
+        k: ['constructor', 'prototype'],
+        v: { evil: true },
+      }),
+    ];
+    const result = parseSessionFileContent(lines.join('\n'));
+    expect(({} as any).evil).toBeUndefined();
+    expect(result.interactions).toBe(0);
   });
 
-  describe('modelInteractions counting', () => {
-    it('counts interactions per model in JSON format', () => {
-      const session = {
-        requests: [
-          { model: 'gpt-4o', message: { text: 'q1' }, response: [{ value: 'a1' }] },
-          { model: 'gpt-4o', message: { text: 'q2' }, response: [{ value: 'a2' }] },
-          { model: 'claude-sonnet-4', message: { text: 'q3' }, response: [{ value: 'a3' }] },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.modelInteractions).toEqual({ 'gpt-4o': 2, 'claude-sonnet-4': 1 });
-      expect(result.interactions).toBe(3);
-    });
-
-    it('counts interactions per model in JSONL delta format', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [] } }),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'gpt-4o', message: { text: 'q1' }, response: [{ value: 'a1' }],
-        }}),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'claude-sonnet-4', message: { text: 'q2' }, response: [{ value: 'a2' }],
-        }}),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'claude-sonnet-4', message: { text: 'q3' }, response: [{ value: 'a3' }],
-        }}),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(result.modelInteractions).toEqual({ 'gpt-4o': 1, 'claude-sonnet-4': 2 });
-      expect(result.interactions).toBe(3);
-    });
-
-    it('does not count requests with empty message text', () => {
-      const session = {
-        requests: [
-          { model: 'gpt-4o', message: { text: 'real question' }, response: [{ value: 'a' }] },
-          { model: 'gpt-4o', message: { text: '   ' }, response: [{ value: 'a' }] },
-          { model: 'gpt-4o', message: { text: '' }, response: [{ value: 'a' }] },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.modelInteractions).toEqual({ 'gpt-4o': 1 });
-      expect(result.interactions).toBe(1);
-    });
-
-    it('returns empty modelInteractions for empty session', () => {
-      const result = parseSessionFileContent('session.json', '{}', mockEstimate);
-      expect(result.modelInteractions).toEqual({});
-    });
-
-    it('counts interactions using message.parts in JSON format', () => {
-      const session = {
-        requests: [
-          { model: 'gpt-4o', message: { parts: [{ text: 'hello' }] }, response: [{ value: 'a' }] },
-        ],
-      };
-      const result = parseSessionFileContent('session.json', JSON.stringify(session), mockEstimate);
-      expect(result.modelInteractions).toEqual({ 'gpt-4o': 1 });
-    });
+  it('rejects prototype in delta key paths', () => {
+    const lines = [
+      JSON.stringify({ kind: 0, v: {} }),
+      JSON.stringify({ kind: 1, k: ['prototype', 'injected'], v: 'bad' }),
+    ];
+    const result = parseSessionFileContent(lines.join('\n'));
+    expect(({} as any).injected).toBeUndefined();
+    expect(result.interactions).toBe(0);
   });
 
-  describe('model normalization', () => {
-    it('uses selectedModel.identifier from delta format', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [] } }),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          selectedModel: { identifier: 'claude-opus-4' },
-          message: { text: 'test' },
-          response: [{ value: 'resp' }],
-        }}),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(result.modelUsage['claude-opus-4']).toBeDefined();
-    });
-
-    it('strips copilot/ prefix from modelId in delta format', () => {
-      const lines = [
-        JSON.stringify({ kind: 0, v: { requests: [] } }),
-        JSON.stringify({ kind: 2, k: ['requests'], v: {
-          modelId: 'copilot/gpt-4o',
-          message: { text: 'test' },
-          response: [],
-        }}),
-      ];
-      const result = parseSessionFileContent('session.jsonl', lines.join('\n'), mockEstimate);
-      expect(result.modelUsage['gpt-4o']).toBeDefined();
-    });
+  it('rejects keys starting with double underscore', () => {
+    const lines = [
+      JSON.stringify({ kind: 0, v: {} }),
+      JSON.stringify({ kind: 1, k: ['__custom', 'data'], v: 'bad' }),
+    ];
+    const result = parseSessionFileContent(lines.join('\n'));
+    expect(result.interactions).toBe(0);
   });
 });

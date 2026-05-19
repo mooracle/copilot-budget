@@ -1,7 +1,7 @@
 import { __configStore, __configChangeListeners } from './__mocks__/vscode';
 
 // Must import after mock is set up (jest resolves vscode → __mocks__/vscode)
-import { isEnabled, isCommitHookEnabled, getPlanSetting, getTrailerConfig, onConfigChanged } from './config';
+import { isEnabled, isCommitHookEnabled, getTrailerConfig, onConfigChanged } from './config';
 
 beforeEach(() => {
   // Clear overrides between tests
@@ -22,80 +22,79 @@ describe('config', () => {
   });
 
   describe('isCommitHookEnabled', () => {
-    it('returns true by default', () => {
-      expect(isCommitHookEnabled()).toBe(true);
-    });
-
-    it('returns false when overridden', () => {
-      __configStore['copilot-budget.commitHook.enabled'] = false;
+    it('returns false by default (opt-in)', () => {
       expect(isCommitHookEnabled()).toBe(false);
     });
-  });
 
-  describe('getPlanSetting', () => {
-    it('returns "auto" by default', () => {
-      expect(getPlanSetting()).toBe('auto');
+    it('returns true when overridden', () => {
+      __configStore['copilot-budget.commitHook.enabled'] = true;
+      expect(isCommitHookEnabled()).toBe(true);
     });
-
-    it('returns configured plan value', () => {
-      __configStore['copilot-budget.plan'] = 'pro';
-      expect(getPlanSetting()).toBe('pro');
-    });
-
   });
 
   describe('getTrailerConfig', () => {
     it('returns defaults when no overrides set', () => {
       const config = getTrailerConfig();
-      expect(config.premiumRequests).toBe('Copilot-Premium-Requests');
+      // estimatedCost is opt-in: AI Credits is the primary trailer.
+      expect(config.estimatedCost).toBe(false);
+      expect(config.aiCredits).toBe('Copilot-AI-Credits');
+      expect(config.aiCreditsPerModel).toBe(false);
+    });
+
+    it('returns the configured trailer key when estimatedCost is explicitly enabled', () => {
+      __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = 'Copilot-Est-Cost';
+      const config = getTrailerConfig();
       expect(config.estimatedCost).toBe('Copilot-Est-Cost');
-      expect(config.model).toBe(false);
     });
 
     it('returns custom trailer names', () => {
-      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = 'AI-Requests';
       __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = 'AI-Cost';
-      __configStore['copilot-budget.commitHook.trailers.model'] = 'AI-Model';
+      __configStore['copilot-budget.commitHook.trailers.aiCredits'] = 'AI-Credits';
+      __configStore['copilot-budget.commitHook.trailers.aiCreditsPerModel'] = 'AI-Credits-Models';
 
       const config = getTrailerConfig();
-      expect(config.premiumRequests).toBe('AI-Requests');
       expect(config.estimatedCost).toBe('AI-Cost');
-      expect(config.model).toBe('AI-Model');
+      expect(config.aiCredits).toBe('AI-Credits');
+      expect(config.aiCreditsPerModel).toBe('AI-Credits-Models');
     });
 
     it('returns false when trailers are disabled', () => {
-      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = false;
       __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = false;
+      __configStore['copilot-budget.commitHook.trailers.aiCredits'] = false;
 
       const config = getTrailerConfig();
-      expect(config.premiumRequests).toBe(false);
       expect(config.estimatedCost).toBe(false);
+      expect(config.aiCredits).toBe(false);
     });
 
-    it('treats boolean true as default string value', () => {
-      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = true;
-      __configStore['copilot-budget.commitHook.trailers.model'] = true;
+    it('treats boolean true as the default value (string for aiCredits, false for opt-in trailers)', () => {
+      __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = true;
+      __configStore['copilot-budget.commitHook.trailers.aiCredits'] = true;
+      __configStore['copilot-budget.commitHook.trailers.aiCreditsPerModel'] = true;
 
       const config = getTrailerConfig();
-      expect(config.premiumRequests).toBe('Copilot-Premium-Requests');
-      expect(config.model).toBe(false);
+      // estimatedCost default is false (opt-in), so boolean-true falls back to false
+      expect(config.estimatedCost).toBe(false);
+      expect(config.aiCredits).toBe('Copilot-AI-Credits');
+      // aiCreditsPerModel default is false, so boolean-true falls back to false
+      expect(config.aiCreditsPerModel).toBe(false);
     });
 
     it('strips newlines, equals, slashes, and backslashes from trailer keys', () => {
-      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = 'Trailer\nInjection=bad';
+      __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = 'Trailer\nInjection=bad';
       const config = getTrailerConfig();
-      expect(config.premiumRequests).toBe('TrailerInjectionbad');
+      expect(config.estimatedCost).toBe('TrailerInjectionbad');
 
-      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = 'Copilot/Cost\\Value';
+      __configStore['copilot-budget.commitHook.trailers.estimatedCost'] = 'Copilot/Cost\\Value';
       const config2 = getTrailerConfig();
-      expect(config2.premiumRequests).toBe('CopilotCostValue');
+      expect(config2.estimatedCost).toBe('CopilotCostValue');
     });
 
     it('returns false for empty string trailer key', () => {
-      __configStore['copilot-budget.commitHook.trailers.premiumRequests'] = '';
+      __configStore['copilot-budget.commitHook.trailers.aiCredits'] = '';
 
       const config = getTrailerConfig();
-      expect(config.premiumRequests).toBe(false);
+      expect(config.aiCredits).toBe(false);
     });
   });
 
