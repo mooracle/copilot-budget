@@ -124,6 +124,12 @@ type Snapshot = {
 };
 
 export class Tracker {
+  // Cap on the number of `parserState` objects retained at once. Aggregates and
+  // lastOffset survive eviction unchanged — only the incremental-parse anchor
+  // is dropped, forcing a full re-parse on the next mtime change for that file.
+  // TODO: surface as `copilot-budget.parserStateCacheSize` config if heavy
+  // multi-chat users ever need to tune this.
+  private static readonly MAX_PARSER_STATES = 3;
   private baseline: Snapshot = {
     interactions: 0,
     modelUsage: {},
@@ -134,6 +140,11 @@ export class Tracker {
   // trailer the hook just consumed) is preserved as the next commit's delta.
   private lastSnapshot: Snapshot | null = null;
   private fileCache = new Map<string, FileCache>();
+  // Paths in least-recently-touched order whose `parserState` is currently
+  // retained. Tail = most recently used. Touched whenever a scan creates or
+  // applies deltas to a parserState. Over the cap, the head is evicted —
+  // its cache entry survives with parserState=null.
+  private parserStateLru: string[] = [];
   // Snapshot of file paths present at the moment baseline was captured.
   // Used by getFileDiagnostics() to flag which files were already on disk
   // at session start (and therefore have their existing contents folded
@@ -193,6 +204,23 @@ export class Tracker {
     return new Promise<void>((resolve) => setImmediate(resolve));
   }
 
+  private touchParserStateLru(path: string): void {
+    const idx = this.parserStateLru.indexOf(path);
+    if (idx >= 0) this.parserStateLru.splice(idx, 1);
+    this.parserStateLru.push(path);
+    while (this.parserStateLru.length > Tracker.MAX_PARSER_STATES) {
+      const evicted = this.parserStateLru.shift();
+      if (!evicted) break;
+      const entry = this.fileCache.get(evicted);
+      if (entry) entry.parserState = null;
+    }
+  }
+
+  private dropParserStateLru(path: string): void {
+    const idx = this.parserStateLru.indexOf(path);
+    if (idx >= 0) this.parserStateLru.splice(idx, 1);
+  }
+
   private scanAll(): Promise<Snapshot> {
     if (this.scanInFlight) return this.scanInFlight;
     this.scanInFlight = this.doScanAll();
@@ -242,6 +270,7 @@ export class Tracker {
       } catch {
         // File no longer on disk (deleted/moved) — evict from cache.
         this.fileCache.delete(file);
+        this.dropParserStateLru(file);
         continue;
       }
 
@@ -316,6 +345,7 @@ export class Tracker {
         lastOffset: nextLastOffset,
         parserState,
       });
+      this.touchParserStateLru(file);
       totals.interactions += entry.interactions;
       mergeModelUsage(totals.modelUsage, entry.modelUsage);
       mergeModelInteractions(totals.modelInteractions, entry.modelInteractions);
@@ -527,6 +557,7 @@ export class Tracker {
     this.stop();
     this.listeners = [];
     this.fileCache.clear();
+    this.parserStateLru = [];
     this.baselineFiles.clear();
     this.previousStats = null;
     this.lastSnapshot = null;

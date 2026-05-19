@@ -1219,6 +1219,140 @@ describe('Tracker — incremental parsing', () => {
   });
 });
 
+describe('Tracker — parserState LRU eviction', () => {
+  function fourFiles(mtime = 1000) {
+    return ['a', 'b', 'c', 'd'].map((n, i) => ({
+      path: `/sessions/${n}.jsonl`,
+      mtime,
+      content: '{}',
+      parseResult: {
+        interactions: i + 1,
+        modelUsage: {
+          'gpt-4.1': { ...emptyTokens(), inputTokens: 100 * (i + 1) },
+        },
+        modelInteractions: { 'gpt-4.1': i + 1 },
+      },
+    }));
+  }
+
+  it('caps parserState retention at 3 entries; oldest evicted, aggregate preserved', async () => {
+    // Files are processed in array order, so a is touched first and becomes
+    // the LRU head. After d is touched, length=4>cap → a evicted.
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<
+        string,
+        { parserState: unknown; interactions: number; modelUsage: any }
+      >;
+    }).fileCache;
+
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/b.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/c.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/d.jsonl')!.parserState).not.toBeNull();
+
+    // Evicted file's aggregate survives eviction unchanged.
+    const a = cache.get('/sessions/a.jsonl')!;
+    expect(a.interactions).toBe(1);
+    expect(a.modelUsage['gpt-4.1'].inputTokens).toBe(100);
+
+    tracker.dispose();
+  });
+
+  it('re-installs parserState via full re-parse when an evicted file changes', async () => {
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { parserState: unknown }>;
+    }).fileCache;
+    expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
+
+    // Bump a's mtime — full re-parse runs since parserState was evicted.
+    // LRU rotates: a goes to tail, b becomes the new head and gets evicted.
+    const refreshed = fourFiles().map((f) =>
+      f.path === '/sessions/a.jsonl' ? { ...f, mtime: 2000 } : f,
+    );
+    setupFiles(refreshed);
+    await tracker.update();
+
+    expect(cache.get('/sessions/a.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/b.jsonl')!.parserState).toBeNull();
+    expect(cache.get('/sessions/c.jsonl')!.parserState).not.toBeNull();
+    expect(cache.get('/sessions/d.jsonl')!.parserState).not.toBeNull();
+
+    // b's aggregate is unchanged after eviction.
+    const b = (cache.get('/sessions/b.jsonl')! as unknown as {
+      interactions: number;
+      modelUsage: any;
+    });
+    expect(b.interactions).toBe(2);
+    expect(b.modelUsage['gpt-4.1'].inputTokens).toBe(200);
+    tracker.dispose();
+  });
+
+  it('preserves getFileDiagnostics() output across LRU eviction', async () => {
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const diag = tracker.getFileDiagnostics();
+    expect(diag).toHaveLength(4);
+
+    const a = diag.find((d) => d.path === '/sessions/a.jsonl')!;
+    expect(a.interactions).toBe(1);
+    expect(a.modelInteractions).toEqual({ 'gpt-4.1': 1 });
+    expect(a.modelUsage['gpt-4.1'].inputTokens).toBe(100);
+    expect(a.inBaseline).toBe(true);
+
+    const d = diag.find((d) => d.path === '/sessions/d.jsonl')!;
+    expect(d.interactions).toBe(4);
+    expect(d.modelUsage['gpt-4.1'].inputTokens).toBe(400);
+    expect(d.inBaseline).toBe(true);
+
+    tracker.dispose();
+  });
+
+  it('drops evicted-file LRU entry when the file is deleted', async () => {
+    // Cover the statSync-fail eviction path: it must also clear parserStateLru
+    // so a later re-creation doesn't end up double-tracked.
+    setupFiles(fourFiles());
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+
+    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    expect(lru).toEqual(['/sessions/b.jsonl', '/sessions/c.jsonl', '/sessions/d.jsonl']);
+
+    // Delete b: discovery drops it AND statSync throws for that path.
+    mockDiscovery.discoverSessionFiles.mockReturnValue([
+      '/sessions/a.jsonl',
+      '/sessions/c.jsonl',
+      '/sessions/d.jsonl',
+    ]);
+    mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+      if (p.toString() === '/sessions/b.jsonl') throw new Error('ENOENT');
+      return { mtimeMs: 1000 } as fs.Stats;
+    });
+
+    await tracker.update();
+
+    expect(lru).toEqual(['/sessions/c.jsonl', '/sessions/d.jsonl']);
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, unknown>;
+    }).fileCache;
+    expect(cache.has('/sessions/b.jsonl')).toBe(false);
+    tracker.dispose();
+  });
+});
+
 describe('Tracker — periodic scanning', () => {
   it('calls update on interval', async () => {
     setupEmptyDiscovery();

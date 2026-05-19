@@ -119,14 +119,14 @@ Make the mtime-changed branch read only `[lastOffset .. fileSize]` when `parserS
 
 Cap the number of `parserState` objects kept in the cache. Default 3 — covers single-active-chat (typical) and multi-chat (rare) without unbounded growth over long sessions. Evicted entries keep their aggregate; they just lose the ability to do incremental on the next change (full re-parse, no correctness impact).
 
-- [ ] add private constant `MAX_PARSER_STATES = 3` (or read from a future config — for now hardcode and leave a TODO referencing config if it's ever needed).
-- [ ] add private field `parserStateLru: string[]` — paths in least-recently-touched order. Touched on every scan where the file's `parserState` was used or created.
-- [ ] eviction policy: after a scan that creates/uses a `parserState`, if `parserStateLru.length > MAX_PARSER_STATES`, shift the oldest path and set its cache entry's `parserState = null` (keep `lastOffset` and aggregate fields). On the next mtime change for that file, full re-parse runs and re-installs `parserState`.
-- [ ] `dispose()` clears `parserStateLru` too.
-- [ ] write tests: scanning 4 different active files (4 mtime changes) leaves exactly 3 with non-null `parserState`; the least-recently-touched has `parserState = null` but its aggregate is preserved.
-- [ ] write tests: an evicted file that becomes active again gets `parserState` re-installed (full re-parse on next mtime change).
-- [ ] write tests: eviction does not affect `getFileDiagnostics()` output (per-file aggregate breakdown unchanged).
-- [ ] run `npm test` — must pass before next task.
+- [x] add private constant `MAX_PARSER_STATES = 3` (or read from a future config — for now hardcode and leave a TODO referencing config if it's ever needed).
+- [x] add private field `parserStateLru: string[]` — paths in least-recently-touched order. Touched on every scan where the file's `parserState` was used or created.
+- [x] eviction policy: after a scan that creates/uses a `parserState`, if `parserStateLru.length > MAX_PARSER_STATES`, shift the oldest path and set its cache entry's `parserState = null` (keep `lastOffset` and aggregate fields). On the next mtime change for that file, full re-parse runs and re-installs `parserState`.
+- [x] `dispose()` clears `parserStateLru` too.
+- [x] write tests: scanning 4 different active files (4 mtime changes) leaves exactly 3 with non-null `parserState`; the least-recently-touched has `parserState = null` but its aggregate is preserved.
+- [x] write tests: an evicted file that becomes active again gets `parserState` re-installed (full re-parse on next mtime change).
+- [x] write tests: eviction does not affect `getFileDiagnostics()` output (per-file aggregate breakdown unchanged).
+- [x] run `npm test` — must pass before next task.
 
 ### Task 5: Verify acceptance criteria
 
