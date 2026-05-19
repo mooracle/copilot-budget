@@ -312,6 +312,34 @@ const EMPTY_SESSION: ParsedSession = {
   modelInteractions: {},
 };
 
+export interface ParserState {
+  sessionState: unknown;
+}
+
+export function createParserState(): ParserState {
+  return { sessionState: Object.create(null) };
+}
+
+export function applyDeltaLines(lines: string[], state: ParserState): ParserState {
+  for (const line of lines) {
+    try {
+      const delta = JSON.parse(line);
+      state.sessionState = applyDelta(state.sessionState, delta);
+    } catch {
+      // Skip invalid lines
+    }
+  }
+  return state;
+}
+
+export function aggregateFromState(state: ParserState): ParsedSession {
+  const requests =
+    isObject(state.sessionState) && Array.isArray((state.sessionState as any).requests)
+      ? ((state.sessionState as any).requests as unknown[])
+      : [];
+  return processRequests(requests);
+}
+
 export function parseSessionFileContent(fileContent: string): ParsedSession {
   const lines = fileContent.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length === 0) {
@@ -328,19 +356,6 @@ export function parseSessionFileContent(fileContent: string): ParsedSession {
     return EMPTY_SESSION;
   }
 
-  let sessionState: unknown = Object.create(null);
-  for (const line of lines) {
-    try {
-      const delta = JSON.parse(line);
-      sessionState = applyDelta(sessionState, delta);
-    } catch {
-      // Skip invalid lines
-    }
-  }
-
-  const requests =
-    isObject(sessionState) && Array.isArray((sessionState as any).requests)
-      ? ((sessionState as any).requests as unknown[])
-      : [];
-  return processRequests(requests);
+  const state = applyDeltaLines(lines, createParserState());
+  return aggregateFromState(state);
 }

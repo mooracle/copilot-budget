@@ -63,14 +63,14 @@ The mtime filter and per-file `setImmediate` yield are already shipped. This is 
 
 Carve `parseSessionFileContent` into three pieces so callers can apply deltas incrementally while preserving the existing one-shot API for backward compatibility.
 
-- [ ] add exported type `ParserState` (holds `sessionState: unknown`). Initialize via new `createParserState(): ParserState`.
-- [ ] add exported `applyDeltaLines(lines: string[], state: ParserState): ParserState` that runs the existing `applyDelta` loop against `state.sessionState`. Invalid JSON lines are skipped (current behavior preserved).
-- [ ] add exported `aggregateFromState(state: ParserState): ParsedSession` that pulls `state.sessionState.requests` and runs the existing `processRequests`.
-- [ ] refactor `parseSessionFileContent(content: string): ParsedSession` to: skip-empty/first-line-invalid-shape guards (unchanged); then `applyDeltaLines(lines, createParserState())`; then `aggregateFromState`. Output must be byte-identical to current behavior on all existing fixtures.
-- [ ] write tests: `createParserState` returns expected shape; `applyDeltaLines` accepts multiple chunks and matches one-shot result (i.e. `apply(a) + apply(b)` ≡ `apply(a+b)`); `aggregateFromState` on an empty state returns `{interactions: 0, modelUsage: {}, modelInteractions: {}}`.
-- [ ] write tests: pending→completed transition across two `applyDeltaLines` calls — append a kind=2 pending request, aggregate (counts 0), apply kind=1 `result.metadata` + kind=1 `modelState.value=1` in a second call, aggregate (counts 1, correct tokens).
-- [ ] write tests: invalid JSON lines mid-stream don't poison `sessionState` (skipped, subsequent lines still apply).
-- [ ] run `npm test` — must pass before next task.
+- [x] add exported type `ParserState` (holds `sessionState: unknown`). Initialize via new `createParserState(): ParserState`.
+- [x] add exported `applyDeltaLines(lines: string[], state: ParserState): ParserState` that runs the existing `applyDelta` loop against `state.sessionState`. Invalid JSON lines are skipped (current behavior preserved).
+- [x] add exported `aggregateFromState(state: ParserState): ParsedSession` that pulls `state.sessionState.requests` and runs the existing `processRequests`.
+- [x] refactor `parseSessionFileContent(content: string): ParsedSession` to: skip-empty/first-line-invalid-shape guards (unchanged); then `applyDeltaLines(lines, createParserState())`; then `aggregateFromState`. Output must be byte-identical to current behavior on all existing fixtures.
+- [x] write tests: `createParserState` returns expected shape; `applyDeltaLines` accepts multiple chunks and matches one-shot result (i.e. `apply(a) + apply(b)` ≡ `apply(a+b)`); `aggregateFromState` on an empty state returns `{interactions: 0, modelUsage: {}, modelInteractions: {}}`.
+- [x] write tests: pending→completed transition across two `applyDeltaLines` calls — append a kind=2 pending request, aggregate (counts 0), apply kind=1 `result.metadata` + kind=1 `modelState.value=1` in a second call, aggregate (counts 1, correct tokens).
+- [x] write tests: invalid JSON lines mid-stream don't poison `sessionState` (skipped, subsequent lines still apply).
+- [x] run `npm test` — must pass before next task.
 
 ### Task 2: Add lastOffset + parserState to FileCache
 
