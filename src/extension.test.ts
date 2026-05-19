@@ -103,11 +103,11 @@ beforeEach(async () => {
   configChangedCallback = null;
 
   trackerInstance = {
-    start: jest.fn(),
+    start: jest.fn().mockResolvedValue(undefined),
     stop: jest.fn(),
-    reset: jest.fn(),
-    consume: jest.fn(),
-    update: jest.fn(),
+    reset: jest.fn().mockResolvedValue(undefined),
+    consume: jest.fn().mockResolvedValue(undefined),
+    update: jest.fn().mockResolvedValue(undefined),
     dispose: jest.fn(),
     setPreviousStats: jest.fn(),
     getStats: jest.fn().mockReturnValue(SAMPLE_STATS),
@@ -636,7 +636,7 @@ describe('extension', () => {
       await activate(ctx);
 
       const mockChannel = mockGetOutputChannel();
-      __commandCallbacks['copilot-budget.showDiagnostics']();
+      await __commandCallbacks['copilot-budget.showDiagnostics']();
 
       expect(mockGetDiscoveryDiagnostics).toHaveBeenCalledWith(undefined);
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
@@ -707,7 +707,7 @@ describe('extension', () => {
       await activate(ctx);
 
       const mockChannel = mockGetOutputChannel();
-      __commandCallbacks['copilot-budget.showDiagnostics']();
+      await __commandCallbacks['copilot-budget.showDiagnostics']();
 
       expect(mockGetDiscoveryDiagnostics).toHaveBeenCalledWith(ctx.storageUri);
       expect(mockChannel.appendLine).toHaveBeenCalled();
@@ -719,7 +719,7 @@ describe('extension', () => {
       await activate(ctx);
 
       const mockChannel = mockGetOutputChannel();
-      __commandCallbacks['copilot-budget.showDiagnostics']();
+      await __commandCallbacks['copilot-budget.showDiagnostics']();
 
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
         (c: any[]) => c[0],
@@ -735,7 +735,7 @@ describe('extension', () => {
       await activate(ctx);
 
       const mockChannel = mockGetOutputChannel();
-      __commandCallbacks['copilot-budget.showDiagnostics']();
+      await __commandCallbacks['copilot-budget.showDiagnostics']();
 
       const appendCalls = (mockChannel.appendLine as jest.Mock).mock.calls.map(
         (c: any[]) => c[0],

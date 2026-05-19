@@ -11,12 +11,14 @@ const mockOs = os as jest.Mocked<typeof os>;
 
 // Must import after mocks are set up
 import * as vscode from 'vscode';
+import { __configStore } from './__mocks__/vscode';
 import { discoverSessionFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
 
 beforeEach(() => {
   jest.resetAllMocks();
   mockOs.homedir.mockReturnValue('/home/testuser');
   mockOs.platform.mockReturnValue('darwin');
+  for (const k of Object.keys(__configStore)) delete __configStore[k];
 });
 
 function dirent(name: string, isDir: boolean): fs.Dirent {
@@ -153,6 +155,74 @@ describe('discoverSessionFiles', () => {
 
     const files = discoverSessionFiles(storageUri);
     expect(files).toEqual([path.join(chatDir, 'session.jsonl')]);
+  });
+
+  it('skips files older than sessionMaxAgeDays (default 7)', () => {
+    const storageUri = makeStorageUri();
+    const chatDir = path.join(path.dirname(storageUri.fsPath), 'chatSessions');
+
+    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
+      if (p.toString() === chatDir) {
+        return [
+          dirent('fresh.jsonl', false),
+          dirent('stale.jsonl', false),
+        ] as any;
+      }
+      throw new Error(`ENOENT: ${p}`);
+    });
+
+    const now = Date.now();
+    const fiveDays = 5 * 86_400_000;
+    const tenDays = 10 * 86_400_000;
+    mockFs.statSync.mockImplementation((p: fs.PathLike) => {
+      const name = p.toString();
+      if (name.endsWith('fresh.jsonl')) return { size: 100, mtimeMs: now - fiveDays } as any;
+      return { size: 100, mtimeMs: now - tenDays } as any;
+    });
+
+    const files = discoverSessionFiles(storageUri);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toContain('fresh.jsonl');
+  });
+
+  it('respects custom sessionMaxAgeDays value', () => {
+    const storageUri = makeStorageUri();
+    const chatDir = path.join(path.dirname(storageUri.fsPath), 'chatSessions');
+    __configStore['copilot-budget.sessionMaxAgeDays'] = 30;
+
+    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
+      if (p.toString() === chatDir) {
+        return [dirent('twoWeeksOld.jsonl', false)] as any;
+      }
+      throw new Error(`ENOENT: ${p}`);
+    });
+    mockFs.statSync.mockReturnValue({
+      size: 100,
+      mtimeMs: Date.now() - 14 * 86_400_000,
+    } as any);
+
+    const files = discoverSessionFiles(storageUri);
+    expect(files).toHaveLength(1);
+  });
+
+  it('scans all files when sessionMaxAgeDays=0 (filter disabled)', () => {
+    const storageUri = makeStorageUri();
+    const chatDir = path.join(path.dirname(storageUri.fsPath), 'chatSessions');
+    __configStore['copilot-budget.sessionMaxAgeDays'] = 0;
+
+    mockFs.readdirSync.mockImplementation((p: fs.PathOrFileDescriptor, _opts?: any) => {
+      if (p.toString() === chatDir) {
+        return [dirent('ancient.jsonl', false)] as any;
+      }
+      throw new Error(`ENOENT: ${p}`);
+    });
+    mockFs.statSync.mockReturnValue({
+      size: 100,
+      mtimeMs: Date.now() - 365 * 86_400_000,
+    } as any);
+
+    const files = discoverSessionFiles(storageUri);
+    expect(files).toHaveLength(1);
   });
 
   it('resolves chatSessions one level up from storageUri', () => {

@@ -14,6 +14,12 @@ export function isCommitHookEnabled(): boolean {
   return cfg().get<boolean>('commitHook.enabled', false);
 }
 
+export function getSessionMaxAgeDays(): number {
+  const v = cfg().get<number>('sessionMaxAgeDays', 7);
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return 7;
+  return v;
+}
+
 export interface TrailerConfig {
   estimatedCost: string | false;
   aiCredits: string | false;

@@ -76,6 +76,12 @@
           "default": true,
           "description": "Enable or disable Copilot Budget token usage tracking"
         },
+        "copilot-budget.sessionMaxAgeDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 0,
+          "markdownDescription": "Only scan Copilot chat session files modified within this many days. Older sessions are skipped — their tokens are already folded into the session baseline, so re-reading them gains nothing and is slow when the chat history is large. Set to `0` to disable the filter (scan everything)."
+        },
         "copilot-budget.commitHook.enabled": {
           "type": "boolean",
           "default": false,
