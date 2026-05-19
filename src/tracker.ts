@@ -308,8 +308,11 @@ export class Tracker {
           if (lastNewline < 0) {
             // Partial trailing line — no \n yet. Hold off on parsing so the
             // line completes atomically next scan. Bump mtime so we don't
-            // re-enter this branch until the file changes again.
+            // re-enter this branch until the file changes again. Touch the
+            // LRU so an actively-accumulating file isn't evicted between
+            // partial scans (which would force a needless full re-parse).
             cached!.mtime = mtime;
+            this.touchParserStateLru(file);
             totals.interactions += cached!.interactions;
             mergeModelUsage(totals.modelUsage, cached!.modelUsage);
             mergeModelInteractions(totals.modelInteractions, cached!.modelInteractions);
@@ -324,10 +327,17 @@ export class Tracker {
           parsed = aggregateFromState(parserState);
         } else {
           parserState = createParserState();
-          const lines = content.split(/\r?\n/).filter((l) => l.trim());
+          // Match the incremental branch's atomicity guarantee: only parse
+          // lines that are terminated by a \n we have actually seen. If the
+          // file ends mid-write, the partial trailing line stays unparsed and
+          // lastOffset stops at the last newline, so the next scan picks it
+          // up atomically once the completion bytes arrive.
+          const lastNewline = content.lastIndexOf('\n');
+          const completePrefix = lastNewline < 0 ? '' : content.slice(0, lastNewline + 1);
+          const lines = completePrefix.split(/\r?\n/).filter((l) => l.trim());
           applyDeltaLines(lines, parserState);
           parsed = aggregateFromState(parserState);
-          nextLastOffset = content.length;
+          nextLastOffset = lastNewline < 0 ? 0 : lastNewline + 1;
         }
       } catch {
         log(`scanAll: failed to parse session file: ${file}`);

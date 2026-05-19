@@ -72,8 +72,13 @@ function setupFiles(
 ) {
   // Tag content per-file so the parser mock can route on content alone now
   // that parseSessionFileContent no longer takes a path argument. Fixtures
-  // share `content: '{}'`, so the tag is what makes them distinct.
-  const tagged = files.map((f, i) => ({ ...f, taggedContent: `${f.content}\n#file=${i}` }));
+  // share `content: '{}'`, so the tag is what makes them distinct. The
+  // trailing newline keeps the fixture realistic — the tracker's full
+  // re-parse path now only parses lines that have a terminating \n.
+  const tagged = files.map((f, i) => ({
+    ...f,
+    taggedContent: `${f.content}\n#file=${i}\n`,
+  }));
 
   mockDiscovery.discoverSessionFiles.mockReturnValue(tagged.map((f) => f.path));
 
@@ -903,8 +908,8 @@ describe('Tracker — parser state cache', () => {
     const tracker = new Tracker(STUB_STORAGE_URI);
     await tracker.initialize();
 
-    // Tagged content the readFileSync mock returns is `{}\n#file=0`.
-    const expectedContent = `{}\n#file=0`;
+    // Tagged content the readFileSync mock returns is `{}\n#file=0\n`.
+    const expectedContent = `{}\n#file=0\n`;
     const cache = (tracker as unknown as {
       fileCache: Map<string, { lastOffset: number; parserState: unknown; interactions: number }>;
     }).fileCache;
@@ -1095,6 +1100,49 @@ describe('Tracker — incremental parsing', () => {
     expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
     expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['bbb']);
     expect(mockParser.applyDeltaLines.mock.calls[1][1]).not.toBe(stateBefore);
+    tracker.dispose();
+  });
+
+  it('holds off parsing a first-scan partial line until its completion arrives', async () => {
+    // Regression: previously the full re-parse path advanced lastOffset to
+    // content.length even when content ended mid-line. The partial line was
+    // fed to applyDeltaLines (silently dropped by JSON.parse), and on the
+    // next scan only the completion *suffix* was parsed — the original
+    // request's tokens were lost. The fix mirrors the incremental branch's
+    // atomicity guarantee: only parse up to the last complete \n.
+    mockDiscovery.discoverSessionFiles.mockReturnValue(['/sessions/a.jsonl']);
+    const parser = setupIncrementalParser();
+    parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
+    parser.queue({ interactions: 1, modelUsage: {}, modelInteractions: {} });
+    // Scan 1 catches the file mid-write: "good\n" complete, "partial" not.
+    queueScan(1000, 'good\npartial');
+    queueScan(2000, 'good\npartial-completed\nnext\n');
+
+    const tracker = new Tracker(STUB_STORAGE_URI);
+    await tracker.initialize();
+    // Only the complete "good" line was parsed; the partial trailing line
+    // was held back, not fed to the parser.
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
+    expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['good']);
+
+    const cache = (tracker as unknown as {
+      fileCache: Map<string, { lastOffset: number }>;
+    }).fileCache;
+    // lastOffset stops after the last \n, not at content.length.
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe('good\n'.length);
+
+    await tracker.update();
+
+    // Incremental tail starts where scan 1 stopped, so the completion bytes
+    // arrive as one atomic line plus the new "next" line.
+    expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(2);
+    expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual([
+      'partial-completed',
+      'next',
+    ]);
+    expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(
+      'good\npartial-completed\nnext\n'.length,
+    );
     tracker.dispose();
   });
 
