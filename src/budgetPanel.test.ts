@@ -467,7 +467,7 @@ describe('budgetPanel', () => {
   });
 
   describe('hook toggle', () => {
-    it('calls installHook when hook is not installed', async () => {
+    it('calls installHook and persists commitHook.enabled=true when hook is not installed', async () => {
       mockIsHookInstalled.mockResolvedValue(false);
       mockWindow.showQuickPick
         .mockImplementationOnce(async (items: any[]) =>
@@ -480,9 +480,15 @@ describe('budgetPanel', () => {
 
       expect(mockInstallHook).toHaveBeenCalledTimes(1);
       expect(mockUninstallHook).not.toHaveBeenCalled();
+      expect(__workspaceUpdate).toHaveBeenCalledWith(
+        'copilot-budget',
+        'commitHook.enabled',
+        true,
+        vscode.ConfigurationTarget.Global,
+      );
     });
 
-    it('calls uninstallHook when hook is installed', async () => {
+    it('calls uninstallHook and persists commitHook.enabled=false when hook is installed', async () => {
       mockIsHookInstalled.mockResolvedValue(true);
       mockWindow.showQuickPick
         .mockImplementationOnce(async (items: any[]) =>
@@ -495,6 +501,12 @@ describe('budgetPanel', () => {
 
       expect(mockUninstallHook).toHaveBeenCalledTimes(1);
       expect(mockInstallHook).not.toHaveBeenCalled();
+      expect(__workspaceUpdate).toHaveBeenCalledWith(
+        'copilot-budget',
+        'commitHook.enabled',
+        false,
+        vscode.ConfigurationTarget.Global,
+      );
     });
 
     it('re-renders the panel after hook toggle', async () => {

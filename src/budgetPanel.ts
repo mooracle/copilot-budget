@@ -157,6 +157,14 @@ async function handleCurrencyToggle(current: 'aic' | 'usd'): Promise<void> {
 }
 
 async function handleHookToggle(installed: boolean): Promise<void> {
+  // Persist `copilot-budget.commitHook.enabled` so activation and the
+  // onConfigChanged listener (which re-installs the hook on any
+  // copilot-budget.* change when the setting is true) agree with the panel's
+  // choice. Without this, an uninstall via the panel gets silently undone by
+  // a subsequent currency toggle, and any restart re-installs the hook.
+  await vscode.workspace
+    .getConfiguration('copilot-budget')
+    .update('commitHook.enabled', !installed, vscode.ConfigurationTarget.Global);
   if (installed) {
     await uninstallHook();
   } else {

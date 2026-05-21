@@ -2235,4 +2235,47 @@ describe('Tracker.swapSource', () => {
     expect(tracker.mode).toBe('telemetry');
     tracker.dispose();
   });
+
+  it('disposes the new source and rethrows when its first scan fails', async () => {
+    const oldSource = makeMockSource([makeBatch()]);
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+
+    const scan = jest.fn().mockRejectedValue(new Error('boom'));
+    const dispose = jest.fn();
+    const failingSource: Source = { scan, dispose };
+
+    await expect(
+      tracker.swapSource(failingSource, 'telemetry'),
+    ).rejects.toThrow('boom');
+    expect(dispose).toHaveBeenCalledTimes(1);
+    // Old source remains active.
+    expect(oldSource.dispose).not.toHaveBeenCalled();
+    expect(tracker.mode).toBe('files');
+    tracker.dispose();
+  });
+
+  it('disposes the new source if tracker.dispose lands during scan', async () => {
+    const oldSource = makeMockSource([makeBatch()]);
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+
+    let resolveScan: (b: RawAggregateBatch) => void = () => {};
+    const scan = jest.fn(
+      () =>
+        new Promise<RawAggregateBatch>((resolve) => {
+          resolveScan = resolve;
+        }),
+    );
+    const dispose = jest.fn();
+    const newSource: Source = { scan, dispose };
+
+    const swap = tracker.swapSource(newSource, 'telemetry');
+    // Dispose the tracker before the new source's scan resolves.
+    tracker.dispose();
+    resolveScan(makeBatch());
+    await swap;
+
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
 });

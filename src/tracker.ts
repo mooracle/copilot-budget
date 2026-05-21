@@ -625,7 +625,13 @@ export class Tracker {
   }
 
   async update(): Promise<void> {
-    const current = await this.source.scan();
+    // Capture the source reference up front. If swapSource() lands between the
+    // scan await and the post-await mutations, the scanned data belongs to the
+    // OLD source and would corrupt the freshly installed NEW baseline. Bail
+    // out instead so the next poll picks up the new source cleanly.
+    const sourceAtStart = this.source;
+    const current = await sourceAtStart.scan();
+    if (this.source !== sourceAtStart || this.disposed) return;
     const stats = this.computeStats(current);
     this.lastSnapshot = current;
 
@@ -711,7 +717,24 @@ export class Tracker {
     newSource: Source,
     newMode: 'files' | 'telemetry',
   ): Promise<void> {
-    const snapshot = await newSource.scan();
+    // Scan the new source first so a failure leaves the OLD source in place
+    // without disturbing tracker state. On rejection, dispose the new source
+    // ourselves so its reader/handle doesn't leak — the caller only logs.
+    let snapshot: RawAggregateBatch;
+    try {
+      snapshot = await newSource.scan();
+    } catch (err) {
+      newSource.dispose();
+      throw err;
+    }
+
+    // If dispose() landed while we were awaiting scan(), the old source has
+    // already been disposed by dispose() and we must not attach the new
+    // source to a disposed tracker (nothing would ever call dispose on it).
+    if (this.disposed) {
+      newSource.dispose();
+      return;
+    }
 
     const carried: RestoredStats | null = this.lastStats
       ? {
