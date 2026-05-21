@@ -315,12 +315,15 @@ not `squash`; the hook relies on rebase-dir detection instead — see
 
 ### Task 7: Update docs and archive plan
 
-- [ ] If anything *surprising* was learned about hook behavior (e.g., the
+- [x] If anything *surprising* was learned about hook behavior (e.g., the
       cherry-pick "two trailers" case), add a one-line note to CLAUDE.md
       under "Key Design Details" or to the `commitHook.ts` description in
       CLAUDE.md. If nothing surprising, skip — do NOT pad CLAUDE.md with
-      narration.
-- [ ] Move plan: `mv docs/plans/20260522-real-git-e2e-commit-hook.md
+      narration. Added a note in CLAUDE.md's `commitHook.ts` description
+      covering (1) `$2 == squash` only fires when `git commit` is run
+      without `-m` after `merge --squash`, and (2) cherry-pick appends
+      rather than summing when a local tracking file is present.
+- [x] Move plan: `mv docs/plans/20260522-real-git-e2e-commit-hook.md
       docs/plans/completed/`.
 
 ## Technical Details
