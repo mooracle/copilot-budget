@@ -1,7 +1,13 @@
 import { __configStore, __configChangeListeners } from './__mocks__/vscode';
 
 // Must import after mock is set up (jest resolves vscode → __mocks__/vscode)
-import { isEnabled, isCommitHookEnabled, getTrailerConfig, onConfigChanged } from './config';
+import {
+  isEnabled,
+  isCommitHookEnabled,
+  getTrailerConfig,
+  onConfigChanged,
+  getDisplayCurrency,
+} from './config';
 
 beforeEach(() => {
   // Clear overrides between tests
@@ -95,6 +101,27 @@ describe('config', () => {
 
       const config = getTrailerConfig();
       expect(config.aiCredits).toBe(false);
+    });
+  });
+
+  describe('getDisplayCurrency', () => {
+    it('returns "aic" by default', () => {
+      expect(getDisplayCurrency()).toBe('aic');
+    });
+
+    it('returns "usd" when set to usd', () => {
+      __configStore['copilot-budget.displayCurrency'] = 'usd';
+      expect(getDisplayCurrency()).toBe('usd');
+    });
+
+    it('returns "aic" when set to aic explicitly', () => {
+      __configStore['copilot-budget.displayCurrency'] = 'aic';
+      expect(getDisplayCurrency()).toBe('aic');
+    });
+
+    it('falls back to "aic" for unknown values', () => {
+      __configStore['copilot-budget.displayCurrency'] = 'eur';
+      expect(getDisplayCurrency()).toBe('aic');
     });
   });
 

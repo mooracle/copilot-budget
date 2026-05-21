@@ -110,6 +110,16 @@
           ],
           "default": false,
           "markdownDescription": "Git trailer key for per-model AI Credits breakdown. Set to a string (e.g. `\"Copilot-AI-Credits-Models\"`) to enable."
+        },
+        "copilot-budget.displayCurrency": {
+          "type": "string",
+          "enum": [
+            "aic",
+            "usd"
+          ],
+          "default": "aic",
+          "scope": "application",
+          "markdownDescription": "Unit used for status bar, tooltip, panel, and commit trailer values. `aic` shows AI Credits (1 AIC = $0.01, plan-invariant). `usd` converts to dollars at the same rate. Stored at user (application) scope so the choice persists across windows."
         }
       }
     }

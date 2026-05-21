@@ -10,6 +10,11 @@ export function isEnabled(): boolean {
   return cfg().get<boolean>('enabled', true);
 }
 
+export function getDisplayCurrency(): 'aic' | 'usd' {
+  const v = cfg().get<string>('displayCurrency', 'aic');
+  return v === 'usd' ? 'usd' : 'aic';
+}
+
 export function isCommitHookEnabled(): boolean {
   return cfg().get<boolean>('commitHook.enabled', false);
 }

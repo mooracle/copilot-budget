@@ -79,12 +79,12 @@ A new QuickPick "Copilot Budget" panel surfaces three codicon-checkbox toggles: 
 
 Establish the formatting primitive used by status bar, tooltip, quick pick, and trailer. Pure function — no IO, easy to test exhaustively.
 
-- [ ] add `copilot-budget.displayCurrency` setting to `package.json` contributes block. Type `string`, enum `["aic", "usd"]`, default `"aic"`, scope `application` (User-global). MarkdownDescription explains 1 AIC = $0.01.
-- [ ] create `src/amountFormatter.ts` exporting `formatAmount(amountAic: number, opts: { mode: 'files' | 'telemetry'; currency: 'aic' | 'usd'; precision?: 'short' | 'full' }): string`. Tilde prefix when `mode === 'files'`. AIC short: `Math.ceil(amount)` → `42 AIC`. AIC full: `amount.toFixed(2)` → `42.31 AIC`. USD short: `Math.ceil(amountAic) / 100` → `$0.42` (rounds up to next whole AIC ≡ whole cent). USD full: `(amountAic / 100).toFixed(2)` → `$0.42`. Zero is always `0 AIC` / `$0.00` without tilde regardless of mode.
-- [ ] add `getDisplayCurrency(): 'aic' | 'usd'` to `src/config.ts` reading the new setting.
-- [ ] write `formatAmount` tests covering: files+aic short/full, files+usd short/full, telemetry+aic short/full, telemetry+usd short/full, zero in each mode, sub-cent USD rounding, very large amounts.
-- [ ] write `getDisplayCurrency` tests via the existing config mock.
-- [ ] run `npm test` — must pass before next task.
+- [x] add `copilot-budget.displayCurrency` setting to `package.json` contributes block. Type `string`, enum `["aic", "usd"]`, default `"aic"`, scope `application` (User-global). MarkdownDescription explains 1 AIC = $0.01.
+- [x] create `src/amountFormatter.ts` exporting `formatAmount(amountAic: number, opts: { mode: 'files' | 'telemetry'; currency: 'aic' | 'usd'; precision?: 'short' | 'full' }): string`. Tilde prefix when `mode === 'files'`. AIC short: `Math.ceil(amount)` → `42 AIC`. AIC full: `amount.toFixed(2)` → `42.31 AIC`. USD short: `Math.ceil(amountAic) / 100` → `$0.42` (rounds up to next whole AIC ≡ whole cent). USD full: `(amountAic / 100).toFixed(2)` → `$0.42`. Zero is always `0 AIC` / `$0.00` without tilde regardless of mode.
+- [x] add `getDisplayCurrency(): 'aic' | 'usd'` to `src/config.ts` reading the new setting.
+- [x] write `formatAmount` tests covering: files+aic short/full, files+usd short/full, telemetry+aic short/full, telemetry+usd short/full, zero in each mode, sub-cent USD rounding, very large amounts.
+- [x] write `getDisplayCurrency` tests via the existing config mock.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 2: Drop cache heuristic from session parser
 
