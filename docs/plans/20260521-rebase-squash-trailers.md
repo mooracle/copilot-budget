@@ -65,13 +65,13 @@ Amend / reword / edit (`$2 == commit`) and merge (`$2 == merge`) are already cor
 - Modify: `src/trackingFile.ts`
 - Modify: `src/trackingFile.test.ts`
 
-- [ ] In `src/trackingFile.ts`, in the `writeTrackingFile` block that emits `TR_` lines (the `if (stats.totalAiCredits > 0)` body): delete the `tilde` const and all `${tilde}` interpolations. `TR_Copilot-AI-Credits` value becomes `${stats.totalAiCredits.toFixed(2)}`; per-model trailer values become `${e.credits.toFixed(2)}` (two-decimal bare numbers)
-- [ ] In the same block, remove the `$` prefix from the `estimatedCost` trailer value. New form: `TR_<estimatedCost>=${(stats.totalAiCredits / 100).toFixed(2)}`
-- [ ] Replace the multi-line tilde explanation comment (the block immediately before `const tilde = …`) with a brief one-liner: `// Trailer values are bare numbers; decoration is editor-surface-only (see amountFormatter.ts).`
-- [ ] Update `src/trackingFile.test.ts`: flip existing `TR_Copilot-AI-Credits` assertions to expect `42.31` (no `~`); add a parallel test with `mode: 'telemetry'` asserting the same bare-number output so future readers see that mode no longer affects trailer value
-- [ ] Add a test asserting `TR_<estimatedCost>=0.42` (no `$`) when the `estimatedCost` config is enabled
-- [ ] Add a test asserting the per-model trailer is `Model A=12.50,Model B=8.20` (no `~` either side of `=`)
-- [ ] Run tests: `npm test -- trackingFile` — must pass before next task
+- [x] In `src/trackingFile.ts`, in the `writeTrackingFile` block that emits `TR_` lines (the `if (stats.totalAiCredits > 0)` body): delete the `tilde` const and all `${tilde}` interpolations. `TR_Copilot-AI-Credits` value becomes `${stats.totalAiCredits.toFixed(2)}`; per-model trailer values become `${e.credits.toFixed(2)}` (two-decimal bare numbers)
+- [x] In the same block, remove the `$` prefix from the `estimatedCost` trailer value. New form: `TR_<estimatedCost>=${(stats.totalAiCredits / 100).toFixed(2)}`
+- [x] Replace the multi-line tilde explanation comment (the block immediately before `const tilde = …`) with a brief one-liner: `// Trailer values are bare numbers; decoration is editor-surface-only (see amountFormatter.ts).`
+- [x] Update `src/trackingFile.test.ts`: flip existing `TR_Copilot-AI-Credits` assertions to expect `42.31` (no `~`); add a parallel test with `mode: 'telemetry'` asserting the same bare-number output so future readers see that mode no longer affects trailer value
+- [x] Add a test asserting `TR_<estimatedCost>=0.42` (no `$`) when the `estimatedCost` config is enabled
+- [x] Add a test asserting the per-model trailer is `Model A=12.50,Model B=8.20` (no `~` either side of `=`)
+- [x] Run tests: `npm test -- trackingFile` — must pass before next task
 
 ### Task 2: Add squash-sum to the hook script + behavioural tests
 

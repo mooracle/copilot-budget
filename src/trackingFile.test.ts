@@ -194,13 +194,12 @@ describe('trackingFile', () => {
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      // Files mode prepends tilde to flag the upper-bound estimate.
-      expect(content).toContain('TR_Copilot-AI-Credits=~42.31');
+      expect(content).toContain('TR_Copilot-AI-Credits=42.31');
       expect(content).not.toContain('TR_Copilot-Est-Cost');
       expect(content).not.toContain('TR_Copilot-AI-Credits-Models');
     });
 
-    it('emits Copilot-Est-Cost TR_ line with $ prefix only when estimatedCost is explicitly enabled', async () => {
+    it('emits Copilot-Est-Cost TR_ line as a bare USD number when estimatedCost is enabled', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -212,20 +211,20 @@ describe('trackingFile', () => {
       const content = mockWriteTextFile.mock.calls[0][1];
 
       const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-Est-Cost='));
-      // USD is derived inline as totalAiCredits / 100 at trailer-write time (42.31 → $0.42).
-      expect(line).toBe('TR_Copilot-Est-Cost=$0.42');
+      // USD is derived inline as totalAiCredits / 100 at trailer-write time (42.31 → 0.42).
+      expect(line).toBe('TR_Copilot-Est-Cost=0.42');
     });
 
-    it('aiCredits TR_ value has no $ prefix and 2 decimals (tilde-prefixed in files mode)', async () => {
+    it('aiCredits TR_ value is a bare 2-decimal number in files mode', async () => {
       setupWorkspace('/project');
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
       const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-AI-Credits='));
-      expect(line).toBe('TR_Copilot-AI-Credits=~42.31');
+      expect(line).toBe('TR_Copilot-AI-Credits=42.31');
     });
 
-    it('aiCredits TR_ value has no tilde in telemetry mode', async () => {
+    it('aiCredits TR_ value is a bare 2-decimal number in telemetry mode (same as files mode)', async () => {
       setupWorkspace('/project');
       await writeTrackingFile({ ...sampleStats, mode: 'telemetry' });
       const content = mockWriteTextFile.mock.calls[0][1];
@@ -234,7 +233,7 @@ describe('trackingFile', () => {
       expect(line).toBe('TR_Copilot-AI-Credits=42.31');
     });
 
-    it('writes aiCreditsPerModel TR_ line using display names, sorted descending, tilde-prefixed in files mode', async () => {
+    it('writes aiCreditsPerModel TR_ line using display names, sorted descending, bare numbers in files mode', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -246,13 +245,14 @@ describe('trackingFile', () => {
       const content = mockWriteTextFile.mock.calls[0][1];
 
       // Claude Sonnet 4.6 has 34.97 credits, GPT-4.1 has 7.34. Sorted descending.
-      // Each value is tilde-prefixed in files mode.
+      // Bare numeric values, no ~ on either side of =.
       expect(content).toContain(
-        'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=~34.97,GPT-4.1=~7.34',
+        'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
       );
+      expect(content).not.toContain('=~');
     });
 
-    it('writes aiCreditsPerModel TR_ line without tilde in telemetry mode', async () => {
+    it('writes aiCreditsPerModel TR_ line as bare numbers in telemetry mode (same as files mode)', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -318,13 +318,14 @@ describe('trackingFile', () => {
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      // Estimated-cost USD trailer is unaffected by the tilde flag (the dollar
-      // sign is the value marker). AI-Credits trailers are tilde-prefixed in
-      // files mode.
-      expect(content).toContain('TR_AI-Cost=$0.42');
-      expect(content).toContain('TR_AI-Credits=~42.31');
+      // All trailer values are bare numbers — no $ on estimated-cost, no ~
+      // on AI-Credits — regardless of mode.
+      expect(content).toContain('TR_AI-Cost=0.42');
+      expect(content).toContain('TR_AI-Credits=42.31');
       expect(content).toMatch(/TR_AI-Credits-Per-Model=/);
       expect(content).not.toContain('Copilot-');
+      expect(content).not.toContain('$0.42');
+      expect(content).not.toContain('=~');
     });
 
     it('writes MODE=telemetry when stats.mode is telemetry', async () => {

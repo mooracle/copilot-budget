@@ -54,25 +54,22 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
 
   // Only emit TR_ lines when there is real cost to report. The hook is
   // presence-gated on TR_ lines, so writing zero-valued trailers would
-  // append "Copilot-Est-Cost: $0.00" to every commit on idle sessions.
+  // append "Copilot-Est-Cost: 0.00" to every commit on idle sessions.
   if (stats.totalAiCredits > 0) {
     const trailers = getTrailerConfig();
-    // In files mode the AIC numbers are an upper-bound estimate (heuristic
-    // dropped, no cache-read attribution). The tilde flags that downstream:
-    // the trailer remains parseable, just visibly marked as estimated.
-    const tilde = stats.mode === 'files' ? '~' : '';
+    // Trailer values are bare numbers; decoration is editor-surface-only (see amountFormatter.ts).
     if (trailers.estimatedCost) {
-      lines.push(`TR_${trailers.estimatedCost}=$${(stats.totalAiCredits / 100).toFixed(2)}`);
+      lines.push(`TR_${trailers.estimatedCost}=${(stats.totalAiCredits / 100).toFixed(2)}`);
     }
     if (trailers.aiCredits) {
-      lines.push(`TR_${trailers.aiCredits}=${tilde}${stats.totalAiCredits.toFixed(2)}`);
+      lines.push(`TR_${trailers.aiCredits}=${stats.totalAiCredits.toFixed(2)}`);
     }
     if (trailers.aiCreditsPerModel) {
       const entries = Object.entries(stats.models)
         .map(([id, usage]) => ({ name: getDisplayName(id), credits: usage.costAic }))
         .sort((a, b) => b.credits - a.credits);
       if (entries.length > 0) {
-        const value = entries.map((e) => `${e.name}=${tilde}${e.credits.toFixed(2)}`).join(',');
+        const value = entries.map((e) => `${e.name}=${e.credits.toFixed(2)}`).join(',');
         lines.push(`TR_${trailers.aiCreditsPerModel}=${value}`);
       }
     }
