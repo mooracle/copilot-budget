@@ -148,8 +148,8 @@ Amend / reword / edit (`$2 == commit`) and merge (`$2 == merge`) are already cor
 
 ### Task 6: [Final] Mark complete
 
-- [ ] Move this plan to `docs/plans/completed/20260521-rebase-squash-trailers.md`
-- [ ] Confirm CLAUDE.md and CHANGELOG edits match the final code
+- [x] Move this plan to `docs/plans/completed/20260521-rebase-squash-trailers.md`
+- [x] Confirm CLAUDE.md and CHANGELOG edits match the final code
 
 ## Technical Details
 
