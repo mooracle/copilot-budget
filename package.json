@@ -13,8 +13,9 @@
     "url": "https://github.com/mooracle/copilot-budget/issues"
   },
   "homepage": "https://github.com/mooracle/copilot-budget#readme",
+  "_engines_note": "vscode ^1.103.0 is the earliest VS Code that bundles Node.js >= 22.16, the version that promoted node:sqlite from experimental to stable (Electron 37, Node 22.17.0). Required by src/otelReader.ts.",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.103.0"
   },
   "categories": [
     "Other"
@@ -139,7 +140,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.8.0",
     "js-yaml": "^4.1.1",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.103.0",
     "esbuild": "^0.28.0",
     "eslint": "^10.4.0",
     "jest": "^30.4.2",
