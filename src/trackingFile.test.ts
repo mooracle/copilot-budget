@@ -3,6 +3,7 @@ import {
   parseTrackingFileContent,
   readTrackingFile,
   isTrackingFileTruncated,
+  formatTrackingFile,
 } from './trackingFile';
 import { Tracker, TrackingStats, JsonlSource } from './tracker';
 import * as fs from 'fs';
@@ -86,6 +87,47 @@ beforeEach(() => {
 });
 
 describe('trackingFile', () => {
+  describe('formatTrackingFile', () => {
+    it('emits TR_Copilot-AI-Credits line when totalAiCredits > 0', () => {
+      const content = formatTrackingFile(sampleStats);
+      expect(content).toContain('TR_Copilot-AI-Credits=42.31');
+      // Format is newline-terminated key=value pairs.
+      expect(content.endsWith('\n')).toBe(true);
+      expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
+      expect(content).toContain('MODE=files');
+    });
+
+    it('omits all TR_ lines when totalAiCredits is zero', () => {
+      const zeroStats: TrackingStats = {
+        since: '2024-01-15T10:30:00Z',
+        lastUpdated: '2024-01-15T10:30:00Z',
+        models: {},
+        totalTokens: 0,
+        interactions: 0,
+        totalAiCredits: 0,
+        mode: 'files',
+      };
+
+      const content = formatTrackingFile(zeroStats);
+      expect(content).not.toContain('TR_');
+      expect(content).toContain('TOTAL_AI_CREDITS=0.00');
+    });
+
+    it('emits aiCreditsPerModel TR_ line when enabled, sorted descending', () => {
+      mockGetTrailerConfig.mockReturnValue({
+        estimatedCost: false,
+        aiCredits: 'Copilot-AI-Credits',
+        aiCreditsPerModel: 'Copilot-AI-Credits-Models',
+      });
+
+      const content = formatTrackingFile(sampleStats);
+      expect(content).toContain(
+        'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
+      );
+      expect(content).toContain('TR_Copilot-AI-Credits=42.31');
+    });
+  });
+
   describe('writeTrackingFile', () => {
     it('writes stats in new v0.6 key=value schema', async () => {
       setupWorkspace('/project');

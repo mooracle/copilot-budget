@@ -92,16 +92,16 @@ not `squash`; the hook relies on rebase-dir detection instead — see
 - Modify: `src/trackingFile.test.ts`
 - Create: `src/hook-git-e2e.test.ts`
 
-- [ ] In `src/trackingFile.ts`, extract a new exported pure function
+- [x] In `src/trackingFile.ts`, extract a new exported pure function
       `export function formatTrackingFile(stats: TrackingStats): string` from
       the body of `writeTrackingFile` (lines 33–76 → returns
       `lines.join('\n') + '\n'`). `writeTrackingFile` becomes a 4-line wrapper:
       resolve uri, call formatter, `writeTextFile`, return.
-- [ ] Add unit test in `src/trackingFile.test.ts` for `formatTrackingFile`:
+- [x] Add unit test in `src/trackingFile.test.ts` for `formatTrackingFile`:
       one case with cost > 0 (asserts `TR_Copilot-AI-Credits=...` line
       present), one case with `totalAiCredits === 0` (asserts NO `TR_` line),
       one case with `aiCreditsPerModel` enabled.
-- [ ] Create `src/hook-git-e2e.test.ts` with the harness:
+- [x] Create `src/hook-git-e2e.test.ts` with the harness:
       - top-level `describe('hook E2E (real git)', () => { ... })`, gated on a
         `gitAvailable()` helper (`execFileSync('git', ['--version'])` in
         try/catch) — use `describe.skip` with `console.warn(...)` if false.
@@ -121,12 +121,12 @@ not `squash`; the hook relies on rebase-dir detection instead — see
       - `lastCommitMessage(dir, env): string` — `git log -1 --format=%B`.
       - `afterEach` cleanup via `fs.rmSync(dir, { recursive: true, force:
         true })`.
-- [ ] Add a single smoke `it` that exercises the harness: scaffold repo,
+- [x] Add a single smoke `it` that exercises the harness: scaffold repo,
       install hook, do nothing (no tracking file), `git commit --allow-empty
       -m 'init'`, assert the commit succeeds and has no trailer. Purpose is
       to validate the harness wiring, not hook behavior — the *real* normal-
       commit scenarios live in Task 2.
-- [ ] Run `npm test` — all tests (existing + new) must pass before Task 2.
+- [x] Run `npm test` — all tests (existing + new) must pass before Task 2.
 
 ### Task 2: Normal commit + amend scenarios
 

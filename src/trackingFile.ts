@@ -26,10 +26,7 @@ export async function isTrackingFileTruncated(): Promise<boolean> {
   return fileStat !== null && fileStat.size === 0;
 }
 
-export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> {
-  const uri = await getTrackingFileUri();
-  if (!uri) return false;
-
+export function formatTrackingFile(stats: TrackingStats): string {
   const lines: string[] = [
     `SINCE=${stats.since}`,
     `INTERACTIONS=${stats.interactions}`,
@@ -75,8 +72,14 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
     }
   }
 
+  return lines.join('\n') + '\n';
+}
+
+export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> {
+  const uri = await getTrackingFileUri();
+  if (!uri) return false;
   try {
-    await writeTextFile(uri, lines.join('\n') + '\n');
+    await writeTextFile(uri, formatTrackingFile(stats));
     return true;
   } catch {
     return false;
