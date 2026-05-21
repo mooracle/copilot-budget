@@ -212,10 +212,10 @@ Render the toggle panel via codicon-checkbox QuickPick items. Keeps existing `co
 
 ### Task 8: [Final] Update documentation
 
-- [ ] update `README.md`: add "Accurate vs. estimated" section explaining the tilde signal and how to enable Telemetry mode (one toggle in the panel). Note that prompt content is never read — only aggregate token counts.
-- [ ] update `CLAUDE.md`: revise `sessionParser.ts` description (heuristic removed); document new `otelReader.ts`, `budgetPanel.ts`, `amountFormatter.ts` modules; note Node 22 target bump.
-- [ ] update the release notes / CHANGELOG headline to lead with *"Accurate cost tracking via Copilot's OTel database (opt-in upstream setting; auto-detected)"*. Internal refactors (heuristic removal, panel UX, currency toggle) listed under that.
-- [ ] move this plan to `docs/plans/completed/`.
+- [x] update `README.md`: add "Accurate vs. estimated" section explaining the tilde signal and how to enable Telemetry mode (one toggle in the panel). Note that prompt content is never read — only aggregate token counts. Updated Commands table for "Open Panel" title, added `displayCurrency` settings row, refreshed Supported Editors (1.103+) and "How It Works" to describe the source-selection step.
+- [x] update `CLAUDE.md`: revise `sessionParser.ts` description (heuristic removed); document new `otelReader.ts`, `budgetPanel.ts`, `amountFormatter.ts` modules; note Node 22 target bump and `engines.vscode` ^1.103.0 pin; document Source strategy in `tracker.ts`; add asymmetric upstream-write key design detail.
+- [x] update the release notes / CHANGELOG headline to lead with *"Accurate cost tracking via Copilot's OTel database (opt-in upstream setting; auto-detected)"*. Added 2.0.0 entry; bumped `package.json` version. Internal refactors (heuristic removal, panel UX, currency toggle, Source strategy) listed under the headline.
+- [x] move this plan to `docs/plans/completed/`.
 
 ## Technical Details
 

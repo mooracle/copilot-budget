@@ -2,11 +2,11 @@
 
 Track GitHub Copilot token usage and estimated cost, and optionally append AI budget info to git commit messages.
 
-> **Note:** The commit hook is **disabled by default**. Token tracking and the status bar work out of the box; the `prepare-commit-msg` hook that appends `Copilot-AI-Credits` trailers is opt-in. Enable it via the status bar quick pick (click the `$(credit-card)` item, then pick **Commit-Hook: OFF** to toggle it on) or by setting `copilot-budget.commitHook.enabled` to `true`.
+> **Note:** The commit hook is **disabled by default**. Token tracking and the status bar work out of the box; the `prepare-commit-msg` hook that appends `Copilot-AI-Credits` trailers is opt-in. Open the Copilot Budget panel from the status bar to toggle it, or set `copilot-budget.commitHook.enabled` to `true`.
 
 ## Features
 
-- **Token-based cost tracking** — reads server-reported token counts from Copilot's session JSONL (input, output, cache_read, cache_creation) and computes cost in AI Credits against the published per-million-token rate card. Status bar shows estimated cost as `N AIC`.
+- **Token-based cost tracking** — reads server-reported token counts from Copilot's session JSONL (input, output, cache_read, cache_creation) and computes cost in AI Credits against the published per-million-token rate card. Status bar shows estimated cost as `N AIC` (or `~N AIC` in Files mode — see [Accurate vs. estimated](#accurate-vs-estimated)).
 - **AI Credits** — cost is reported in AI Credits (1 AIC = $0.01). AIC is the plan-invariant metric — accurate across individual, Pro, Business, and Enterprise users regardless of negotiated USD discounts.
 - **Per-model breakdown** — see AIC cost and input / cache_read / cache_creation / output tokens grouped by model (GPT, Claude, Gemini, etc.) in the status bar tooltip and quick pick panel.
 - **Upstream rate card** — per-model rates are a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml), shipped with the extension.
@@ -26,7 +26,7 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 
 | Command | Description |
 |---|---|
-| `Copilot Budget: Show Token Stats` | Open a quick pick with total AIC cost and per-model breakdown |
+| `Copilot Budget: Open Panel` | Open the QuickPick panel with toggles (OTel, currency, commit hook) and per-model breakdown |
 | `Copilot Budget: Reset Tracking` | Reset the counter to zero (re-baselines from current session files) |
 | `Copilot Budget: Install Commit Hook` | Install the `prepare-commit-msg` hook that appends AI budget info to commits |
 | `Copilot Budget: Uninstall Commit Hook` | Remove the Copilot Budget commit hook |
@@ -41,14 +41,24 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 | `copilot-budget.commitHook.trailers.estimatedCost` | string \| false | `false` | Opt-in git trailer key for estimated USD cost in commit history. Disabled by default. Set to a string (e.g. `"Copilot-Est-Cost"`) to enable. |
 | `copilot-budget.commitHook.trailers.aiCredits` | string \| false | `"Copilot-AI-Credits"` | Git trailer key for total AI Credits (1 AIC = $0.01). Set to `false` to disable this trailer. |
 | `copilot-budget.commitHook.trailers.aiCreditsPerModel` | string \| false | `false` | Git trailer key for per-model AI Credits breakdown. Disabled by default. Set to a string (e.g. `"Copilot-AI-Credits-Models"`) to enable. |
+| `copilot-budget.displayCurrency` | `"aic"` \| `"usd"` | `"aic"` | Unit used for status bar, tooltip, panel, and commit trailer values. `aic` shows AI Credits (1 AIC = $0.01, plan-invariant). `usd` converts at the same rate. Application-scoped (persists across windows). |
+
+### Accurate vs. estimated
+
+Copilot Budget operates in one of two modes, chosen automatically:
+
+- **Files mode** (default, zero-config): tokens are read from Copilot's session JSONL files. These files do not record the per-request cache split, so Files mode treats every prompt token as fresh `input` — never undercounts but typically overcounts on Anthropic / OpenAI workflows where caching is heavy. Cost values are prefixed with a tilde (`~42 AIC`, `~$0.42`) end-to-end — status bar, tooltip, panel, and the `Copilot-AI-Credits` git trailer — so the audit signal travels with the number.
+- **Telemetry mode** (opt-in, accurate): when Copilot Chat's OTel SQLite exporter is enabled, Copilot Budget reads measured `input_tokens` / `output_tokens` / `cached_tokens` per request from `<globalStorage>/github.copilot-chat/agent-traces.db`. The cache split is real, not a heuristic. Cost values are displayed without the tilde prefix. Only aggregate token counts are read — prompt and response content are never touched.
+
+Enable Telemetry mode in one click via the Copilot Budget panel (status bar item → "Enable accurate cost tracking (OTel)" → reload window). This writes `github.copilot.chat.otel.dbSpanExporter.enabled = true` upstream. To disable it later, use VS Code settings — the extension never writes `false` back to that setting on its own.
+
+**Remote development limitation:** in devcontainers / SSH Remote / Codespaces, the OTel database lives wherever Copilot Chat runs (typically workspace-side). If Copilot Budget runs UI-side, the database is on a different host and Telemetry mode silently falls back to Files mode. The Output channel logs a diagnostic when this happens.
 
 ### Cost Methodology
 
 AIC cost is `(input × rate.input + cache_read × rate.cached_input + cache_creation × (rate.cache_creation ?? rate.input) + output × rate.output) / 1,000,000` per model, summed across models. The upstream rate card publishes USD per million tokens; the extension converts those rates to AIC (× 100) once at load time, so all in-extension cost values are AIC. If the opt-in `Copilot-Est-Cost` trailer is enabled, the USD equivalent is computed from AIC ÷ 100 at trailer-write time.
 
 AIC is plan-invariant — accurate across individual, Pro, Business, and Enterprise plans. GitHub Copilot's post-2026-06-01 billing is denominated in AIC directly, so AIC matches what Copilot bills regardless of any negotiated USD pricing.
-
-When per-message cache split (`cacheReadTokens`) is not reported by Copilot, the extension applies a heuristic: turn 1 is treated as 0% cached, turn 2 onward as 75% cached. Real values may be higher or lower.
 
 ### Example `settings.json`
 
@@ -145,22 +155,23 @@ In git worktrees, the hook is installed in the **common git directory** (shared 
 
 ## How It Works
 
-1. **Discovery** — On activation, Copilot Budget scans only the current window's `workspaceStorage/<hash>/chatSessions/` directory, derived from the extension's `storageUri`. Each open window tracks its own workspace's usage independently — multi-window setups no longer double-count tokens across windows. When VS Code is opened with no folder, no scanning is performed and the status bar shows a visible "no workspace" indicator instead. All discovery activity is logged to the "Copilot Budget" Output channel.
-2. **Parsing** — Each session file is parsed to extract per-request `result.metadata.{promptTokens, outputTokens, cacheReadTokens?, cacheCreationTokens?}`. When the cache split is absent the turn-based heuristic fills it in.
-3. **Baseline & Restore** — A token snapshot is taken at startup as a baseline so only new activity is counted. If a tracking file from a previous session exists (written on deactivation), those stats are restored and merged, providing continuity across VS Code restarts.
-4. **Polling** — Every 30 seconds the extension re-scans, using file mtime caching to skip unchanged files.
-5. **Cost computation** — Per-model rates are loaded from the bundled `models-and-pricing.yml` (mirror of `github/docs` upstream). The rate card publishes USD per million tokens; rates are converted to AIC (× 100) once at load time, so all in-extension cost values are AIC.
-6. **Commit hook** — See [Commit Hook Workflow](#commit-hook-workflow) above for the full details.
+1. **Source selection** — On activation, Copilot Budget picks between Files mode (JSONL) and Telemetry mode (OTel SQLite). Telemetry mode is chosen when `github.copilot.chat.otel.dbSpanExporter.enabled` is `true` AND `agent-traces.db` exists locally. Otherwise Files mode is chosen. The choice hot-swaps on config change without losing prior totals.
+2. **Discovery** — Files mode scans only the current window's `workspaceStorage/<hash>/chatSessions/` directory, derived from the extension's `storageUri`. Telemetry mode reads `<globalStorage>/github.copilot-chat/agent-traces.db` and filters spans by the current window's session ids. Each open window tracks its own workspace's usage independently. When VS Code is opened with no folder, no scanning is performed and the status bar shows a visible "no workspace" indicator instead. All discovery activity is logged to the "Copilot Budget" Output channel.
+3. **Parsing** — Files mode reads `result.metadata.{promptTokens, outputTokens, cacheReadTokens?, cacheCreationTokens?}` per request from JSONL; absent cache splits default to `0`. Telemetry mode reads measured `input_tokens` / `output_tokens` / `cached_tokens` from OTel spans.
+4. **Baseline & Restore** — A snapshot is taken at startup as a baseline so only new activity is counted. If a tracking file from a previous session exists, those stats are restored and merged for continuity across VS Code restarts.
+5. **Polling** — Every 30 seconds the extension re-scans. Files mode uses file mtime caching plus incremental delta parsing; Telemetry mode queries spans newer than the last seen `end_time_ms`.
+6. **Cost computation** — Per-model rates are loaded from the bundled `models-and-pricing.yml` (mirror of `github/docs` upstream). The rate card publishes USD per million tokens; rates are converted to AIC (× 100) once at load time, so all in-extension cost values are AIC.
+7. **Commit hook** — See [Commit Hook Workflow](#commit-hook-workflow) above for the full details.
 
 ## Supported Editors
 
-- Visual Studio Code 1.85+ (Stable)
+- Visual Studio Code 1.103+ (Stable) — required for bundled Node ≥ 22.16, where `node:sqlite` is stable.
 - Visual Studio Code Insiders
 - Visual Studio Code Exploration builds
-- VSCodium
-- Cursor
+- VSCodium 1.103+
+- Cursor (on a compatible Code base)
 
-Also works in remote environments (Codespaces, WSL, SSH Remote).
+Also works in remote environments (Codespaces, WSL, SSH Remote) for Files mode. Telemetry mode requires the OTel database to be reachable on the same host as the extension — see the remote limitation note in [Accurate vs. estimated](#accurate-vs-estimated).
 
 ## Requirements
 

@@ -5,6 +5,43 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-05-21
+
+Accurate cost tracking via Copilot's OTel database (opt-in upstream setting; auto-detected). When `github.copilot.chat.otel.dbSpanExporter.enabled = true` AND `<globalStorage>/github.copilot-chat/agent-traces.db` exists, Copilot Budget reads measured `input_tokens` / `output_tokens` / `cached_tokens` per request from upstream's OTel SQLite store and reports them verbatim. Otherwise the extension runs in Files mode and never undercounts — every prompt token is treated as fresh `input` and cost displays carry a `~` prefix end-to-end so the upper-bound signal travels with the number, including into the `Copilot-AI-Credits` git trailer.
+
+### Added
+
+- **Telemetry mode** — auto-detected when the upstream OTel exporter is enabled and `agent-traces.db` is reachable on the same host. Mode hot-swaps without losing cumulative totals when the upstream setting flips. New `src/otelReader.ts` opens the DB readonly via `node:sqlite`.
+- **Files mode tilde signal** — status bar, tooltip, panel, and `Copilot-AI-Credits` trailer all carry a leading `~` when the value comes from JSONL (Files mode). Trailer becomes parseable but visibly tagged: `Copilot-AI-Credits: ~42` vs `Copilot-AI-Credits: 42`.
+- **Copilot Budget panel** — single QuickPick with three codicon-checkbox toggles (OTel, currency, commit hook), per-model breakdown, and Refresh. Replaces the old stats quick pick body; reuses the `copilot-budget.showStats` command id so existing keybindings continue to work. Command title is now *"Copilot Budget: Open Panel"*.
+- **Currency toggle** — new `copilot-budget.displayCurrency` setting (`"aic"` | `"usd"`, default `"aic"`, application-scoped). All user-facing surfaces route through `formatAmount(amount, { mode, currency, precision })`. USD short rounds up to the next whole cent (`Math.ceil(amountAic) / 100`).
+- **OTel toggle (asymmetric)** — accepting the OTel row when upstream is disabled writes `github.copilot.chat.otel.dbSpanExporter.enabled = true` to user settings and prompts to reload. Accepting when upstream is already enabled opens VS Code Settings filtered to the upstream key — the panel never writes `false`. To stop using OTel data, the user must flip the upstream setting via VS Code Settings.
+- **Mode-swap signal** — one-time info message on the first Files→Telemetry auto-swap per window: *"Switched to Telemetry mode — historical totals stay as-is; new activity uses measured tokens."*
+
+### Changed
+
+- **Cache-hit heuristic removed.** Previously, Files mode applied a turn-based heuristic (turn 1 = 0% cached, turn 2+ = 75% cached) when per-request cache split was absent from JSONL metadata. This was calibrated for Anthropic and undercounted Gemini / xAI by ~4× while overcorrecting OpenAI by ~2×. The heuristic is gone — `cacheReadTokens` defaults to `0` when absent, producing a clean upper-bound estimate. Users who want accurate cache accounting should enable Telemetry mode.
+- **Tracking file gains a `MODE=` line** (`files|telemetry`). Machine-readable only — not converted to a git trailer. `parseTrackingFileContent` tolerates the new key the same way it tolerates legacy `TOTAL_COST_USD` — silently ignores anything it doesn't recognize.
+- **Status bar tooltip disclosure** — Files mode now reads *"Estimate assumes no caching (upper bound)."*; Telemetry mode reads *"Measured via Copilot's OTel database."*. The old "heuristic" wording is gone.
+- **Tracker refactored to a Source strategy** (`JsonlSource`, `OTelSource`). `Tracker` is constructed with a `Source` instance + `mode`, exposes `swapSource(newSource, newMode)` for hot-swap, and threads `mode` into `TrackingStats` for downstream formatter/trailer code. Pure refactor — JSONL polling and incremental delta parsing are unchanged.
+- **esbuild target bumped to Node 22** so `node:sqlite` isn't downcompiled away.
+
+### Removed
+
+- 75%-on-turn-2 cache-read heuristic in `sessionParser.ts`. The `turnIndex` parameter was dropped from `extractRequestTokens`.
+
+### Breaking
+
+- **Minimum VS Code version is now 1.103** (was 1.85). VS Code 1.103 is the first release bundling Electron 37 / Node 22.17.0, where `node:sqlite` is stable. Pre-1.103 VS Code installs cannot load this extension.
+- **Files mode AIC trailer values now carry a leading `~`.** Downstream parsers that expect a bare number after `Copilot-AI-Credits:` must strip the optional `~`. Telemetry mode trailers are unchanged.
+- The old `copilot-budget.showStats` quick pick body is replaced by the Copilot Budget panel. The command id is preserved; the rendered list now includes three toggle rows at the top before the per-model breakdown.
+
+### Upgrade Notes
+
+- Telemetry mode is opt-in via Copilot Chat's setting, not ours. Click the status bar item → *"Enable accurate cost tracking (OTel)"* → reload the window. On reload, the panel auto-detects the DB and switches modes.
+- Same-repo dual-window remains last-writer-wins on `<gitdir>/copilot-budget` (pre-existing limitation). Window-scoping still holds for distinct repos.
+- Remote development (devcontainer / SSH Remote / Codespaces): `agent-traces.db` lives where Copilot Chat runs (typically workspace-side). When the upstream setting is `true` but the DB is missing locally, the Output channel logs a diagnostic and the extension falls back to Files mode.
+
 ## [1.0.1] - 2026-05-19
 
 ### Fixed
