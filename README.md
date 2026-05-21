@@ -42,14 +42,14 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 | `copilot-budget.commitHook.trailers.estimatedCost` | string \| false | `false` | Opt-in git trailer key for estimated USD cost in commit history. Disabled by default. Set to a string (e.g. `"Copilot-Est-Cost"`) to enable. |
 | `copilot-budget.commitHook.trailers.aiCredits` | string \| false | `"Copilot-AI-Credits"` | Git trailer key for total AI Credits (1 AIC = $0.01). Set to `false` to disable this trailer. |
 | `copilot-budget.commitHook.trailers.aiCreditsPerModel` | string \| false | `false` | Git trailer key for per-model AI Credits breakdown. Disabled by default. Set to a string (e.g. `"Copilot-AI-Credits-Models"`) to enable. |
-| `copilot-budget.displayCurrency` | `"aic"` \| `"usd"` | `"aic"` | Unit used for status bar, tooltip, panel, and commit trailer values. `aic` shows AI Credits (1 AIC = $0.01, plan-invariant). `usd` converts at the same rate. Application-scoped (persists across windows). |
+| `copilot-budget.displayCurrency` | `"aic"` \| `"usd"` | `"aic"` | Unit used for status bar, tooltip, and panel. Trailer values are always bare numbers (AIC for `Copilot-AI-Credits`, USD for the opt-in `Copilot-Est-Cost`) regardless of this setting. Application-scoped (persists across windows). |
 
 ### Accurate vs. estimated
 
 Copilot Budget operates in one of two modes, chosen automatically:
 
-- **Files mode** (default, zero-config): tokens are read from Copilot's session JSONL files. These files do not record the per-request cache split, so Files mode treats every prompt token as fresh `input` — never undercounts but typically overcounts on Anthropic / OpenAI workflows where caching is heavy. Cost values are prefixed with a tilde (`~42 AIC`, `~$0.42`) end-to-end — status bar, tooltip, panel, and the `Copilot-AI-Credits` git trailer — so the audit signal travels with the number.
-- **Telemetry mode** (opt-in, accurate): when Copilot Chat's OTel SQLite exporter is enabled, Copilot Budget reads measured `input_tokens` / `output_tokens` / `cached_tokens` per request from `<globalStorage>/github.copilot-chat/agent-traces.db`. The cache split is real, not a heuristic. Cost values are displayed without the tilde prefix. Only aggregate token counts are read — prompt and response content are never touched.
+- **Files mode** (default, zero-config): tokens are read from Copilot's session JSONL files. These files do not record the per-request cache split, so Files mode treats every prompt token as fresh `input` — never undercounts but typically overcounts on Anthropic / OpenAI workflows where caching is heavy. Editor surfaces (status bar, tooltip, panel) carry a tilde prefix (`~42 AIC`, `~$0.42`) to flag the upper-bound estimate. The `Copilot-AI-Credits` git trailer (and the tracking-file `TR_` lines it derives from) carries a bare numeric value regardless of mode — decoration is editor-only, so downstream parsers see a stable format.
+- **Telemetry mode** (opt-in, accurate): when Copilot Chat's OTel SQLite exporter is enabled, Copilot Budget reads measured `input_tokens` / `output_tokens` / `cached_tokens` per request from `<globalStorage>/github.copilot-chat/agent-traces.db`. The cache split is real, not a heuristic. Editor surfaces drop the tilde prefix. Only aggregate token counts are read — prompt and response content are never touched.
 
 Enable Telemetry mode in one click via the Copilot Budget panel (status bar item → "Enable accurate cost tracking (OTel)" → reload window). This writes `github.copilot.chat.otel.dbSpanExporter.enabled = true` upstream. To disable it later, use VS Code settings — the extension never writes `false` back to that setting on its own.
 
@@ -113,35 +113,44 @@ By default (`copilot-budget.commitHook.enabled: false`), the hook is **not** ins
 
 ### What Gets Appended
 
-With default settings (Files mode), a commit message looks like:
+With default settings, a commit message looks like:
 
 ```
 feat: add user authentication
 
-Copilot-AI-Credits: ~42.31
+Copilot-AI-Credits: 42.31
 ```
 
-The leading `~` marks the AIC value as an upper-bound estimate from Files mode. In Telemetry mode the tilde is dropped (`Copilot-AI-Credits: 42.31`).
+Trailer values are bare two-decimal numbers in both Files and Telemetry mode — the trailer name conveys the unit (AIC). The Files-mode `~` upper-bound signal lives in editor surfaces only, not in commit history.
 
-With the opt-in per-model trailer and the opt-in USD trailer both enabled (still Files mode):
+With the opt-in per-model trailer and the opt-in USD trailer both enabled:
 
 ```
 feat: add user authentication
 
-Copilot-AI-Credits: ~42.31
-Copilot-AI-Credits-Models: Claude Sonnet 4.6=~40.81,GPT-4.1=~1.50
-Copilot-Est-Cost: $0.42
+Copilot-AI-Credits: 42.31
+Copilot-AI-Credits-Models: Claude Sonnet 4.6=40.81,GPT-4.1=1.50
+Copilot-Est-Cost: 0.42
 ```
 
-The per-model trailer value is a comma-separated list of `<model>=<aic>` entries sorted by descending credits, using display names from the upstream rate card. The `Copilot-Est-Cost` USD trailer is not tilde-prefixed.
+The per-model trailer value is a comma-separated list of `<model>=<aic>` entries sorted by descending credits, using display names from the upstream rate card. The `Copilot-Est-Cost` value is bare USD (no `$` prefix).
 
 ### Hook Skip Conditions
 
 The hook silently does nothing when:
 
-- The commit source is `merge`, `squash`, or `commit` (amend) — to avoid polluting non-standard commits.
+- The commit source is `merge` or `commit` (amend / reword) — to avoid polluting non-standard commits.
 - The tracking file (`.git/copilot-budget`) does not exist.
 - The tracking file contains no `TR_` lines — no enabled trailers or no Copilot usage to report.
+
+### Squash and Fixup Behavior
+
+When `git rebase -i` squashes commits (or uses `fixup -c` / `fixup -C` which carry the fixup's message), git invokes the hook with `$2 == squash`. In that case the hook does **not** consult the tracking file or append fresh trailers. Instead it scans the in-progress squash message for inherited `Copilot-AI-Credits:` trailer lines (one per squashed commit) and rewrites them as a single summed line at the position of the first occurrence. The tracking file is left untouched so any usage accumulated during the rebase flushes on the next normal commit.
+
+Limitations:
+
+- Only the total `Copilot-AI-Credits:` trailer is summed. The opt-in aggregate per-model trailer (`Copilot-AI-Credits-Models: Claude=10.00,GPT=5.00`) is left as-is — N duplicate lines after an N-way squash. Likewise for the opt-in `Copilot-Est-Cost` USD trailer and any user-renamed trailer key (the awk script matches the default name only).
+- Plain `fixup` is handled implicitly: git discards the fixup commit's message before the hook runs, so the previous commit's trailer is preserved as-is. The fixup's own tracked usage stays in the tracking file and flushes on the next normal commit.
 
 ### Manual Hook Management
 
@@ -155,6 +164,12 @@ If the hook was not auto-installed (e.g. `commitHook.enabled` is `false`), insta
 ### Worktree Support
 
 In git worktrees, the hook is installed in the **common git directory** (shared across worktrees), while the tracking file is written to each **worktree's own git directory**. This means the hook is shared but each worktree tracks its own usage independently.
+
+## Examples
+
+The [`examples/`](examples/) directory contains sample integrations that consume the trailers Copilot Budget writes:
+
+- [`examples/github-actions/pr-title-aic-total.yml`](examples/github-actions/pr-title-aic-total.yml) — GitHub Actions workflow that sums `Copilot-AI-Credits:` trailers across all commits in a pull request and rewrites the PR title as `[N AIC] <original title>`.
 
 ## How It Works
 

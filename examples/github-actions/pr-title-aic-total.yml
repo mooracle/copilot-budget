@@ -13,14 +13,14 @@
 #     rather than stack.
 #
 # Notes:
-#   - Tolerant of an optional leading `~` on legacy trailer values
-#     (pre-2.x extension wrote `~12.31` in Files mode).
-#   - Ignores per-model trailers (`Copilot-AI-Credits-<Model>`); summing
+#   - Ignores per-model trailers (`Copilot-AI-Credits-Models`); summing
 #     only the totals avoids double-counting.
-#   - `printf "%.0f"` does banker's rounding; we use `awk '{printf "%d",
-#     int($1) + ($1 > int($1) ? 1 : 0)}'` to ceil so the title never
+#   - `printf "%.0f"` does banker's rounding; we use awk's
+#     `(n > int(n) ? int(n) + 1 : int(n))` to ceil so the title never
 #     under-states (matches the extension's status-bar convention).
 #   - If the sum is zero, the title is left alone (no PR has `[0 AIC]`).
+#   - PRs with no `Copilot-AI-Credits:` trailers leave the title untouched
+#     (the `grep` step is allowed to find nothing without failing the job).
 
 name: PR title — Copilot AIC total
 
@@ -58,10 +58,11 @@ jobs:
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
 
           # Extract trailer values from every commit between base and head.
-          # Regex tolerates `~` prefix (legacy) and integer or decimal values.
+          # The `|| true` keeps the pipeline from failing under `pipefail` when
+          # grep finds no matches (e.g. PRs without the trailer).
           RAW_SUM=$(git log --format=%B "$BASE_SHA..$HEAD_SHA" \
-            | grep -E '^Copilot-AI-Credits: *~?[0-9]+(\.[0-9]+)?$' \
-            | sed -E 's/^Copilot-AI-Credits: *~?//' \
+            | { grep -E '^Copilot-AI-Credits: [0-9]+(\.[0-9]+)?$' || true; } \
+            | sed -E 's/^Copilot-AI-Credits: //' \
             | awk '{ s += $1 + 0 } END { printf "%.4f", s + 0 }')
 
           # Ceil to integer for the title prefix.
