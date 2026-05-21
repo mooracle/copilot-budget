@@ -1,4 +1,11 @@
-import { Tracker, TrackingStats, ModelStats } from './tracker';
+import {
+  Tracker,
+  TrackingStats,
+  ModelStats,
+  JsonlSource,
+  Source,
+  RawAggregateBatch,
+} from './tracker';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import * as sessionDiscovery from './sessionDiscovery';
@@ -145,7 +152,7 @@ afterEach(() => {
 
 describe('Tracker — initial state', () => {
   it('returns zero stats before initialize', async () => {
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     const stats = tracker.getStats();
     expect(stats.totalTokens).toBe(0);
     expect(stats.interactions).toBe(0);
@@ -179,7 +186,7 @@ describe('Tracker — baseline computation', () => {
       },
     ]);
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     const stats = tracker.getStats();
 
@@ -192,7 +199,7 @@ describe('Tracker — baseline computation', () => {
 
   it('handles no session files', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(tracker.getStats().totalTokens).toBe(0);
     tracker.dispose();
@@ -221,7 +228,7 @@ describe('Tracker — delta computation', () => {
       },
     ]);
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     setupFiles([
@@ -284,7 +291,7 @@ describe('Tracker — delta computation', () => {
       },
     ]);
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     const listener = jest.fn();
     tracker.onStatsChanged(listener);
     await tracker.initialize();
@@ -306,7 +313,7 @@ describe('Tracker — delta computation', () => {
         },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     const listener = jest.fn();
     tracker.onStatsChanged(listener);
     await tracker.initialize();
@@ -351,7 +358,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
         },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     setupFiles([
@@ -385,7 +392,7 @@ describe('Tracker — published-rate billing for "included" models', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     setupFiles([
@@ -425,7 +432,7 @@ describe('Tracker — mixed-model session', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     setupFiles([
@@ -484,7 +491,7 @@ describe('Tracker — totalTokens invariant', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     setupFiles([
@@ -523,7 +530,7 @@ describe('Tracker — restored stats merge', () => {
       },
     ]);
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     tracker.setPreviousStats({
       since: '2026-04-01T00:00:00.000Z',
       interactions: 7,
@@ -581,7 +588,7 @@ describe('Tracker — restored stats merge', () => {
 
   it('reset() clears previousStats and resets baseline', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     tracker.setPreviousStats({
       since: '2026-04-01T00:00:00.000Z',
       interactions: 5,
@@ -620,7 +627,7 @@ describe('Tracker — restored stats merge', () => {
         },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     setupFiles([
@@ -696,7 +703,7 @@ describe('Tracker — restored stats merge', () => {
         },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     await tracker.update();
 
@@ -710,7 +717,7 @@ describe('Tracker — restored stats merge', () => {
 
   it('consume() clears previousStats so restored prior-session stats do not leak forward', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     tracker.setPreviousStats({
       since: '2026-04-01T00:00:00.000Z',
       interactions: 5,
@@ -748,7 +755,7 @@ describe('Tracker — getFileDiagnostics', () => {
         },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     // File b appears after initialize — its entire content (including the
@@ -804,7 +811,7 @@ describe('Tracker — getFileDiagnostics', () => {
 
   it('returns an empty list before initialize', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     expect(tracker.getFileDiagnostics()).toEqual([]);
     tracker.dispose();
   });
@@ -826,7 +833,7 @@ describe('Tracker — mtime caching', () => {
         },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
@@ -844,7 +851,7 @@ describe('Tracker — mtime caching', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
@@ -876,7 +883,7 @@ describe('Tracker — mtime caching', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.createParserState).toHaveBeenCalledTimes(2);
 
@@ -910,12 +917,12 @@ describe('Tracker — parser state cache', () => {
         },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     // Tagged content the readFileSync mock returns is `{}\n#file=0\n`.
     const expectedContent = `{}\n#file=0\n`;
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number; parserState: unknown; interactions: number }>;
     }).fileCache;
     const entry = cache.get('/sessions/a.jsonl');
@@ -943,7 +950,7 @@ describe('Tracker — parser state cache', () => {
         parseResult: { interactions: 0, modelUsage: {}, modelInteractions: {} },
       },
     ]);
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
@@ -1031,7 +1038,7 @@ describe('Tracker — incremental parsing', () => {
     queueScan(1000, 'line1\nline2\n');
     queueScan(2000, 'line1\nline2\nline3\nline4\n');
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
@@ -1054,7 +1061,7 @@ describe('Tracker — incremental parsing', () => {
     expect(stats.models['gpt-4.1'].inputTokens).toBe(100);
     expect(stats.models['gpt-4.1'].outputTokens).toBe(50);
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
     }).fileCache;
     expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(
@@ -1071,7 +1078,7 @@ describe('Tracker — incremental parsing', () => {
     queueScan(1000, 'a\nb\nc\n');
     queueScan(2000, 'a\n');
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
@@ -1085,7 +1092,7 @@ describe('Tracker — incremental parsing', () => {
     expect(mockParser.applyDeltaLines.mock.calls[1][0]).toEqual(['a']);
     expect(mockParser.applyDeltaLines.mock.calls[1][1]).not.toBe(stateBefore);
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number }>;
     }).fileCache;
     expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(2);
@@ -1100,7 +1107,7 @@ describe('Tracker — incremental parsing', () => {
     queueScan(1000, 'aaa\n');
     queueScan(2000, 'bbb\n');
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
@@ -1130,14 +1137,14 @@ describe('Tracker — incremental parsing', () => {
     queueScan(1000, 'good\npartial');
     queueScan(2000, 'good\npartial-completed\nnext\n');
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     // Only the complete "good" line was parsed; the partial trailing line
     // was held back, not fed to the parser.
     expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
     expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['good']);
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number }>;
     }).fileCache;
     // lastOffset stops after the last \n, not at content.length.
@@ -1168,12 +1175,12 @@ describe('Tracker — incremental parsing', () => {
     queueScan(2000, 'a\nbpartial');
     queueScan(3000, 'a\nbpartial-complete\nmore\n');
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.applyDeltaLines).toHaveBeenCalledTimes(1);
     expect(mockParser.applyDeltaLines.mock.calls[0][0]).toEqual(['a']);
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number; mtime: number }>;
     }).fileCache;
     const offsetAfterScan1 = cache.get('/sessions/a.jsonl')!.lastOffset;
@@ -1222,7 +1229,7 @@ describe('Tracker — incremental parsing', () => {
     queueScan(1000, 'pending\n');
     queueScan(2000, 'pending\nresult\nmodelState\n');
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     const stateBefore = mockParser.applyDeltaLines.mock.calls[0][1];
     expect(tracker.getStats().interactions).toBe(0);
@@ -1258,9 +1265,9 @@ describe('Tracker — incremental parsing', () => {
     queueScan(1000, scan1);
     queueScan(2000, scan2);
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number }>;
     }).fileCache;
     expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(scan1.length);
@@ -1303,17 +1310,19 @@ describe('Tracker — incremental parsing', () => {
     parser.queue({ interactions: 0, modelUsage: {}, modelInteractions: {} });
     queueScan(2000, 'corrupted\nlater-line\n');
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
     }).fileCache;
     // After scan 1's rejection: parserState dropped, lastOffset reset.
     expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
     expect(cache.get('/sessions/a.jsonl')!.lastOffset).toBe(0);
 
-    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    const lru = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
+      parserStateLru: string[];
+    }).parserStateLru;
     expect(lru).not.toContain('/sessions/a.jsonl');
 
     await tracker.update();
@@ -1344,16 +1353,18 @@ describe('Tracker — incremental parsing', () => {
     queueScan(1000, 'good\n');
     queueScan(2000, 'bad!\n'); // same length → falls to full re-parse branch
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
-    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    const lru = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
+      parserStateLru: string[];
+    }).parserStateLru;
     expect(lru).toContain('/sessions/a.jsonl');
 
     // Override the second applyDeltaLines call to simulate rejection.
     mockParser.applyDeltaLines.mockImplementationOnce((_lines, state) => state);
     await tracker.update();
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { lastOffset: number; parserState: unknown }>;
     }).fileCache;
     expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
@@ -1384,10 +1395,10 @@ describe('Tracker — parserState LRU eviction', () => {
     // the LRU head. After d is touched, length=4>cap → a evicted.
     setupFiles(fourFiles());
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<
         string,
         { parserState: unknown; interactions: number; modelUsage: any }
@@ -1410,10 +1421,10 @@ describe('Tracker — parserState LRU eviction', () => {
   it('re-installs parserState via full re-parse when an evicted file changes', async () => {
     setupFiles(fourFiles());
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, { parserState: unknown }>;
     }).fileCache;
     expect(cache.get('/sessions/a.jsonl')!.parserState).toBeNull();
@@ -1444,7 +1455,7 @@ describe('Tracker — parserState LRU eviction', () => {
   it('preserves getFileDiagnostics() output across LRU eviction', async () => {
     setupFiles(fourFiles());
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
     const diag = tracker.getFileDiagnostics();
@@ -1469,10 +1480,12 @@ describe('Tracker — parserState LRU eviction', () => {
     // so a later re-creation doesn't end up double-tracked.
     setupFiles(fourFiles());
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
 
-    const lru = (tracker as unknown as { parserStateLru: string[] }).parserStateLru;
+    const lru = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
+      parserStateLru: string[];
+    }).parserStateLru;
     expect(lru).toEqual(['/sessions/b.jsonl', '/sessions/c.jsonl', '/sessions/d.jsonl']);
 
     // Delete b: discovery drops it AND statSync throws for that path.
@@ -1489,7 +1502,7 @@ describe('Tracker — parserState LRU eviction', () => {
     await tracker.update();
 
     expect(lru).toEqual(['/sessions/c.jsonl', '/sessions/d.jsonl']);
-    const cache = (tracker as unknown as {
+    const cache = ((tracker as unknown as { source: JsonlSource }).source as unknown as {
       fileCache: Map<string, unknown>;
     }).fileCache;
     expect(cache.has('/sessions/b.jsonl')).toBe(false);
@@ -1500,7 +1513,7 @@ describe('Tracker — parserState LRU eviction', () => {
 describe('Tracker — periodic scanning', () => {
   it('calls update on interval', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     // Await start so the setInterval is installed before we advance fake
     // timers — start() is async (it awaits the initial scan) and would
     // otherwise still be in its microtask when advanceTimersByTime runs.
@@ -1540,7 +1553,7 @@ describe('Tracker — error handling', () => {
       modelUsage: {},
       modelInteractions: {},
     });
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
     tracker.dispose();
@@ -1552,7 +1565,7 @@ describe('Tracker — error handling', () => {
     mockFs.readFileSync.mockImplementation(() => {
       throw new Error('EACCES');
     });
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(tracker.getStats().totalTokens).toBe(0);
     tracker.dispose();
@@ -1582,7 +1595,7 @@ describe('Tracker — cache persistence across mtime filter', () => {
       },
     ]);
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockParser.createParserState).toHaveBeenCalledTimes(1);
 
@@ -1609,7 +1622,7 @@ describe('Tracker — cache persistence across mtime filter', () => {
       },
     ]);
 
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(tracker.getFileDiagnostics()).toHaveLength(1);
 
@@ -1628,7 +1641,7 @@ describe('Tracker — cache persistence across mtime filter', () => {
 describe('Tracker — dispose', () => {
   it('clears timer, listeners, and cache', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.start(60_000);
     tracker.dispose();
     jest.advanceTimersByTime(120_000);
@@ -1641,7 +1654,7 @@ describe('Tracker — dispose', () => {
     // in start(), setInterval would be installed on a disposed tracker and
     // leak forever.
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     const startPromise = tracker.start(60_000);
     tracker.dispose();
     await startPromise;
@@ -1655,7 +1668,7 @@ describe('Tracker — dispose', () => {
 describe('Tracker — storageUri threading', () => {
   it('passes the stored storageUri to discoverSessionFiles on scan', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(STUB_STORAGE_URI);
+    const tracker = new Tracker(new JsonlSource(STUB_STORAGE_URI), 'files');
     await tracker.initialize();
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledWith(STUB_STORAGE_URI);
     tracker.dispose();
@@ -1663,7 +1676,7 @@ describe('Tracker — storageUri threading', () => {
 
   it('passes undefined to discoverSessionFiles when no storageUri given', async () => {
     setupEmptyDiscovery();
-    const tracker = new Tracker(undefined);
+    const tracker = new Tracker(new JsonlSource(undefined), 'files');
     await tracker.initialize();
     expect(mockDiscovery.discoverSessionFiles).toHaveBeenCalledWith(undefined);
     tracker.dispose();
@@ -1671,13 +1684,141 @@ describe('Tracker — storageUri threading', () => {
 
   it('reports zero stats when storageUri is undefined and discovery returns empty', async () => {
     mockDiscovery.discoverSessionFiles.mockReturnValue([]);
-    const tracker = new Tracker(undefined);
+    const tracker = new Tracker(new JsonlSource(undefined), 'files');
     await tracker.initialize();
     const stats = tracker.getStats();
     expect(stats.interactions).toBe(0);
     expect(stats.totalTokens).toBe(0);
     expect(stats.totalAiCredits).toBe(0);
     expect(stats.models).toEqual({});
+    tracker.dispose();
+  });
+});
+
+describe('Tracker — Source strategy', () => {
+  // Tracker is source-agnostic: it delegates discovery+parse to the injected
+  // Source and only handles baseline/delta arithmetic. A bare in-memory mock
+  // satisfying the Source interface should drive every Tracker code path
+  // (initialize, update, dispose) without touching fs, discovery, or parser
+  // mocks. This is the contract Task 5b's OTelSource will rely on.
+  function makeMockSource(batches: RawAggregateBatch[]): Source & {
+    scan: jest.Mock<Promise<RawAggregateBatch>, []>;
+    dispose: jest.Mock<void, []>;
+  } {
+    let idx = 0;
+    const scan = jest.fn(async () => {
+      const next =
+        batches[idx] ??
+        ({ interactions: 0, modelUsage: {}, modelInteractions: {} } as RawAggregateBatch);
+      idx += 1;
+      return next;
+    });
+    const dispose = jest.fn();
+    return { scan, dispose };
+  }
+
+  it('initialize calls source.scan exactly once and zeros the delta', async () => {
+    const source = makeMockSource([
+      {
+        interactions: 5,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 200,
+            outputTokens: 100,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 5 },
+      },
+    ]);
+    const tracker = new Tracker(source, 'files');
+    await tracker.initialize();
+
+    expect(source.scan).toHaveBeenCalledTimes(1);
+    const stats = tracker.getStats();
+    // Initial scan becomes the baseline → delta is zero.
+    expect(stats.totalTokens).toBe(0);
+    expect(stats.interactions).toBe(0);
+    expect(stats.totalAiCredits).toBe(0);
+    expect(stats.models).toEqual({});
+    tracker.dispose();
+  });
+
+  it('update calls source.scan again and surfaces the delta', async () => {
+    const source = makeMockSource([
+      {
+        interactions: 0,
+        modelUsage: {},
+        modelInteractions: {},
+      },
+      {
+        interactions: 1,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 1_000_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 1 },
+      },
+    ]);
+    const tracker = new Tracker(source, 'files');
+    await tracker.initialize();
+    expect(source.scan).toHaveBeenCalledTimes(1);
+
+    await tracker.update();
+    expect(source.scan).toHaveBeenCalledTimes(2);
+
+    const stats = tracker.getStats();
+    expect(stats.interactions).toBe(1);
+    expect(stats.models['gpt-4.1'].inputTokens).toBe(1_000_000);
+    expect(stats.totalAiCredits).toBeCloseTo(200, 6);
+    tracker.dispose();
+  });
+
+  it('dispose forwards to source.dispose', async () => {
+    const source = makeMockSource([
+      { interactions: 0, modelUsage: {}, modelInteractions: {} },
+    ]);
+    const tracker = new Tracker(source, 'files');
+    await tracker.initialize();
+    tracker.dispose();
+    expect(source.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('mode passed at construction is reflected in getStats', async () => {
+    const source = makeMockSource([
+      { interactions: 0, modelUsage: {}, modelInteractions: {} },
+    ]);
+    const filesTracker = new Tracker(source, 'files');
+    await filesTracker.initialize();
+    expect(filesTracker.mode).toBe('files');
+    expect(filesTracker.getStats().mode).toBe('files');
+    filesTracker.dispose();
+
+    const telemetrySource = makeMockSource([
+      { interactions: 0, modelUsage: {}, modelInteractions: {} },
+    ]);
+    const telemetryTracker = new Tracker(telemetrySource, 'telemetry');
+    await telemetryTracker.initialize();
+    expect(telemetryTracker.mode).toBe('telemetry');
+    expect(telemetryTracker.getStats().mode).toBe('telemetry');
+    telemetryTracker.dispose();
+  });
+
+  it('getFileDiagnostics returns [] for a non-JSONL Source', async () => {
+    // OTelSource won't have per-file granularity (it's per-span). Tracker
+    // must return an empty list for any Source that isn't a JsonlSource
+    // rather than crashing or throwing.
+    const source = makeMockSource([
+      { interactions: 0, modelUsage: {}, modelInteractions: {} },
+    ]);
+    const tracker = new Tracker(source, 'telemetry');
+    await tracker.initialize();
+    expect(tracker.getFileDiagnostics()).toEqual([]);
     tracker.dispose();
   });
 });

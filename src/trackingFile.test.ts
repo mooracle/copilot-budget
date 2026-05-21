@@ -4,7 +4,7 @@ import {
   readTrackingFile,
   isTrackingFileTruncated,
 } from './trackingFile';
-import { Tracker, TrackingStats } from './tracker';
+import { Tracker, TrackingStats, JsonlSource } from './tracker';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
@@ -820,7 +820,7 @@ describe('trackingFile', () => {
       // shows up as a positive delta on update().
       (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([]);
 
-      const tracker = new Tracker(undefined);
+      const tracker = new Tracker(new JsonlSource(undefined), 'files');
       tracker.setPreviousStats(restored!);
       await tracker.initialize();
 

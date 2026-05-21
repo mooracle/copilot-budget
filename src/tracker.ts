@@ -48,6 +48,23 @@ export interface FileDiagnostics {
   inBaseline: boolean;
 }
 
+// Per-scan raw counts the Tracker aggregates into TrackingStats. JsonlSource
+// produces this from chatSessions/*.jsonl. The forthcoming OTelSource (Task 5b)
+// produces the same shape from agent-traces.db so Tracker stays source-agnostic.
+export interface RawAggregateBatch {
+  interactions: number;
+  modelUsage: ModelUsage;
+  modelInteractions: { [model: string]: number };
+}
+
+// Strategy interface lifting source-of-truth out of Tracker. Implementations
+// own discovery, parsing, and any per-source caching; Tracker only handles
+// baseline/delta arithmetic and listener fan-out.
+export interface Source {
+  scan(): Promise<RawAggregateBatch>;
+  dispose(): void;
+}
+
 interface FileCache {
   mtime: number;
   interactions: number;
@@ -122,28 +139,20 @@ function accumulateModelStats(
   entry.costAic += contrib.costAic;
 }
 
-type Snapshot = {
-  interactions: number;
-  modelUsage: ModelUsage;
-  modelInteractions: { [model: string]: number };
-};
+// Yield to the event loop so the extension host can service UI/I-O between
+// files. `setImmediate` fires after the current poll phase, which is what we
+// want; `Promise.resolve()` would only flush microtasks and starve I/O.
+function yieldEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
 
-export class Tracker {
+export class JsonlSource implements Source {
   // Cap on the number of `parserState` objects retained at once. Aggregates and
   // lastOffset survive eviction unchanged — only the incremental-parse anchor
   // is dropped, forcing a full re-parse on the next mtime change for that file.
   // TODO: surface as `copilot-budget.parserStateCacheSize` config if heavy
   // multi-chat users ever need to tune this.
   private static readonly MAX_PARSER_STATES = 3;
-  private baseline: Snapshot = {
-    interactions: 0,
-    modelUsage: {},
-    modelInteractions: {},
-  };
-  // The scan that produced lastStats. consume() uses this as the new baseline
-  // so any activity not yet reflected in lastStats (and therefore not in the
-  // trailer the hook just consumed) is preserved as the next commit's delta.
-  private lastSnapshot: Snapshot | null = null;
   private fileCache = new Map<string, FileCache>();
   // Paths in least-recently-touched order whose `parserState` is currently
   // retained. Tail = most recently used. Touched whenever a scan creates or
@@ -156,64 +165,73 @@ export class Tracker {
   // into the baseline) versus files that appeared mid-session (whose
   // entire contents count toward the session delta).
   private baselineFiles = new Set<string>();
-  private since: string;
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private listeners: StatsListener[] = [];
-  private lastStats: TrackingStats | null = null;
-  private previousStats: RestoredStats | null = null;
-  private readonly storageUri: vscode.Uri | undefined;
-  // Single-flight mutex for scanAll. The 30s timer can fire while a previous
+  // Single-flight mutex for scan(). The 30s timer can fire while a previous
   // scan is still in progress (large chat histories, slow disks). Without
   // this, overlapping scans would each parse every file and contend on the
   // fileCache. With it, the second caller awaits the in-flight scan's result.
-  private scanInFlight: Promise<Snapshot> | null = null;
-  // Set by dispose(). Honored by start() after the initial async scan resolves
-  // so a dispose() that lands during initialize() doesn't install the polling
-  // timer on a disposed tracker (it would otherwise leak forever).
-  private disposed = false;
+  private scanInFlight: Promise<RawAggregateBatch> | null = null;
+  private readonly storageUri: vscode.Uri | undefined;
 
   constructor(storageUri: vscode.Uri | undefined) {
-    this.since = new Date().toISOString();
     this.storageUri = storageUri;
   }
 
-  setPreviousStats(restored: RestoredStats): void {
-    this.previousStats = restored;
-    this.since = restored.since;
-    // Pre-render restored stats so the status bar reflects the prior session
-    // immediately, before the first async scan completes. Without this, the
-    // bar would briefly show 0 AIC after activation on accounts with large
-    // chat histories where the initial scan takes seconds. Once scan lands,
-    // computeStats merges current delta with previousStats and overwrites.
-    this.lastStats = this.computeStats({
-      interactions: 0,
-      modelUsage: {},
-      modelInteractions: {},
-    });
+  scan(): Promise<RawAggregateBatch> {
+    if (this.scanInFlight) return this.scanInFlight;
+    this.scanInFlight = this.doScan();
+    // Clear the slot once the scan settles (success or failure) so the next
+    // caller starts a fresh scan rather than reusing a stale result. The
+    // returned `.finally()` Promise propagates any rejection from doScan();
+    // awaiters already see that rejection via `scanInFlight` itself, so we
+    // swallow the duplicate to prevent an unhandled rejection warning.
+    this.scanInFlight
+      .finally(() => {
+        this.scanInFlight = null;
+      })
+      .catch(() => {});
+    return this.scanInFlight;
   }
 
-  onStatsChanged(listener: StatsListener): { dispose: () => void } {
-    this.listeners.push(listener);
-    return {
-      dispose: () => {
-        const idx = this.listeners.indexOf(listener);
-        if (idx >= 0) this.listeners.splice(idx, 1);
-      },
-    };
+  // Snapshot the current file-cache key set as the baseline. Called by Tracker
+  // after initialize/consume/reset so getFileDiagnostics() can flag which files
+  // were already present when the session started (their existing contents are
+  // folded into the baseline) versus files that appeared mid-session.
+  markBaseline(): void {
+    this.baselineFiles = new Set(this.fileCache.keys());
   }
 
-  // Yield to the event loop so the extension host can service UI/I-O between
-  // files. `setImmediate` fires after the current poll phase, which is what we
-  // want; `Promise.resolve()` would only flush microtasks and starve I/O.
-  private yieldEventLoop(): Promise<void> {
-    return new Promise<void>((resolve) => setImmediate(resolve));
+  // Per-file breakdown for diagnostics. Reflects the most recent successful
+  // scan of each file (the same data the delta computation consumed), plus
+  // a flag indicating whether the file was already present when the baseline
+  // was captured. New files that appeared mid-session have their entire
+  // contents — including the very first request — attributed to the session
+  // delta, since baseline contributes 0 for them.
+  getFileDiagnostics(): FileDiagnostics[] {
+    const out: FileDiagnostics[] = [];
+    for (const [path, entry] of this.fileCache.entries()) {
+      out.push({
+        path,
+        mtime: entry.mtime,
+        interactions: entry.interactions,
+        modelInteractions: entry.modelInteractions,
+        modelUsage: entry.modelUsage,
+        inBaseline: this.baselineFiles.has(path),
+      });
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  dispose(): void {
+    this.fileCache.clear();
+    this.parserStateLru = [];
+    this.baselineFiles.clear();
   }
 
   private touchParserStateLru(path: string): void {
     const idx = this.parserStateLru.indexOf(path);
     if (idx >= 0) this.parserStateLru.splice(idx, 1);
     this.parserStateLru.push(path);
-    while (this.parserStateLru.length > Tracker.MAX_PARSER_STATES) {
+    while (this.parserStateLru.length > JsonlSource.MAX_PARSER_STATES) {
       const evicted = this.parserStateLru.shift();
       if (!evicted) break;
       const entry = this.fileCache.get(evicted);
@@ -226,25 +244,9 @@ export class Tracker {
     if (idx >= 0) this.parserStateLru.splice(idx, 1);
   }
 
-  private scanAll(): Promise<Snapshot> {
-    if (this.scanInFlight) return this.scanInFlight;
-    this.scanInFlight = this.doScanAll();
-    // Clear the slot once the scan settles (success or failure) so the next
-    // caller starts a fresh scan rather than reusing a stale result. The
-    // returned `.finally()` Promise propagates any rejection from doScanAll();
-    // awaiters already see that rejection via `scanInFlight` itself, so we
-    // swallow the duplicate to prevent an unhandled rejection warning.
-    this.scanInFlight
-      .finally(() => {
-        this.scanInFlight = null;
-      })
-      .catch(() => {});
-    return this.scanInFlight;
-  }
-
-  private async doScanAll(): Promise<Snapshot> {
+  private async doScan(): Promise<RawAggregateBatch> {
     const files = discoverSessionFiles(this.storageUri);
-    log(`scanAll: discovered ${files.length} session file(s)`);
+    log(`scan: discovered ${files.length} session file(s)`);
 
     // Union discovered ∪ cached. Discovery may filter out files that have aged
     // past `sessionMaxAgeDays`, but files already in the cache contributed to
@@ -255,7 +257,7 @@ export class Tracker {
       filesToScan.add(cached);
     }
 
-    const totals: Snapshot = {
+    const totals: RawAggregateBatch = {
       interactions: 0,
       modelUsage: {},
       modelInteractions: {},
@@ -266,7 +268,7 @@ export class Tracker {
       // Yield between files so a long scan doesn't block the extension host.
       // Mtime-cached hits still take this yield — they're cheap individually
       // but on a 1000-file cache a tight loop still adds up.
-      if (i > 0) await this.yieldEventLoop();
+      if (i > 0) await yieldEventLoop();
       const file = fileList[i];
 
       let stat: fs.Stats;
@@ -360,7 +362,7 @@ export class Tracker {
           }
         }
       } catch {
-        log(`scanAll: failed to parse session file: ${file}`);
+        log(`scan: failed to parse session file: ${file}`);
         continue;
       }
 
@@ -388,17 +390,73 @@ export class Tracker {
     }
 
     log(
-      `scanAll: total ${totals.interactions} interactions across ${Object.keys(totals.modelUsage).length} model(s)`,
+      `scan: total ${totals.interactions} interactions across ${Object.keys(totals.modelUsage).length} model(s)`,
     );
 
     return totals;
   }
+}
 
-  private computeStats(current: {
-    interactions: number;
-    modelUsage: ModelUsage;
-    modelInteractions: { [model: string]: number };
-  }): TrackingStats {
+export class Tracker {
+  private baseline: RawAggregateBatch = {
+    interactions: 0,
+    modelUsage: {},
+    modelInteractions: {},
+  };
+  // The scan that produced lastStats. consume() uses this as the new baseline
+  // so any activity not yet reflected in lastStats (and therefore not in the
+  // trailer the hook just consumed) is preserved as the next commit's delta.
+  private lastSnapshot: RawAggregateBatch | null = null;
+  private since: string;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private listeners: StatsListener[] = [];
+  private lastStats: TrackingStats | null = null;
+  private previousStats: RestoredStats | null = null;
+  private readonly source: Source;
+  readonly mode: 'files' | 'telemetry';
+  // Set by dispose(). Honored by start() after the initial async scan resolves
+  // so a dispose() that lands during initialize() doesn't install the polling
+  // timer on a disposed tracker (it would otherwise leak forever).
+  private disposed = false;
+
+  constructor(source: Source, mode: 'files' | 'telemetry' = 'files') {
+    this.since = new Date().toISOString();
+    this.source = source;
+    this.mode = mode;
+  }
+
+  setPreviousStats(restored: RestoredStats): void {
+    this.previousStats = restored;
+    this.since = restored.since;
+    // Pre-render restored stats so the status bar reflects the prior session
+    // immediately, before the first async scan completes. Without this, the
+    // bar would briefly show 0 AIC after activation on accounts with large
+    // chat histories where the initial scan takes seconds. Once scan lands,
+    // computeStats merges current delta with previousStats and overwrites.
+    this.lastStats = this.computeStats({
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
+    });
+  }
+
+  onStatsChanged(listener: StatsListener): { dispose: () => void } {
+    this.listeners.push(listener);
+    return {
+      dispose: () => {
+        const idx = this.listeners.indexOf(listener);
+        if (idx >= 0) this.listeners.splice(idx, 1);
+      },
+    };
+  }
+
+  private markSourceBaseline(): void {
+    if (this.source instanceof JsonlSource) {
+      this.source.markBaseline();
+    }
+  }
+
+  private computeStats(current: RawAggregateBatch): TrackingStats {
     const baseline = this.baseline;
 
     const deltaModels: { [model: string]: ModelStats } = {};
@@ -463,15 +521,15 @@ export class Tracker {
       totalTokens,
       interactions,
       totalAiCredits,
-      mode: 'files',
+      mode: this.mode,
     };
   }
 
   async initialize(): Promise<void> {
-    const snapshot = await this.scanAll();
+    const snapshot = await this.source.scan();
     this.baseline = snapshot;
     this.lastSnapshot = snapshot;
-    this.baselineFiles = new Set(this.fileCache.keys());
+    this.markSourceBaseline();
     log(
       `initialize: baseline set at ${snapshot.interactions} interactions across ${Object.keys(snapshot.modelUsage).length} model(s)`,
     );
@@ -485,7 +543,7 @@ export class Tracker {
   }
 
   async update(): Promise<void> {
-    const current = await this.scanAll();
+    const current = await this.source.scan();
     const stats = this.computeStats(current);
     this.lastSnapshot = current;
 
@@ -524,10 +582,10 @@ export class Tracker {
 
   async reset(): Promise<void> {
     this.previousStats = null;
-    const snapshot = await this.scanAll();
+    const snapshot = await this.source.scan();
     this.baseline = snapshot;
     this.lastSnapshot = snapshot;
-    this.baselineFiles = new Set(this.fileCache.keys());
+    this.markSourceBaseline();
     this.since = new Date().toISOString();
     const stats = this.computeStats(snapshot);
     this.lastStats = stats;
@@ -544,35 +602,21 @@ export class Tracker {
   // baseline and the next commit would underreport.
   async consume(): Promise<void> {
     this.previousStats = null;
-    this.baseline = this.lastSnapshot ?? (await this.scanAll());
-    this.baselineFiles = new Set(this.fileCache.keys());
+    this.baseline = this.lastSnapshot ?? (await this.source.scan());
+    this.markSourceBaseline();
     this.since = new Date().toISOString();
-    const current = await this.scanAll();
+    const current = await this.source.scan();
     this.lastSnapshot = current;
     const stats = this.computeStats(current);
     this.lastStats = stats;
     this.notifyListeners(stats);
   }
 
-  // Per-file breakdown for diagnostics. Reflects the most recent successful
-  // scan of each file (the same data the delta computation consumed), plus
-  // a flag indicating whether the file was already present when the baseline
-  // was captured. New files that appeared mid-session have their entire
-  // contents — including the very first request — attributed to the session
-  // delta, since baseline contributes 0 for them.
   getFileDiagnostics(): FileDiagnostics[] {
-    const out: FileDiagnostics[] = [];
-    for (const [path, entry] of this.fileCache.entries()) {
-      out.push({
-        path,
-        mtime: entry.mtime,
-        interactions: entry.interactions,
-        modelInteractions: entry.modelInteractions,
-        modelUsage: entry.modelUsage,
-        inBaseline: this.baselineFiles.has(path),
-      });
+    if (this.source instanceof JsonlSource) {
+      return this.source.getFileDiagnostics();
     }
-    return out.sort((a, b) => a.path.localeCompare(b.path));
+    return [];
   }
 
   getStats(): TrackingStats {
@@ -584,7 +628,7 @@ export class Tracker {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
-        mode: 'files',
+        mode: this.mode,
       };
     }
     return this.lastStats;
@@ -594,9 +638,7 @@ export class Tracker {
     this.disposed = true;
     this.stop();
     this.listeners = [];
-    this.fileCache.clear();
-    this.parserStateLru = [];
-    this.baselineFiles.clear();
+    this.source.dispose();
     this.previousStats = null;
     this.lastSnapshot = null;
   }

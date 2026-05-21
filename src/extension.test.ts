@@ -9,7 +9,7 @@ jest.mock('./sessionDiscovery');
 import * as vscode from 'vscode';
 import { __commandCallbacks, createMockExtensionContext } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
-import { Tracker } from './tracker';
+import { Tracker, JsonlSource } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
 import {
   writeTrackingFile,
@@ -525,10 +525,17 @@ describe('extension', () => {
       expect(readOrder).toBeLessThan(startOrder);
     });
 
-    it('passes context.storageUri to the Tracker constructor', async () => {
+    it('passes context.storageUri via JsonlSource to the Tracker constructor', async () => {
       const ctx = makeContext();
       await activate(ctx);
-      expect(MockTracker).toHaveBeenCalledWith(ctx.storageUri);
+      const MockJsonlSource = JsonlSource as jest.MockedClass<typeof JsonlSource>;
+      expect(MockJsonlSource).toHaveBeenCalledWith(ctx.storageUri);
+      // Tracker receives the JsonlSource instance + the initial 'files' mode.
+      // Auto-mocked instance identity comes from JsonlSource.mock.instances[0].
+      expect(MockTracker).toHaveBeenCalledWith(
+        MockJsonlSource.mock.instances[0],
+        'files',
+      );
     });
   });
 
