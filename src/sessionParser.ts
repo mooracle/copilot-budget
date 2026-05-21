@@ -197,12 +197,11 @@ interface RequestTokens {
  * Read server-reported token counts from a request's `result.metadata` block.
  * Returns null when the request is pending (no result/metadata, or
  * modelState.value !== 1) so the caller can skip it without counting an
- * interaction. When `cacheReadTokens` is absent, applies a turn-based heuristic
- * (turn 1 = 0% cached, turn ≥ 2 = 75% cached) — the resulting cost is lower
- * than treating all input as fresh, but the heuristic is a midpoint estimate,
- * not an upper bound.
+ * interaction. Pure passthrough: any cache split present in metadata is
+ * honored verbatim; missing `cacheReadTokens` / `cacheCreationTokens` default
+ * to 0, treating every prompt token as fresh input (upper-bound estimate).
  */
-function extractRequestTokens(request: unknown, turnIndex: number): RequestTokens | null {
+function extractRequestTokens(request: unknown): RequestTokens | null {
   if (!isObject(request)) {
     return null;
   }
@@ -235,19 +234,10 @@ function extractRequestTokens(request: unknown, turnIndex: number): RequestToken
       : clampNonNegInt(rawCacheCreation);
 
   const rawCacheRead = (metadata as any).cacheReadTokens;
-  let cacheReadTokens: number;
-  if (rawCacheRead === undefined) {
-    // Field absent entirely → fall back to the heuristic. Apply 75% over the
-    // remaining prompt budget after cache_creation, so the three buckets never
-    // sum above promptTokens when only one cache field is reported. An
-    // explicit `null` is treated as a serialized zero (clampNonNegInt below),
-    // not as missing data — otherwise we'd over-discount requests where the
-    // server reported "no cache reads happened".
-    const remaining = Math.max(0, promptTokens - cacheCreationTokens);
-    cacheReadTokens = turnIndex >= 2 ? Math.floor(remaining * 0.75) : 0;
-  } else {
-    cacheReadTokens = clampNonNegInt(rawCacheRead);
-  }
+  const cacheReadTokens =
+    rawCacheRead === undefined || rawCacheRead === null
+      ? 0
+      : clampNonNegInt(rawCacheRead);
 
   const inputTokens = Math.max(
     0,
@@ -269,15 +259,13 @@ function processRequests(requests: unknown[]): ParsedSession {
   const modelUsage: ModelUsage = {};
   const modelInteractions: { [model: string]: number } = {};
   let interactions = 0;
-  let turnIndex = 0;
 
   for (const request of requests) {
     if (!isObject(request)) {
       continue;
     }
-    turnIndex += 1;
 
-    const tokens = extractRequestTokens(request, turnIndex);
+    const tokens = extractRequestTokens(request);
     if (!tokens) {
       continue;
     }

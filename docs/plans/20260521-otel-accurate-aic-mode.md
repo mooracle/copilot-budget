@@ -94,11 +94,11 @@ Establish the formatting primitive used by status bar, tooltip, quick pick, and 
 
 Remove the 75%-on-turn-2+ heuristic. When `cacheReadTokens` is absent in metadata, treat it as 0 (same as `cacheCreationTokens` already does).
 
-- [ ] in `extractRequestTokens` replace the branch at lines 238–250 with a single `clampNonNegInt(rawCacheRead ?? 0)`. Drop the `turnIndex` parameter from the `extractRequestTokens` signature; remove `let turnIndex = 0` and the `turnIndex += 1` from `processRequests`.
-- [ ] update the JSDoc above `extractRequestTokens` to remove the heuristic prose. Note that the parser is now purely passthrough: any cache split present in metadata is honored; missing fields default to 0.
-- [ ] remove or rewrite tests asserting the 75% heuristic. Replace with tests asserting that absent `cacheReadTokens` produces `cacheReadTokens: 0` in the output regardless of turn index.
-- [ ] add a test asserting that explicit `cacheReadTokens` in metadata is honored verbatim and explicit `cacheCreationTokens` likewise. Establishes that the parser is now pure passthrough: present fields are honored, missing fields default to 0. No heuristic anywhere.
-- [ ] run `npm test` — must pass before next task.
+- [x] in `extractRequestTokens` replace the branch at lines 238–250 with a single `clampNonNegInt(rawCacheRead ?? 0)`. Drop the `turnIndex` parameter from the `extractRequestTokens` signature; remove `let turnIndex = 0` and the `turnIndex += 1` from `processRequests`.
+- [x] update the JSDoc above `extractRequestTokens` to remove the heuristic prose. Note that the parser is now purely passthrough: any cache split present in metadata is honored; missing fields default to 0.
+- [x] remove or rewrite tests asserting the 75% heuristic. Replace with tests asserting that absent `cacheReadTokens` produces `cacheReadTokens: 0` in the output regardless of turn index.
+- [x] add a test asserting that explicit `cacheReadTokens` in metadata is honored verbatim and explicit `cacheCreationTokens` likewise. Establishes that the parser is now pure passthrough: present fields are honored, missing fields default to 0. No heuristic anywhere.
+- [x] run `npm test` — must pass before next task.
 
 ### Task 3: Route status bar, tooltip, and trailer through formatter
 

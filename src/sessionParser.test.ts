@@ -202,11 +202,7 @@ describe('parseSessionFileContent — JSONL session reads', () => {
     });
   });
 
-  it('treats explicit cacheReadTokens=null as 0, not as missing data triggering the heuristic', () => {
-    // Two requests in one session — the heuristic would normally kick in on
-    // turn 2+. An explicit null says "no cache reads happened", so the input
-    // bucket must keep the full promptTokens instead of getting 75% diverted
-    // to cache_read.
+  it('treats explicit cacheReadTokens=null as 0', () => {
     const result = parseSessionFileContent(
       deltaSession([
         makeRequest({
@@ -306,21 +302,21 @@ describe('parseSessionFileContent — JSONL session reads', () => {
   });
 });
 
-describe('cache-split heuristic', () => {
-  it('does NOT fire when cacheReadTokens is explicitly present', () => {
+describe('cache-split passthrough (heuristic removed)', () => {
+  it('honors explicit cacheReadTokens verbatim', () => {
     const result = parseSessionFileContent(
       deltaSession([
         makeRequest({
           model: 'claude-sonnet-4.6',
           promptTokens: 1000,
           outputTokens: 100,
-          cacheReadTokens: 200, // explicit
+          cacheReadTokens: 200,
         }),
         makeRequest({
           model: 'claude-sonnet-4.6',
           promptTokens: 1000,
           outputTokens: 100,
-          cacheReadTokens: 800, // explicit
+          cacheReadTokens: 800,
         }),
       ]),
     );
@@ -332,16 +328,52 @@ describe('cache-split heuristic', () => {
     });
   });
 
-  it('turn 1 has 0% cache; turn 2+ has 75% cache when cacheReadTokens absent', () => {
+  it('honors explicit cacheCreationTokens verbatim', () => {
     const result = parseSessionFileContent(
       deltaSession([
-        // Turn 1: no cache field; expect 0% cached
+        makeRequest({
+          model: 'claude-sonnet-4.6',
+          promptTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: 100,
+          cacheCreationTokens: 300,
+        }),
+      ]),
+    );
+    expect(result.modelUsage['claude-sonnet-4.6']).toEqual({
+      inputTokens: 600, // 1000 - 100 - 300
+      outputTokens: 100,
+      cacheReadTokens: 100,
+      cacheCreationTokens: 300,
+    });
+  });
+
+  it('treats absent cacheReadTokens as 0 on turn 1 (no heuristic)', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
         makeRequest({
           model: 'gpt-4.1',
           promptTokens: 1000,
           outputTokens: 100,
         }),
-        // Turn 2: no cache field; expect 75% cached (floor(2000 * 0.75) = 1500)
+      ]),
+    );
+    expect(result.modelUsage['gpt-4.1']).toEqual({
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it('treats absent cacheReadTokens as 0 on turn 2+ (no heuristic)', () => {
+    const result = parseSessionFileContent(
+      deltaSession([
+        makeRequest({
+          model: 'gpt-4.1',
+          promptTokens: 1000,
+          outputTokens: 100,
+        }),
         makeRequest({
           model: 'gpt-4.1',
           promptTokens: 2000,
@@ -349,31 +381,23 @@ describe('cache-split heuristic', () => {
         }),
       ]),
     );
-    // Turn 1: input=1000, cacheRead=0
-    // Turn 2: cacheRead = floor(2000 * 0.75) = 1500, input = 2000 - 1500 = 500
+    // Every prompt token is fresh input (upper-bound estimate).
     expect(result.modelUsage['gpt-4.1']).toEqual({
-      inputTokens: 1500, // 1000 + 500
+      inputTokens: 3000,
       outputTokens: 300,
-      cacheReadTokens: 1500, // 0 + 1500
+      cacheReadTokens: 0,
       cacheCreationTokens: 0,
     });
   });
 
-  it('heuristic caps at the remaining prompt budget when cacheCreationTokens is reported alone', () => {
-    // Defensive: if upstream ever ships cacheCreationTokens without
-    // cacheReadTokens, the heuristic must not push the three buckets above
-    // promptTokens (would double-count tokens at higher rates).
+  it('treats absent cacheReadTokens as 0 even when cacheCreationTokens is present', () => {
     const result = parseSessionFileContent(
       deltaSession([
-        // Turn 1
         makeRequest({
           model: 'claude-sonnet-4.6',
           promptTokens: 100,
           outputTokens: 10,
         }),
-        // Turn 2: cacheCreation reported, cacheRead absent. Without the cap,
-        // heuristic would set cacheRead = floor(1000 * 0.75) = 750 and the
-        // sum (750 + 800 + 0 input) = 1550 > promptTokens.
         makeRequest({
           model: 'claude-sonnet-4.6',
           promptTokens: 1000,
@@ -383,28 +407,22 @@ describe('cache-split heuristic', () => {
       ]),
     );
     const usage = result.modelUsage['claude-sonnet-4.6'];
-    // Turn 2: remaining = 1000 - 800 = 200; cacheRead = floor(200 * 0.75) = 150;
-    // input = 1000 - 150 - 800 = 50. Sum = 1000 (matches promptTokens).
-    expect(usage.cacheReadTokens).toBe(150); // 0 (turn 1) + 150 (turn 2)
+    expect(usage.cacheReadTokens).toBe(0);
     expect(usage.cacheCreationTokens).toBe(800);
-    // Turn 1 input=100, Turn 2 input=50
-    expect(usage.inputTokens).toBe(150);
-    // No bucket overshoot vs sum of promptTokens across both turns (100 + 1000)
-    expect(
-      usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
-    ).toBeLessThanOrEqual(1100);
+    expect(usage.inputTokens).toBe(300); // 100 + (1000 - 800)
   });
 
-  it('counts pending requests against turn index so heuristic still aligns with array position', () => {
+  it('absent cacheReadTokens stays 0 regardless of array position (no turn-index influence)', () => {
     const result = parseSessionFileContent(
       deltaSession([
-        // Turn 1: pending — skipped, but turnIndex advances to 1
+        // Pending request — skipped entirely.
         makeRequest({
           model: 'gpt-4.1',
           modelStateValue: 2,
           promptTokens: 9999,
         }),
-        // Turn 2: complete, no cache field → heuristic applies (75%)
+        // Completed, no cache field. With the heuristic removed, cacheRead
+        // stays 0 regardless of where this request sits in the array.
         makeRequest({
           model: 'gpt-4.1',
           promptTokens: 1000,
@@ -413,9 +431,9 @@ describe('cache-split heuristic', () => {
       ]),
     );
     expect(result.modelUsage['gpt-4.1']).toEqual({
-      inputTokens: 250, // 1000 - 750
+      inputTokens: 1000,
       outputTokens: 100,
-      cacheReadTokens: 750, // floor(1000 * 0.75)
+      cacheReadTokens: 0,
       cacheCreationTokens: 0,
     });
   });
