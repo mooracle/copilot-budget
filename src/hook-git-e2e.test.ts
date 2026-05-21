@@ -588,13 +588,14 @@ describeE2E('hook E2E (real git)', () => {
     expect(msgC).toMatch(/^[ \t]*Copilot-AI-Credits: 2\.00$/m);
   });
 
-  // `git cherry-pick` invokes prepare-commit-msg with COMMIT_SOURCE="" (empty
-  // in modern git, not "message"). The hook's early-exit only matches `merge`
-  // or `commit`, so it falls through. With no local tracking file, no rebase
-  // dir, and source != squash, the hook exits at the `[ -f "$TRACKING_FILE" ]`
-  // guard. The cherry-picked commit body already contains the source commit's
-  // trailer verbatim (cherry-pick copies the message), so the resulting commit
-  // ends up with exactly one trailer — inherited, not appended by the hook.
+  // `git cherry-pick` invokes prepare-commit-msg with COMMIT_SOURCE=message
+  // (verified against git 2.50). The hook's early-exit only matches `merge` or
+  // `commit`, so `message` falls through. With the tracking file truncated by
+  // the preceding commit (0 bytes), the TR_ grep returns empty and the hook
+  // exits before appending. The cherry-picked commit body already contains
+  // the source commit's trailer verbatim (cherry-pick copies the message), so
+  // the resulting commit ends up with exactly one trailer — inherited, not
+  // appended by the hook.
   it('git cherry-pick of a commit with a trailer preserves it (no local tracking)', () => {
     repo = setupRepo();
     installHook(repo.gitDir);
@@ -636,12 +637,13 @@ describeE2E('hook E2E (real git)', () => {
     expect(fs.statSync(trackingFilePath(repo)).size).toBe(0);
   });
 
-  // `git revert --no-edit` invokes prepare-commit-msg with COMMIT_SOURCE=""
-  // (empty for revert, same as cherry-pick). The hook falls through, and with
-  // no tracking file it exits at the file guard. Git's default revert message
-  // is `Revert "<subject>"\n\nThis reverts commit <sha>.` and does NOT inline
-  // the reverted commit's body, so no inherited trailer arrives in the message
-  // file either. Final message has zero Copilot-AI-Credits lines.
+  // `git revert --no-edit` invokes prepare-commit-msg with COMMIT_SOURCE=message
+  // (verified against git 2.50 — same as cherry-pick). The hook falls through,
+  // and with the tracking file truncated by the preceding commit the TR_ grep
+  // returns empty, so the hook exits before appending. Git's default revert
+  // message is `Revert "<subject>"\n\nThis reverts commit <sha>.` and does NOT
+  // inline the reverted commit's body, so no inherited trailer arrives in the
+  // message file either. Final message has zero Copilot-AI-Credits lines.
   it('git revert --no-edit produces no Copilot-AI-Credits trailer (no local tracking)', () => {
     repo = setupRepo();
     installHook(repo.gitDir);
