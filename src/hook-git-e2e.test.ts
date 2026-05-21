@@ -223,6 +223,26 @@ function commitMessageAt(repo: Repo, ref: string): string {
   });
 }
 
+function cherryPick(repo: Repo, ref: string): void {
+  execFileSync('git', ['-C', repo.dir, 'cherry-pick', ref], {
+    env: repo.env,
+    stdio: 'pipe',
+  });
+}
+
+function revert(repo: Repo, ref: string, ...extraFlags: string[]): void {
+  const args = ['-C', repo.dir, 'revert', ...extraFlags, ref];
+  execFileSync('git', args, { env: repo.env, stdio: 'pipe' });
+}
+
+function mergeNoFf(repo: Repo, branch: string, message: string): void {
+  execFileSync(
+    'git',
+    ['-C', repo.dir, 'merge', '--no-ff', '-m', message, branch],
+    { env: repo.env, stdio: 'pipe' },
+  );
+}
+
 // Tolerate the 4-space indentation git applies to inherited body lines in
 // SQUASH_MSG: any preserved (non-summed) trailer keeps that indentation in
 // the final message, so the matcher has to accept it.
@@ -548,6 +568,104 @@ describeE2E('hook E2E (real git)', () => {
     expect(msgB).toMatch(/^[ \t]*Copilot-AI-Credits: 3\.00$/m);
     expect(countAiCreditsTrailers(msgC)).toBe(1);
     expect(msgC).toMatch(/^[ \t]*Copilot-AI-Credits: 2\.00$/m);
+  });
+
+  // `git cherry-pick` invokes prepare-commit-msg with COMMIT_SOURCE="" (empty
+  // in modern git, not "message"). The hook's early-exit only matches `merge`
+  // or `commit`, so it falls through. With no local tracking file, no rebase
+  // dir, and source != squash, the hook exits at the `[ -f "$TRACKING_FILE" ]`
+  // guard. The cherry-picked commit body already contains the source commit's
+  // trailer verbatim (cherry-pick copies the message), so the resulting commit
+  // ends up with exactly one trailer — inherited, not appended by the hook.
+  it('git cherry-pick of a commit with a trailer preserves it (no local tracking)', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+
+    commit(repo, 'chore: init');
+    branchWithCommits(repo, 'feature', [makeStats(4.0)]);
+
+    checkout(repo, 'main');
+    cherryPick(repo, 'feature');
+
+    const msg = lastCommitMessage(repo);
+    expect(countAiCreditsTrailers(msg)).toBe(1);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 4\.00$/m);
+  });
+
+  // Same cherry-pick path, but a local tracking file exists. The hook falls
+  // through to the TR_ append branch and adds a *second* trailer on top of the
+  // one inherited from the source commit's body. The hook does NOT sum on the
+  // normal-commit path — that summing only happens on rebase/squash sources —
+  // so the resulting message carries TWO `Copilot-AI-Credits:` lines and the
+  // tracking file is truncated. If summing here is ever desired, that's a
+  // separate scope change (flag with ⚠️ and discuss).
+  it('git cherry-pick with a local tracking file appends a second trailer', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+
+    commit(repo, 'chore: init');
+    branchWithCommits(repo, 'feature', [makeStats(4.0)]);
+
+    checkout(repo, 'main');
+    writeStats(repo.gitDir, makeStats(1.0));
+    cherryPick(repo, 'feature');
+
+    const msg = lastCommitMessage(repo);
+    expect(countAiCreditsTrailers(msg)).toBe(2);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 4\.00$/m);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 1\.00$/m);
+    // Tracking file truncated on the append path (normal-commit branch).
+    expect(fs.statSync(trackingFilePath(repo)).size).toBe(0);
+  });
+
+  // `git revert --no-edit` invokes prepare-commit-msg with COMMIT_SOURCE=""
+  // (empty for revert, same as cherry-pick). The hook falls through, and with
+  // no tracking file it exits at the file guard. Git's default revert message
+  // is `Revert "<subject>"\n\nThis reverts commit <sha>.` and does NOT inline
+  // the reverted commit's body, so no inherited trailer arrives in the message
+  // file either. Final message has zero Copilot-AI-Credits lines.
+  it('git revert --no-edit produces no Copilot-AI-Credits trailer (no local tracking)', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+
+    commit(repo, 'chore: init');
+    writeStats(repo.gitDir, makeStats(4.0));
+    commit(repo, 'feat: x');
+
+    revert(repo, 'HEAD', '--no-edit');
+
+    const msg = lastCommitMessage(repo);
+    expect(countAiCreditsTrailers(msg)).toBe(0);
+    expect(msg).toMatch(/^Revert /m);
+  });
+
+  // `git merge --no-ff` with `-m` fires prepare-commit-msg with $2=merge, so
+  // the hook exits at the `case` statement before reading any tracking file.
+  // The merge commit message is exactly the `-m` text — git does NOT inline
+  // feature-branch commit bodies into a normal merge commit message — so the
+  // inherited trailer from the feature commit never reaches the merge commit.
+  // The local tracking file remains untouched because the hook exits before
+  // the truncation step.
+  it('git merge --no-ff writes no trailer and leaves the tracking file intact', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+
+    commit(repo, 'chore: init');
+    branchWithCommits(repo, 'feature', [makeStats(3.0)]);
+    checkout(repo, 'main');
+
+    writeStats(repo.gitDir, makeStats(7.0));
+    const sizeBefore = fs.statSync(trackingFilePath(repo)).size;
+
+    mergeNoFf(repo, 'feature', 'merge feature');
+
+    const msg = lastCommitMessage(repo);
+    expect(msg).toContain('merge feature');
+    expect(countAiCreditsTrailers(msg)).toBe(0);
+    // Tracking file unchanged: hook exited on $2=merge before truncation.
+    expect(fs.statSync(trackingFilePath(repo)).size).toBe(sizeBefore);
+    const trackingContent = fs.readFileSync(trackingFilePath(repo), 'utf8');
+    expect(trackingContent).toContain('TR_Copilot-AI-Credits=7.00');
   });
 });
 

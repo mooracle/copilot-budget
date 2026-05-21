@@ -262,7 +262,7 @@ not `squash`; the hook relies on rebase-dir detection instead — see
 **Files:**
 - Modify: `src/hook-git-e2e.test.ts`
 
-- [ ] **Scenario: `git cherry-pick` of a commit carrying a trailer.** Setup:
+- [x] **Scenario: `git cherry-pick` of a commit carrying a trailer.** Setup:
       branch `feature` with one commit (trailer 4.00). Switch to main, `git
       cherry-pick feature`. (Note: `$COMMIT_SOURCE` for cherry-pick is empty
       `""` in modern git, not `message`. Either way, the case statement at
@@ -272,22 +272,23 @@ not `squash`; the hook relies on rebase-dir detection instead — see
       commit message already has its trailer from the source commit. Assert:
       cherry-picked commit has exactly one `Copilot-AI-Credits: 4.00`
       (original, no duplicate, no second append).
-- [ ] **Scenario: `git cherry-pick` WITH a local tracking file → trailer
+- [x] **Scenario: `git cherry-pick` WITH a local tracking file → trailer
       ADDED on top.** Same as above but write tracking file with `1.00`
       before the cherry-pick. Hook reads `TR_` line → appends. Assert: commit
       message ends up with TWO `Copilot-AI-Credits:` lines (4.00 from source,
       1.00 newly appended) — the hook does NOT sum on normal-commit path.
       Document this as expected behavior. (If user wants summing here, that's
       a separate scope discussion — flag with ⚠️ and stop.)
-- [ ] **Scenario: `git revert --no-edit` of a commit carrying a trailer.**
+- [x] **Scenario: `git revert --no-edit` of a commit carrying a trailer.**
       Revert fires hook with `$COMMIT_SOURCE` empty (or `message` if
       `--edit` is used) — neither matches the early-exit case, so it falls
       through to the tracking-file branch like cherry-pick. With no tracking
-      file: revert commit's auto-generated message includes the reverted
-      commit's body (and thus its trailer). Assert: revert commit has
-      exactly one `Copilot-AI-Credits:` line (the inherited one from the
-      reverted commit's body).
-- [ ] **Scenario: real merge commit (`git merge --no-ff`) writes no
+      file: ⚠️ git's default revert message is `Revert "<subject>"\n\nThis
+      reverts commit <sha>.` and does NOT inline the reverted commit's body
+      (the plan's original assertion overestimated git's behavior — verified
+      empirically). The hook adds nothing on top, so the revert commit ends
+      up with ZERO `Copilot-AI-Credits:` lines. Test asserts that.
+- [x] **Scenario: real merge commit (`git merge --no-ff`) writes no
       trailer.** Setup: branch `feature` with one commit (trailer 3.00).
       Switch to main, write local tracking file `7.00`, `git merge --no-ff
       feature -m 'merge feature'`. Merge commit fires hook with `$2=merge` →
@@ -296,7 +297,7 @@ not `squash`; the hook relies on rebase-dir detection instead — see
       bodies, so no inherited trailer arrives via the message file either.
       Assert: merge commit message has NO `Copilot-AI-Credits:` line, AND
       the local tracking file is UNCHANGED (`7.00` intact, not truncated).
-- [ ] Run `npm test` — must pass before Task 6.
+- [x] Run `npm test` — must pass before Task 6.
 
 ### Task 6: Verify acceptance criteria
 
