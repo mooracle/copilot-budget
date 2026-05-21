@@ -178,6 +178,51 @@ function squashMerge(repo: Repo, branch: string): void {
   });
 }
 
+// `git rebase -i HEAD~n` driven headlessly via GIT_SEQUENCE_EDITOR (the
+// editor that rewrites the rebase todo list) and GIT_EDITOR=true (from
+// gitEnv, which auto-accepts the prepared commit message file).
+//
+// - 'squash' / 'fixup' / 'reword': rewrite all entries after the first
+//   from `pick` to the named action.
+// - 'pick': no-op editor (leaves the todo list alone). Per githooks docs,
+//   `pick` actions during rebase do NOT invoke prepare-commit-msg.
+//
+// `sed -i.bak` is portable across BSD (macOS) and GNU sed; the .bak file
+// is cleaned up so a repeated invocation in the same repo stays clean.
+// The sed address `2,$` (single-quoted so the shell doesn't expand `$`)
+// rewrites every line from the second through the last, skipping line 1
+// so the first pick stays as the base of the squash/fixup/reword sequence.
+function rebaseInteractive(
+  repo: Repo,
+  n: number,
+  action: 'squash' | 'fixup' | 'reword' | 'pick',
+): void {
+  let sequenceEditor: string;
+  if (action === 'pick') {
+    sequenceEditor = 'true';
+  } else {
+    const scriptPath = path.join(repo.dir, `seq-editor-${action}.sh`);
+    fs.writeFileSync(
+      scriptPath,
+      `#!/bin/sh\nsed -i.bak '2,$ s/^pick /${action} /' "$1" && rm -f "$1.bak"\n`,
+    );
+    fs.chmodSync(scriptPath, 0o755);
+    sequenceEditor = scriptPath;
+  }
+  const env = { ...repo.env, GIT_SEQUENCE_EDITOR: sequenceEditor };
+  execFileSync('git', ['-C', repo.dir, 'rebase', '-i', `HEAD~${n}`], {
+    env,
+    stdio: 'pipe',
+  });
+}
+
+function commitMessageAt(repo: Repo, ref: string): string {
+  return execFileSync('git', ['-C', repo.dir, 'log', '-1', '--format=%B', ref], {
+    env: repo.env,
+    encoding: 'utf8',
+  });
+}
+
 // Tolerate the 4-space indentation git applies to inherited body lines in
 // SQUASH_MSG: any preserved (non-summed) trailer keeps that indentation in
 // the final message, so the matcher has to accept it.
@@ -424,6 +469,85 @@ describeE2E('hook E2E (real git)', () => {
     expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 5\.00$/m);
     // Two Copilot-Est-Cost lines preserved (one per source, unchanged).
     expect(countTrailers(msg, 'Copilot-Est-Cost')).toBe(2);
+  });
+
+  // `git rebase -i` is the case the existing shell-only suite has to fake.
+  // Here we drive the real workflow: each squash step fires the hook with
+  // $COMMIT_SOURCE=message (the documented gotcha — see commitHook.ts:56-64),
+  // and the hook's `$GIT_DIR/rebase-merge` directory probe routes it into
+  // the sum branch even without $2=squash.
+  it('git rebase -i squash sums three commit trailers into one', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+
+    commit(repo, 'chore: init');
+    writeStats(repo.gitDir, makeStats(5.0));
+    commit(repo, 'feat: a');
+    writeStats(repo.gitDir, makeStats(3.0));
+    commit(repo, 'feat: b');
+    writeStats(repo.gitDir, makeStats(2.0));
+    commit(repo, 'feat: c');
+
+    rebaseInteractive(repo, 3, 'squash');
+
+    const msg = lastCommitMessage(repo);
+    expect(countAiCreditsTrailers(msg)).toBe(1);
+    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 10\.00$/m);
+  });
+
+  // Per githooks(5): `prepare-commit-msg` is invoked by `git rebase` only
+  // for `reword` and `squash`, NOT for `pick` or `fixup`. With fixup, git
+  // reuses the first commit's message verbatim and the secondary commit
+  // bodies (and their trailers) are discarded before the hook would have
+  // run — so only the base commit's trailer survives in the final message.
+  it('git rebase -i fixup keeps only the first commit trailer', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+
+    commit(repo, 'chore: init');
+    writeStats(repo.gitDir, makeStats(5.0));
+    commit(repo, 'feat: a');
+    writeStats(repo.gitDir, makeStats(3.0));
+    commit(repo, 'feat: b');
+    writeStats(repo.gitDir, makeStats(2.0));
+    commit(repo, 'feat: c');
+
+    rebaseInteractive(repo, 3, 'fixup');
+
+    const msg = lastCommitMessage(repo);
+    expect(countAiCreditsTrailers(msg)).toBe(1);
+    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 5\.00$/m);
+  });
+
+  // No-op confirmation: a pure-pick rebase doesn't fire prepare-commit-msg,
+  // so each commit's body — including its single trailer — is preserved.
+  // This is the "acceptable alternative" called out in the plan: it doesn't
+  // exercise the per-commit sum branch with no duplicates, but it confirms
+  // the rebase-i path doesn't accidentally mutate single-trailer commits.
+  it('git rebase -i with all picks preserves each commit trailer', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+
+    commit(repo, 'chore: init');
+    writeStats(repo.gitDir, makeStats(5.0));
+    commit(repo, 'feat: a');
+    writeStats(repo.gitDir, makeStats(3.0));
+    commit(repo, 'feat: b');
+    writeStats(repo.gitDir, makeStats(2.0));
+    commit(repo, 'feat: c');
+
+    rebaseInteractive(repo, 3, 'pick');
+
+    const msgA = commitMessageAt(repo, 'HEAD~2');
+    const msgB = commitMessageAt(repo, 'HEAD~1');
+    const msgC = commitMessageAt(repo, 'HEAD');
+
+    expect(countAiCreditsTrailers(msgA)).toBe(1);
+    expect(msgA).toMatch(/^[ \t]*Copilot-AI-Credits: 5\.00$/m);
+    expect(countAiCreditsTrailers(msgB)).toBe(1);
+    expect(msgB).toMatch(/^[ \t]*Copilot-AI-Credits: 3\.00$/m);
+    expect(countAiCreditsTrailers(msgC)).toBe(1);
+    expect(msgC).toMatch(/^[ \t]*Copilot-AI-Credits: 2\.00$/m);
   });
 });
 

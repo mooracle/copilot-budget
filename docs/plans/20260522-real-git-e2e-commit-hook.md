@@ -222,14 +222,17 @@ not `squash`; the hook relies on rebase-dir detection instead — see
 **Files:**
 - Modify: `src/hook-git-e2e.test.ts`
 
-- [ ] **Helper**: `rebaseSquash(repo, env, n)` — runs `git rebase -i HEAD~n`
+- [x] **Helper**: `rebaseSquash(repo, env, n)` — runs `git rebase -i HEAD~n`
       with `GIT_SEQUENCE_EDITOR` set to a small inline `sed` invocation that
       rewrites all but the first `pick` to `squash` (use a shell snippet like
       `sed -i.bak '2,$s/^pick /squash /' "$1"` written to a tmp file +
       chmod). `GIT_EDITOR=true` to auto-accept the combined commit message.
       Tracker note: `sed -i` flags differ between BSD and GNU; use `sed -i.bak`
       and then `rm` the `.bak` file inside the helper script for portability.
-- [ ] **Scenario: rebase -i squashes three commits into one with summed
+      (Implemented as `rebaseInteractive(repo, n, action)` with `action ∈
+      {squash, fixup, reword, pick}` so the helper covers Scenarios 1–3 in
+      one place; `pick` short-circuits to `GIT_SEQUENCE_EDITOR=true`.)
+- [x] **Scenario: rebase -i squashes three commits into one with summed
       trailer.** Three commits on `main` with trailers 5.00, 3.00, 2.00 (each
       via normal-commit hook path on separate commits, so each has its own
       `Copilot-AI-Credits:` line and the tracking file is empty between
@@ -238,29 +241,21 @@ not `squash`; the hook relies on rebase-dir detection instead — see
       `.git/rebase-merge/` dir exists, so hook enters the sum branch
       (`src/commitHook.ts:61-64`). Assert: final commit has exactly one
       `Copilot-AI-Credits: 10.00` line.
-- [ ] **Scenario: rebase -i with `fixup` instead of `squash`.** Same setup,
-      but rewrite to `fixup`. `git fixup` discards the secondary commit
-      messages — but the `COMMIT_MSG_FILE` still passes through
-      prepare-commit-msg with rebase dir present. Document expected behavior:
-      with `fixup`, only the first commit's trailer survives in the message
-      file (the message is reused verbatim). Assert: final commit has one
-      `Copilot-AI-Credits: 5.00` (the first commit's value only). If observed
-      behavior differs, add ⚠️ note and discuss with user before changing the
-      hook.
-- [ ] **Scenario: rebase -i that rewrites each commit individually (e.g.,
-      reword or `--exec`) keeps each commit's single trailer intact.** A pure
-      no-op `pick` rebase may not fire prepare-commit-msg at all (git skips
-      the hook when there is no message rewrite), so this scenario would
-      pass trivially. To actually exercise the per-commit sum branch with
-      no duplicates, force a rewrite: use `git rebase -i HEAD~3` with
-      `GIT_SEQUENCE_EDITOR` rewriting each `pick` to `reword`, and a
-      `GIT_EDITOR` script that appends a newline (forcing a real edit) but
-      preserves the existing trailer. Assert each rebased commit still has
-      exactly one `Copilot-AI-Credits:` line with its original value.
-      (Acceptable alternative: rename this scenario to "no-op confirmation —
-      pick-only rebase produces no hook fires" and just assert the commits'
-      messages are byte-identical to pre-rebase via `git log --format=%B`.)
-- [ ] Run `npm test` — must pass before Task 5.
+- [x] **Scenario: rebase -i with `fixup` instead of `squash`.** Same setup,
+      but rewrite to `fixup`. Per githooks(5), prepare-commit-msg is NOT
+      invoked for `fixup` — git reuses the first commit's message verbatim
+      and the secondary commit messages (and their trailers) are discarded
+      before any hook would have run. Final commit has exactly one
+      `Copilot-AI-Credits: 5.00` (the first commit's value only). No ⚠️
+      needed; behavior matches the plan's expectation.
+- [x] **Scenario: rebase -i with all picks preserves each commit trailer
+      (acceptable-alternative variant).** Used the no-op pick-only path the
+      plan flagged as acceptable: `GIT_SEQUENCE_EDITOR=true` leaves the todo
+      list untouched, so git rewrites the three commits without firing
+      prepare-commit-msg for any of them. Each commit's body — including
+      its single trailer — is preserved byte-for-byte; assert one trailer
+      per commit at its original value (5.00 / 3.00 / 2.00).
+- [x] Run `npm test` — must pass before Task 5.
 
 ### Task 5: cherry-pick, revert, real merge
 
