@@ -181,6 +181,56 @@ describe('hook script (runtime behaviour)', () => {
     });
   });
 
+  describe('rebase in progress: sums trailers, leaves tracking file alone', () => {
+    // git rebase -i (squash/fixup/reword/edit) invokes prepare-commit-msg with
+    // source=message, not source=squash. The hook detects rebase state via
+    // $GIT_DIR/rebase-merge (rebase -i / interactive) or $GIT_DIR/rebase-apply
+    // (am-style) and routes to the same sum path used by $2 == squash.
+
+    it('sums duplicate trailers when rebase-merge dir exists (rebase -i squash)', () => {
+      fs.mkdirSync(path.join(gitDir, 'rebase-merge'));
+      const tracking =
+        'SINCE=1\nTOTAL_AI_CREDITS=7.00\nTR_Copilot-AI-Credits=7.00\n';
+      const msg = [
+        'first commit',
+        'Copilot-AI-Credits: 10.00',
+        '',
+        'second commit',
+        'Copilot-AI-Credits: 5.00',
+        '',
+      ].join('\n');
+      const { message, tracking: postTracking } = runHook(msg, 'message', {
+        trackingFile: tracking,
+      });
+      const matches = message.match(/^Copilot-AI-Credits: .*$/gm) ?? [];
+      expect(matches).toEqual(['Copilot-AI-Credits: 15.00']);
+      // Tracking file must survive the rebase unchanged — its tally belongs
+      // to the NEXT real commit, not the transient rebase step.
+      expect(postTracking).toBe(tracking);
+    });
+
+    it('sums duplicate trailers when rebase-apply dir exists (am-style rebase)', () => {
+      fs.mkdirSync(path.join(gitDir, 'rebase-apply'));
+      const msg = 'Copilot-AI-Credits: 4.00\nCopilot-AI-Credits: 6.00\n';
+      const { message } = runHook(msg, 'message');
+      const matches = message.match(/^Copilot-AI-Credits: .*$/gm) ?? [];
+      expect(matches).toEqual(['Copilot-AI-Credits: 10.00']);
+    });
+
+    it('does not append a fresh trailer from the tracking file during rebase', () => {
+      fs.mkdirSync(path.join(gitDir, 'rebase-merge'));
+      const tracking =
+        'SINCE=1\nTOTAL_AI_CREDITS=12.50\nTR_Copilot-AI-Credits=12.50\n';
+      const msg = 'subject\n\nbody\n';
+      const { message, tracking: postTracking } = runHook(msg, 'message', {
+        trackingFile: tracking,
+      });
+      // No tracking-file trailer appended; no truncation.
+      expect(message).toBe(msg);
+      expect(postTracking).toBe(tracking);
+    });
+  });
+
   describe('non-squash source: tracking-file path', () => {
     it('appends trailers and truncates the tracking file on a normal commit', () => {
       const tracking =

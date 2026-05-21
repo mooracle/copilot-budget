@@ -44,10 +44,26 @@ squash_sum_trailers() {
 
 case "$COMMIT_SOURCE" in
   merge|commit) exit 0 ;;
-  squash) squash_sum_trailers "$COMMIT_MSG_FILE"; exit 0 ;;
 esac
 
 GIT_DIR="$(git rev-parse --git-dir)"
+
+# git rebase -i (squash/fixup/reword) invokes prepare-commit-msg with
+# source=message, NOT source=squash. Detect rebase state via the standard
+# state directories and route those invocations to the sum path. Skip the
+# tracking-file logic entirely during rebase so transient rebase commits
+# don't consume usage destined for the next real commit.
+if [ -d "$GIT_DIR/rebase-merge" ] || [ -d "$GIT_DIR/rebase-apply" ]; then
+  squash_sum_trailers "$COMMIT_MSG_FILE"
+  exit 0
+fi
+
+# git merge --squash + git commit invokes with source=squash.
+if [ "$COMMIT_SOURCE" = squash ]; then
+  squash_sum_trailers "$COMMIT_MSG_FILE"
+  exit 0
+fi
+
 TRACKING_FILE="$GIT_DIR/copilot-budget"
 [ -f "$TRACKING_FILE" ] || exit 0
 

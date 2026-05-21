@@ -342,7 +342,9 @@ describe('commitHook', () => {
     it('includes essential shell logic', () => {
       expect(writtenContent).toContain('case "$COMMIT_SOURCE"');
       expect(writtenContent).toContain('merge|commit) exit 0');
-      expect(writtenContent).toContain('squash) squash_sum_trailers');
+      expect(writtenContent).toContain('squash_sum_trailers');
+      expect(writtenContent).toContain('rebase-merge');
+      expect(writtenContent).toContain('rebase-apply');
       expect(writtenContent).toContain('git rev-parse --git-dir');
       expect(writtenContent).not.toContain('git rev-parse --show-toplevel');
       expect(writtenContent).toContain('$GIT_DIR/copilot-budget');

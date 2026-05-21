@@ -145,12 +145,12 @@ The hook silently does nothing when:
 
 ### Squash and Fixup Behavior
 
-When `git rebase -i` squashes commits (or uses `fixup -c` / `fixup -C` which carry the fixup's message), git invokes the hook with `$2 == squash`. In that case the hook does **not** consult the tracking file or append fresh trailers. Instead it scans the in-progress squash message for inherited `Copilot-AI-Credits:` trailer lines (one per squashed commit) and rewrites them as a single summed line at the position of the first occurrence. The tracking file is left untouched so any usage accumulated during the rebase flushes on the next normal commit.
+When an interactive rebase is in progress (`git rebase -i` with `squash`/`fixup -c`/`fixup -C`, or any other step that fires the hook), the hook detects the rebase state via `$GIT_DIR/rebase-merge` (or `$GIT_DIR/rebase-apply` for am-style rebase) and switches into sum mode. In sum mode it does **not** consult the tracking file or append fresh trailers. Instead it scans the in-progress message for inherited `Copilot-AI-Credits:` trailer lines (one per squashed commit) and rewrites them as a single summed line at the position of the first occurrence. The tracking file is left untouched so any usage accumulated during the rebase flushes on the next normal commit. `git merge --squash` + `git commit` invokes the hook with `$2 == squash` and follows the same sum path.
 
 Limitations:
 
 - Only the total `Copilot-AI-Credits:` trailer is summed. The opt-in aggregate per-model trailer (`Copilot-AI-Credits-Models: Claude=10.00,GPT=5.00`) is left as-is — N duplicate lines after an N-way squash. Likewise for the opt-in `Copilot-Est-Cost` USD trailer and any user-renamed trailer key (the awk script matches the default name only).
-- Plain `fixup` is handled implicitly: git discards the fixup commit's message before the hook runs, so the previous commit's trailer is preserved as-is. The fixup's own tracked usage stays in the tracking file and flushes on the next normal commit.
+- Plain `git commit --fixup=X` followed by `git rebase --autosquash`: the fixup commit's message (and any trailer the hook wrote into it) is discarded by autosquash, so the rebased commit retains only the original commit's trailer. For trailers that survive the rebase, use `git commit --fixup=amend:X` or `git commit --fixup=reword:X`, whose messages replace or merge into the target commit during autosquash.
 
 ### Manual Hook Management
 
