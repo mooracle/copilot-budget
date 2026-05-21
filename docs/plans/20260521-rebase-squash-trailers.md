@@ -79,37 +79,37 @@ Amend / reword / edit (`$2 == commit`) and merge (`$2 == merge`) are already cor
 - Modify: `src/commitHook.ts`
 - Create: `src/hook-script.test.ts`
 
-- [ ] In `src/commitHook.ts`, change `const HOOK_SCRIPT = …` to `export const HOOK_SCRIPT = …` so tests can write it to a tmp file
-- [ ] Replace `case "$COMMIT_SOURCE" in merge|squash|commit) exit 0 ;; esac` with:
+- [x] In `src/commitHook.ts`, change `const HOOK_SCRIPT = …` to `export const HOOK_SCRIPT = …` so tests can write it to a tmp file
+- [x] Replace `case "$COMMIT_SOURCE" in merge|squash|commit) exit 0 ;; esac` with:
   ```sh
   case "$COMMIT_SOURCE" in
     merge|commit) exit 0 ;;
     squash) squash_sum_trailers "$COMMIT_MSG_FILE"; exit 0 ;;
   esac
   ```
-- [ ] Add a `squash_sum_trailers()` shell function (defined before the case statement) using the two-pass awk template in Technical Details. Atomic write via `mktemp` + `mv`. POSIX-portable form: `mktemp "${TMPDIR:-/tmp}/copilot-budget.XXXXXX"`. Failure to create tmp file → `exit 0` (never block a commit on bookkeeping failure)
-- [ ] Create `src/hook-script.test.ts`:
+- [x] Add a `squash_sum_trailers()` shell function (defined before the case statement) using the two-pass awk template in Technical Details. Atomic write via `mktemp` + `mv`. POSIX-portable form: `mktemp "${TMPDIR:-/tmp}/copilot-budget.XXXXXX"`. Failure to create tmp file → `exit 0` (never block a commit on bookkeeping failure)
+- [x] Create `src/hook-script.test.ts`:
   - per-test `tmpDir` via `fs.mkdtempSync(path.join(os.tmpdir(), 'cb-hook-'))`
   - suite setup writes `HOOK_SCRIPT` to `${tmpDir}/prepare-commit-msg` and `chmod +x`
-  - per-test setup creates `${tmpDir}/.git/` (just `mkdir -p`, no real `git init` needed) and writes `msgContent` to `${tmpDir}/COMMIT_EDITMSG`
-  - **Required env contract for every `runHook` call**: `GIT_DIR=${tmpDir}/.git` set on the spawned process — `git rev-parse --git-dir` with `GIT_DIR` set echoes the env value without validating contents, so the non-squash path resolves the tracking file correctly without a real repo. Pin this in the helper signature, not "optional"
+  - per-test setup creates `${tmpDir}/.git/` (mkdir -p was insufficient: `git rev-parse --git-dir` validates GIT_DIR even when the env var is set, so the setup also writes `HEAD` and creates `objects/` + `refs/` to satisfy the validator)
+  - **Required env contract for every `runHook` call**: `GIT_DIR=${tmpDir}/.git` set on the spawned process. With the minimum scaffolding above in place, `git rev-parse --git-dir` echoes the env value, so the non-squash path resolves the tracking file correctly without a real repo. Pinned in the helper signature
   - helper `runHook(msgContent, source, { trackingFile? })` writes optional tracking-file content to `${tmpDir}/.git/copilot-budget`, invokes `execFileSync('sh', [hookPath, msgFile, source], { env: { ...process.env, GIT_DIR: gitDir } })`, returns `{ message: <new msg file content>, tracking: <tracking file content or null if absent> }`
-- [ ] **Squash test cases**:
-  - [ ] two identical totals: `Copilot-AI-Credits: 10.00\n\nCopilot-AI-Credits: 5.00` → exactly one `Copilot-AI-Credits: 15.00` at the position of the first occurrence
-  - [ ] three-way sum: 10.00 + 5.00 + 3.50 → 18.50
-  - [ ] mixed total + per-model: two `Copilot-AI-Credits: 10.00` AND two `Copilot-AI-Credits-Claude-Sonnet-4-6: 8.00` → one of each, summed (20.00 and 16.00)
-  - [ ] same-model multi-occurrence: three `Copilot-AI-Credits-GPT-4o: 4.00` lines → one `Copilot-AI-Credits-GPT-4o: 12.00`
-  - [ ] whitespace variation: `Copilot-AI-Credits:  10.00` (two spaces after colon) and `Copilot-AI-Credits: 10.00 ` (trailing space) both sum correctly
-  - [ ] body text containing the pattern: a commit body line `Copilot-AI-Credits: 9999` is summed in — assert the behaviour with an inline comment noting the documented accepted trade-off
-  - [ ] no Copilot trailers in message → message unchanged byte-for-byte
-  - [ ] empty message → empty output
-  - [ ] tracking file present but `$2 == squash` → tracking file NOT truncated, no fresh trailer appended from tracking file
-- [ ] **Non-squash regression cases**:
-  - [ ] `$2 == ""` (normal commit) with tracking file containing `TR_Copilot-AI-Credits=12.50` → message gets `Copilot-AI-Credits: 12.50` appended, tracking file truncated to 0 bytes
-  - [ ] `$2 == "commit"` (amend) → message unchanged, tracking file untouched
-  - [ ] `$2 == "merge"` → message unchanged, tracking file untouched
-  - [ ] no tracking file + `$2 == ""` → message unchanged
-- [ ] Run tests: `npm test -- hook-script` and `npm test -- commitHook` — must pass before next task
+- [x] **Squash test cases**:
+  - [x] two identical totals: `Copilot-AI-Credits: 10.00\n\nCopilot-AI-Credits: 5.00` → exactly one `Copilot-AI-Credits: 15.00` at the position of the first occurrence
+  - [x] three-way sum: 10.00 + 5.00 + 3.50 → 18.50
+  - [x] mixed total + per-model: two `Copilot-AI-Credits: 10.00` AND two `Copilot-AI-Credits-Claude-Sonnet-4-6: 8.00` → one of each, summed (20.00 and 16.00)
+  - [x] same-model multi-occurrence: three `Copilot-AI-Credits-GPT-4o: 4.00` lines → one `Copilot-AI-Credits-GPT-4o: 12.00`
+  - [x] whitespace variation: `Copilot-AI-Credits:  10.00` (two spaces after colon) and `Copilot-AI-Credits: 10.00 ` (trailing space) both sum correctly
+  - [x] body text containing the pattern: a commit body line `Copilot-AI-Credits: 9999` is summed in — assert the behaviour with an inline comment noting the documented accepted trade-off
+  - [x] no Copilot trailers in message → message unchanged byte-for-byte
+  - [x] empty message → empty output
+  - [x] tracking file present but `$2 == squash` → tracking file NOT truncated, no fresh trailer appended from tracking file
+- [x] **Non-squash regression cases**:
+  - [x] `$2 == ""` (normal commit) with tracking file containing `TR_Copilot-AI-Credits=12.50` → message gets `Copilot-AI-Credits: 12.50` appended, tracking file truncated to 0 bytes
+  - [x] `$2 == "commit"` (amend) → message unchanged, tracking file untouched
+  - [x] `$2 == "merge"` → message unchanged, tracking file untouched
+  - [x] no tracking file + `$2 == ""` → message unchanged
+- [x] Run tests: `npm test -- hook-script` and `npm test -- commitHook` — must pass before next task
 
 ### Task 3: Update CLAUDE.md to reflect bare-number trailers + squash-sum
 

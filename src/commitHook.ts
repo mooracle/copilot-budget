@@ -7,11 +7,45 @@ import { errorMessage } from './utils';
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
-const HOOK_SCRIPT = `#!/bin/sh
+export const HOOK_SCRIPT = `#!/bin/sh
 ${MARKER}
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
-case "$COMMIT_SOURCE" in merge|squash|commit) exit 0 ;; esac
+
+squash_sum_trailers() {
+  msg_file="$1"
+  tmp="$(mktemp "\${TMPDIR:-/tmp}/copilot-budget.XXXXXX")" || exit 0
+  awk '
+    NR == FNR {
+      if ($0 ~ /^Copilot-AI-Credits(-[A-Za-z0-9._-]+)?:[ \\t]*[0-9]+(\\.[0-9]+)?[ \\t]*$/) {
+        colon = index($0, ":")
+        name = substr($0, 1, colon - 1)
+        val  = substr($0, colon + 1)
+        sub(/^[ \\t]+/, "", val)
+        sub(/[ \\t]+$/, "", val)
+        sums[name] += val + 0
+      }
+      next
+    }
+    {
+      if ($0 ~ /^Copilot-AI-Credits(-[A-Za-z0-9._-]+)?:[ \\t]*[0-9]+(\\.[0-9]+)?[ \\t]*$/) {
+        colon = index($0, ":")
+        name  = substr($0, 1, colon - 1)
+        if (!(name in printed)) {
+          printf "%s: %.2f\\n", name, sums[name]
+          printed[name] = 1
+        }
+        next
+      }
+      print
+    }
+  ' "$msg_file" "$msg_file" > "$tmp" && mv "$tmp" "$msg_file"
+}
+
+case "$COMMIT_SOURCE" in
+  merge|commit) exit 0 ;;
+  squash) squash_sum_trailers "$COMMIT_MSG_FILE"; exit 0 ;;
+esac
 
 GIT_DIR="$(git rev-parse --git-dir)"
 TRACKING_FILE="$GIT_DIR/copilot-budget"

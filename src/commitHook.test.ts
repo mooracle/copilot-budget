@@ -341,7 +341,8 @@ describe('commitHook', () => {
 
     it('includes essential shell logic', () => {
       expect(writtenContent).toContain('case "$COMMIT_SOURCE"');
-      expect(writtenContent).toContain('merge|squash|commit');
+      expect(writtenContent).toContain('merge|commit) exit 0');
+      expect(writtenContent).toContain('squash) squash_sum_trailers');
       expect(writtenContent).toContain('git rev-parse --git-dir');
       expect(writtenContent).not.toContain('git rev-parse --show-toplevel');
       expect(writtenContent).toContain('$GIT_DIR/copilot-budget');
@@ -361,7 +362,6 @@ describe('commitHook', () => {
     it('is a dumb pipe with no accumulation logic', () => {
       expect(writtenContent).not.toContain('git log -1');
       expect(writtenContent).not.toContain('trailers:key=');
-      expect(writtenContent).not.toContain('awk');
       expect(writtenContent).not.toContain('validate_num');
       expect(writtenContent).not.toContain('PREV_');
       expect(writtenContent).not.toContain('TOTAL_');
