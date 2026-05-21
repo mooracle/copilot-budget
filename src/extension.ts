@@ -49,7 +49,18 @@ function pickSource(
   const upstreamEnabled = isOTelDbExporterEnabled();
   const mode = getEstimationMode(reader, upstreamEnabled);
   if (mode === 'telemetry') {
-    return { source: new OTelSource(reader, sessionIdsFn), mode: 'telemetry' };
+    try {
+      // `new OTelSource` calls `reader.getLatestTimestamp()` which opens the
+      // SQLite DB. A corrupted or partially-written DB throws here. Without
+      // this guard, activation (and the hot-swap listener) would die outright
+      // and the reader handle would leak. Close it and fall back to Files mode
+      // so the extension stays usable.
+      return { source: new OTelSource(reader, sessionIdsFn), mode: 'telemetry' };
+    } catch (err) {
+      log(`Failed to open OTel DB, falling back to Files mode: ${String(err)}`);
+      reader.close();
+      return { source: new JsonlSource(context.storageUri), mode: 'files' };
+    }
   }
   // Files mode — log the remote-host mismatch diagnostic if relevant, then
   // release the reader handle (we don't need it).
@@ -131,8 +142,14 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
 
       if (tracker) {
         // Force a fresh scan so the per-file breakdown reflects what's on
-        // disk right now, not whatever was cached up to ~30s ago.
-        await tracker.update();
+        // disk right now, not whatever was cached up to ~30s ago. A scan
+        // failure (e.g., transient OTel DB error) shouldn't break the
+        // diagnostics output — fall back to the last cached stats.
+        try {
+          await tracker.update();
+        } catch (err) {
+          log(`showDiagnostics: tracker.update failed: ${String(err)}`);
+        }
         const stats = tracker.getStats();
         ch.appendLine('');
         ch.appendLine('Current stats:');
@@ -283,7 +300,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.showStats', () => {
-      if (tracker) showBudgetPanel({ tracker });
+      if (tracker) {
+        showBudgetPanel({ tracker }).catch((err) =>
+          log(`showBudgetPanel failed: ${String(err)}`),
+        );
+      }
     }),
   );
 

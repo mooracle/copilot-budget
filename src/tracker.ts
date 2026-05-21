@@ -700,10 +700,19 @@ export class Tracker {
   // into `previousStats`: the new source contributes only its own delta on
   // top of the carried total. `since` is preserved (the user has been
   // tracking since activation; the data source changed, not the session).
+  //
+  // Scan the new source BEFORE mutating any tracker state. If the scan fails
+  // (corrupted OTel DB, transient I/O), the old source stays in place and
+  // the tracker keeps reporting its previous good state. Without this order,
+  // a failed scan would leave baseline cleared and previousStats overwritten,
+  // and the next successful poll would treat the entire new source as fresh
+  // delta — wildly inflating stats.
   async swapSource(
     newSource: Source,
     newMode: 'files' | 'telemetry',
   ): Promise<void> {
+    const snapshot = await newSource.scan();
+
     const carried: RestoredStats | null = this.lastStats
       ? {
           since: this.since,
@@ -721,10 +730,6 @@ export class Tracker {
     this.source = newSource;
     this.mode = newMode;
     this.previousStats = carried;
-    this.baseline = { interactions: 0, modelUsage: {}, modelInteractions: {} };
-    this.lastSnapshot = null;
-
-    const snapshot = await newSource.scan();
     this.baseline = snapshot;
     this.lastSnapshot = snapshot;
     this.markSourceBaseline();
