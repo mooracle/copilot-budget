@@ -24,9 +24,14 @@ interface Repo {
 
 // Isolation env: HOME + GIT_CONFIG_GLOBAL=/dev/null guards against the user's
 // ~/.gitconfig; GIT_CONFIG_SYSTEM=/dev/null guards against /etc/gitconfig
-// (which may force commit.gpgsign=true on CI hosts).
+// (which may force commit.gpgsign=true on CI hosts). GIT_DIR / GIT_WORK_TREE /
+// GIT_INDEX_FILE are scrubbed so a parent process running inside a git
+// operation (alias, `rebase --exec`, hook) cannot redirect our `-C <tmpdir>`
+// commands to its own repo. GIT_TEMPLATE_DIR is scrubbed because it would
+// inject a `prepare-commit-msg` template at `git init` time, running before
+// our hook is installed.
 function gitEnv(home: string): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
     GIT_CONFIG_GLOBAL: '/dev/null',
@@ -37,6 +42,14 @@ function gitEnv(home: string): NodeJS.ProcessEnv {
     GIT_COMMITTER_EMAIL: 'test@example.com',
     GIT_EDITOR: 'true',
   };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_OBJECT_DIRECTORY;
+  delete env.GIT_COMMON_DIR;
+  delete env.GIT_NAMESPACE;
+  delete env.GIT_TEMPLATE_DIR;
+  return env;
 }
 
 function setupRepo(): Repo {
@@ -59,23 +72,19 @@ function writeStats(gitDir: string, stats: TrackingStats): void {
 }
 
 let dummyCounter = 0;
-function commit(
-  repo: Repo,
-  message: string,
-  ...extraFlags: string[]
-): void {
+function commit(repo: Repo, message: string): void {
   // A normal `git commit` needs a tree change; create a unique file each time
-  // so commits don't no-op. Callers using --allow-empty can pass it via flags.
-  if (!extraFlags.includes('--allow-empty')) {
-    const filename = `file-${dummyCounter++}.txt`;
-    fs.writeFileSync(path.join(repo.dir, filename), String(Math.random()));
-    execFileSync('git', ['-C', repo.dir, 'add', filename], {
-      env: repo.env,
-      stdio: 'pipe',
-    });
-  }
-  const args = ['-C', repo.dir, 'commit', '-m', message, ...extraFlags];
-  execFileSync('git', args, { env: repo.env, stdio: 'pipe' });
+  // so commits don't no-op.
+  const filename = `file-${dummyCounter++}.txt`;
+  fs.writeFileSync(path.join(repo.dir, filename), String(Math.random()));
+  execFileSync('git', ['-C', repo.dir, 'add', filename], {
+    env: repo.env,
+    stdio: 'pipe',
+  });
+  execFileSync('git', ['-C', repo.dir, 'commit', '-m', message], {
+    env: repo.env,
+    stdio: 'pipe',
+  });
 }
 
 // Amend rewrites the existing commit; no tree change is required, so this
@@ -384,7 +393,11 @@ describeE2E('hook E2E (real git)', () => {
 
     const msg = lastCommitMessage(repo);
     expect(countAiCreditsTrailers(msg)).toBe(1);
-    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 5\.00$/m);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+    // If the awk dedup ever regressed, the indented inherited copies from
+    // SQUASH_MSG would survive in the body — the un-indented count assertion
+    // above would still pass at 1, so we also assert their absence.
+    expect(msg).not.toMatch(/^[ \t]+Copilot-AI-Credits:/m);
   });
 
   it('git merge --squash does not consume a concurrent local tracking file', () => {
@@ -408,7 +421,8 @@ describeE2E('hook E2E (real git)', () => {
 
     const msg = lastCommitMessage(repo);
     expect(countAiCreditsTrailers(msg)).toBe(1);
-    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 5\.00$/m);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+    expect(msg).not.toMatch(/^[ \t]+Copilot-AI-Credits:/m);
     // Tracking file is unchanged (not truncated, value still 9.99).
     expect(fs.statSync(trackingFilePath(repo)).size).toBe(sizeBefore);
     const trackingContent = fs.readFileSync(trackingFilePath(repo), 'utf8');
@@ -435,7 +449,8 @@ describeE2E('hook E2E (real git)', () => {
 
     const msg = lastCommitMessage(repo);
     expect(countAiCreditsTrailers(msg)).toBe(1);
-    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 3\.00$/m);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 3\.00$/m);
+    expect(msg).not.toMatch(/^[ \t]+Copilot-AI-Credits:/m);
   });
 
   it('git merge --squash preserves Copilot-AI-Credits-Models lines (non-numeric value)', () => {
@@ -460,9 +475,10 @@ describeE2E('hook E2E (real git)', () => {
     squashMerge(repo, 'feature');
 
     const msg = lastCommitMessage(repo);
-    // Exactly one summed AI-Credits trailer.
+    // Exactly one summed AI-Credits trailer, with no surviving indented copies.
     expect(countAiCreditsTrailers(msg)).toBe(1);
-    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 5\.00$/m);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+    expect(msg).not.toMatch(/^[ \t]+Copilot-AI-Credits: [0-9]/m);
     // Two per-model lines preserved (one per source commit, unchanged).
     expect(countTrailers(msg, 'Copilot-AI-Credits-Models')).toBe(2);
   });
@@ -486,7 +502,8 @@ describeE2E('hook E2E (real git)', () => {
 
     const msg = lastCommitMessage(repo);
     expect(countAiCreditsTrailers(msg)).toBe(1);
-    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 5\.00$/m);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+    expect(msg).not.toMatch(/^[ \t]+Copilot-AI-Credits: [0-9]/m);
     // Two Copilot-Est-Cost lines preserved (one per source, unchanged).
     expect(countTrailers(msg, 'Copilot-Est-Cost')).toBe(2);
   });
@@ -512,7 +529,8 @@ describeE2E('hook E2E (real git)', () => {
 
     const msg = lastCommitMessage(repo);
     expect(countAiCreditsTrailers(msg)).toBe(1);
-    expect(msg).toMatch(/^[ \t]*Copilot-AI-Credits: 10\.00$/m);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 10\.00$/m);
+    expect(msg).not.toMatch(/^[ \t]+Copilot-AI-Credits:/m);
   });
 
   // Per githooks(5): `prepare-commit-msg` is invoked by `git rebase` only
@@ -668,20 +686,3 @@ describeE2E('hook E2E (real git)', () => {
     expect(trackingContent).toContain('TR_Copilot-AI-Credits=7.00');
   });
 });
-
-// Helpers exported for subsequent E2E task files (Task 2–5 add scenarios here
-// in the same test file; these reusable pieces live near the top so adding a
-// scenario only needs `repo = setupRepo(); ...`).
-export {
-  gitAvailable,
-  setupRepo,
-  installHook,
-  writeStats,
-  commit,
-  lastCommitMessage,
-  makeStats,
-  makeStatsWithModel,
-  branchWithCommits,
-  squashMerge,
-  checkout,
-};
