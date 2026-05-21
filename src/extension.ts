@@ -76,7 +76,7 @@ function pickSource(
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
   null;
-let commitResetCheck: Promise<boolean> | null = null;
+let consumeInFlight: Promise<boolean> | null = null;
 
 // Detect commit-hook truncation and rebase the tracker so the next commit
 // only reports activity that wasn't already in the consumed trailer.
@@ -86,28 +86,49 @@ let commitResetCheck: Promise<boolean> | null = null;
 // callers can skip writing stale cumulative stats over the freshly written
 // post-rebase file.
 //
-// Concurrency: overlapping callers share the in-flight promise rather than
-// getting `false` immediately. Without this, a 5s-poll call entering while
-// a stats-change call was mid-await would resolve to `false` and proceed to
-// write a pre-consume snapshot that could race the post-consume write and
-// reintroduce already-consumed trailers.
+// Concurrency: only the consume-and-write step is memoized. The truncation
+// probe is run fresh per caller so a slow-filesystem race can't latch a
+// stale `false`: if caller A's stat ran pre-truncation and resolved to false,
+// memoizing that result would cause a caller B arriving post-truncation to
+// reuse A's stale answer and write pre-consume stats over the truncated
+// signal. Memoizing only the consume step keeps overlapping positive callers
+// from running two parallel rebases against the same source.
 function checkCommitReset(): Promise<boolean> {
   if (!tracker) return Promise.resolve(false);
-  if (commitResetCheck) return commitResetCheck;
-  commitResetCheck = (async () => {
-    try {
-      if (!tracker || !(await isTrackingFileTruncated())) return false;
-      await tracker.consume();
-      log('Tracking file truncated by commit hook — stats rebased to last snapshot');
-      if (tracker) {
-        await writeTrackingFile(tracker.getStats()).catch(() => {});
+  return (async () => {
+    if (!tracker) return false;
+    // Always re-probe truncation; never share a negative result across
+    // callers. See concurrency note above.
+    if (!(await isTrackingFileTruncated())) return false;
+    if (!tracker) return false;
+    if (consumeInFlight) return consumeInFlight;
+    consumeInFlight = (async () => {
+      try {
+        if (!tracker) return false;
+        // consume() can bail without rebasing if a source swap lands during
+        // its awaits. In that case lastStats still holds the pre-truncation
+        // cumulative totals (swapSource carried them into previousStats), so
+        // writing them back would re-introduce the trailers the hook just
+        // consumed and double count on the next commit. We still return
+        // `true` so overlapping/periodic callers skip writing their own
+        // pre-consume snapshots; the tracking file stays truncated and the
+        // next 5s poll retries.
+        const rebased = await tracker.consume();
+        if (!rebased) {
+          log('Tracking file truncated but consume() bailed (source swap); next poll will retry');
+          return true;
+        }
+        log('Tracking file truncated by commit hook — stats rebased to last snapshot');
+        if (tracker) {
+          await writeTrackingFile(tracker.getStats()).catch(() => {});
+        }
+        return true;
+      } finally {
+        consumeInFlight = null;
       }
-      return true;
-    } finally {
-      commitResetCheck = null;
-    }
+    })();
+    return consumeInFlight;
   })();
-  return commitResetCheck;
 }
 
 const ALL_COMMANDS = [
@@ -331,14 +352,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.toggleCommitHook', async () => {
+      // Hook action first; persist setting only on success. See
+      // budgetPanel.handleHookToggle for the rationale — the setting and
+      // disk state must stay in sync or we re-attempt failing installs on
+      // every later config change. The settings write can also fail (locked
+      // settings.json, Sync provider error); warn the user when it does so
+      // they know disk and config have drifted.
       const newState = !isCommitHookEnabled();
-      await vscode.workspace
-        .getConfiguration('copilot-budget')
-        .update('commitHook.enabled', newState, vscode.ConfigurationTarget.Global);
-      if (newState) {
-        await installHook();
-      } else {
-        await uninstallHook();
+      const succeeded = newState ? await installHook() : await uninstallHook();
+      if (!succeeded) return;
+      try {
+        await vscode.workspace
+          .getConfiguration('copilot-budget')
+          .update('commitHook.enabled', newState, vscode.ConfigurationTarget.Global);
+      } catch {
+        vscode.window.showWarningMessage(
+          `Copilot Budget: Hook ${newState ? 'installed' : 'removed'}, but failed to save the commitHook.enabled setting — disk state and setting may now disagree.`,
+        );
       }
     }),
   );
@@ -358,24 +388,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(configSub);
 
-  // Hot-swap the source-of-truth when the upstream OTel setting flips. We
-  // re-evaluate `getEstimationMode` (which checks the upstream setting AND
-  // file presence) rather than blindly trusting the change event — the setting
-  // can be true while the DB is missing on remote-host setups, in which case
-  // we stay in Files mode and log the diagnostic.
-  const otelSub = onDidChangeOTelSetting(() => {
+  // Re-pick the source and swap if the effective mode changed. Used both by
+  // the upstream-setting change listener and the periodic re-eval poll
+  // (DB-materializes-later recovery). We re-evaluate `getEstimationMode`
+  // (which checks the upstream setting AND file presence) rather than
+  // blindly trusting the change event — the setting can be true while the
+  // DB is missing on remote-host setups, in which case we stay in Files mode
+  // and log the diagnostic.
+  //
+  // Serialized via swapChain: concurrent triggers (rapid setting flips, or
+  // the 30s auto-upgrade poll overlapping a manual toggle) would otherwise
+  // start parallel swapSource calls — the slower one finishing last would
+  // overwrite `tracker.mode`/`tracker.source` back to a stale value, and the
+  // auto-poll's `mode === 'files'` guard would prevent recovery. Each chained
+  // step re-evaluates pickSource against the latest settings, so a swap
+  // intent that's no longer correct silently no-ops.
+  let swapChain: Promise<void> = Promise.resolve();
+  const maybeSwapMode = () => {
     if (!tracker) return;
-    const next = pickSource(context, sessionIdsFn);
-    if (next.mode === tracker.mode) {
-      // No effective mode change — release the freshly created reader/source
-      // without disturbing the running tracker.
-      next.source.dispose();
-      return;
-    }
-    const prevMode = tracker.mode;
-    tracker
-      .swapSource(next.source, next.mode)
-      .then(async () => {
+    swapChain = swapChain.then(async () => {
+      if (!tracker) return;
+      const next = pickSource(context, sessionIdsFn);
+      if (next.mode === tracker.mode) {
+        // No effective mode change — release the freshly created reader/source
+        // without disturbing the running tracker.
+        next.source.dispose();
+        return;
+      }
+      const prevMode = tracker.mode;
+      try {
+        await tracker.swapSource(next.source, next.mode);
         log(`Estimation mode swapped: ${prevMode} → ${next.mode}`);
         if (prevMode === 'files' && next.mode === 'telemetry') {
           const shown = context.workspaceState.get<boolean>(
@@ -389,10 +431,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             );
           }
         }
-      })
-      .catch((err) => log(`swapSource failed: ${String(err)}`));
-  });
+      } catch (err) {
+        log(`swapSource failed: ${String(err)}`);
+      }
+    });
+  };
+
+  const otelSub = onDidChangeOTelSetting(maybeSwapMode);
   context.subscriptions.push(otelSub);
+
+  // Periodic re-eval to recover from the "DB materializes after activation"
+  // case: upstream setting is on, but `agent-traces.db` didn't exist yet at
+  // activation (or wasn't visible from this window). Without this poll, the
+  // tracker would stay in Files mode for the rest of the session — even
+  // after the user used Copilot Chat and the DB appeared — because no config
+  // event would fire to trigger the existing swap path.
+  //
+  // Only check when we'd actually transition Files → Telemetry: if we're
+  // already in Telemetry, there's nothing to upgrade; if the upstream
+  // setting is off, the asymmetric invariant means we shouldn't auto-swap
+  // anyway.
+  const modeRefresh = setInterval(() => {
+    if (!tracker || tracker.mode === 'telemetry') return;
+    if (!isOTelDbExporterEnabled()) return;
+    maybeSwapMode();
+  }, 30_000);
+  context.subscriptions.push({ dispose: () => clearInterval(modeRefresh) });
 }
 
 export async function deactivate(): Promise<void> {
@@ -411,6 +475,6 @@ export async function deactivate(): Promise<void> {
     statusBar.dispose();
     statusBar = null;
   }
-  commitResetCheck = null;
+  consumeInFlight = null;
   disposeLogger();
 }

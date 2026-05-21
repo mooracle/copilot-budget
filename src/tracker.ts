@@ -411,12 +411,26 @@ export class JsonlSource implements Source {
 export class OTelSource implements Source {
   private readonly reader: OTelReader;
   private readonly sessionIdsFn: () => string[];
-  // Construction-time high-water mark. Every scan reads spans whose
-  // start_time_ms is at or after this value. Tracker's baseline arithmetic
-  // does the rest: initialize()'s scan captures whatever already lived above
-  // this mark as the baseline, and subsequent scans surface only the post-
-  // construction delta on top of it.
+  // Construction-time high-water mark (max end_time_ms over chat spans). Every
+  // scan reads spans whose `end_time_ms` is strictly greater than this value.
+  // We filter on end-time (not start-time) because OTel writers materialize a
+  // span row when the span ends — so an in-flight request at construction time
+  // appears later with a start_time that pre-dates our baseline. Filtering by
+  // start_time would silently drop those spans from every scan. Tracker's
+  // baseline arithmetic does the rest: initialize()'s scan captures whatever
+  // arrives between construction and that scan as the baseline, and subsequent
+  // scans surface only the post-construction delta on top of it.
   private readonly baselineMs: number;
+  // Sticky session-id set: every id ever returned by sessionIdsFn() stays in
+  // the filter. Without this, a session file aging past sessionMaxAgeDays,
+  // a transient chatSessions/ read failure, or a user-initiated session
+  // deletion would drop those ids from the filter — and Tracker's baseline
+  // (which counted those spans on the initial scan) would no longer match
+  // `current`, shrinking the reported delta. JsonlSource has the equivalent
+  // protection via its `fileCache.keys()` union; OTelSource was the asymmetric
+  // one. Sticky entries cost an `IN (?, ?, ...)` parameter slot each, so
+  // memory scales with sessions-seen-this-window, not span volume.
+  private readonly seenSessionIds = new Set<string>();
 
   constructor(reader: OTelReader, sessionIdsFn: () => string[]) {
     this.reader = reader;
@@ -425,7 +439,8 @@ export class OTelSource implements Source {
   }
 
   async scan(): Promise<RawAggregateBatch> {
-    const sessionIds = this.sessionIdsFn();
+    for (const id of this.sessionIdsFn()) this.seenSessionIds.add(id);
+    const sessionIds = Array.from(this.seenSessionIds);
     const spans = this.reader.readSpansSince(this.baselineMs, sessionIds);
 
     const modelUsage: ModelUsage = {};
@@ -608,7 +623,15 @@ export class Tracker {
   }
 
   async initialize(): Promise<void> {
-    const snapshot = await this.source.scan();
+    // Same guard as update(): swapSource() (or dispose) may land while the
+    // scan is in flight. The scanned data belongs to the OLD source — writing
+    // it as the NEW source's baseline would clobber swapSource's bookkeeping
+    // and leave the tracker reporting OLD-source delta against a NEW-source
+    // identity. Bail out; the freshly installed source already established
+    // its own baseline.
+    const sourceAtStart = this.source;
+    const snapshot = await sourceAtStart.scan();
+    if (this.source !== sourceAtStart || this.disposed) return;
     this.baseline = snapshot;
     this.lastSnapshot = snapshot;
     this.markSourceBaseline();
@@ -651,7 +674,18 @@ export class Tracker {
   // most callers fire-and-forget — initialize() can take seconds on accounts
   // with large chat histories and we don't want to block activation.
   async start(intervalMs: number = 30_000): Promise<void> {
-    await this.initialize();
+    // Catch the initial scan failure rather than letting it propagate. The
+    // caller in activation fires-and-forgets `start()` and swallows the
+    // rejection — without the catch here, a transient OTel-DB lock or
+    // momentary I/O error at activation would short-circuit the poll-timer
+    // install and the tracker would stay silent forever. Logging surfaces
+    // the failure; the timer then drives `update()` retries every 30s, which
+    // recover automatically once the underlying source can be read again.
+    try {
+      await this.initialize();
+    } catch (err) {
+      log(`initialize failed (will retry via poll): ${String(err)}`);
+    }
     // dispose() may have been called while initialize() was suspended; if so,
     // skip installing the timer — otherwise the disposed tracker would keep
     // polling on a cleared cache forever.
@@ -669,8 +703,15 @@ export class Tracker {
   }
 
   async reset(): Promise<void> {
+    // Capture source up front so a swap during the awaited scan can't have us
+    // rebaseline the NEW source from OLD-source data. previousStats stays
+    // intact across the bail so a swap-then-retry path doesn't silently lose
+    // restored stats. The user can re-issue the reset; swapSource already
+    // produced a clean baseline on the new source.
+    const sourceAtStart = this.source;
+    const snapshot = await sourceAtStart.scan();
+    if (this.source !== sourceAtStart || this.disposed) return;
     this.previousStats = null;
-    const snapshot = await this.source.scan();
     this.baseline = snapshot;
     this.lastSnapshot = snapshot;
     this.markSourceBaseline();
@@ -688,16 +729,38 @@ export class Tracker {
   // truncation — survives as the next commit's delta. Without this, a 5s
   // detection window would silently absorb that activity into a fresh
   // baseline and the next commit would underreport.
-  async consume(): Promise<void> {
+  //
+  // Returns `true` when the rebase happened, `false` when it bailed out due
+  // to a source swap (or dispose). Callers must NOT log success or write the
+  // post-rebase tracker stats back to the tracking file on a `false` return —
+  // doing so would re-introduce the cumulative pre-truncation totals (which
+  // swapSource carried into previousStats) and the next commit would double
+  // count the already-consumed trailers. Leaving the tracking file truncated
+  // lets the next 5s poll retry.
+  async consume(): Promise<boolean> {
+    // Capture source up front: if swapSource() lands between either of the
+    // awaited scans and the post-await mutations, the OLD source's data
+    // would corrupt the NEW baseline AND wipe out the carried previousStats
+    // that swapSource installed.
+    const sourceAtStart = this.source;
+    let baselineSnapshot: RawAggregateBatch;
+    if (this.lastSnapshot) {
+      baselineSnapshot = this.lastSnapshot;
+    } else {
+      baselineSnapshot = await sourceAtStart.scan();
+      if (this.source !== sourceAtStart || this.disposed) return false;
+    }
+    const current = await sourceAtStart.scan();
+    if (this.source !== sourceAtStart || this.disposed) return false;
     this.previousStats = null;
-    this.baseline = this.lastSnapshot ?? (await this.source.scan());
+    this.baseline = baselineSnapshot;
+    this.lastSnapshot = current;
     this.markSourceBaseline();
     this.since = new Date().toISOString();
-    const current = await this.source.scan();
-    this.lastSnapshot = current;
     const stats = this.computeStats(current);
     this.lastStats = stats;
     this.notifyListeners(stats);
+    return true;
   }
 
   // Swap the source-of-truth on the fly. Used when the user enables OTel
@@ -717,7 +780,29 @@ export class Tracker {
     newSource: Source,
     newMode: 'files' | 'telemetry',
   ): Promise<void> {
-    // Scan the new source first so a failure leaves the OLD source in place
+    // Refresh lastStats from the OLD source first so usage that arrived since
+    // the last 30s poll gets folded into the carried-over previousStats.
+    // Without this, the gap between the last update() and the swap is lost:
+    // it isn't in previousStats (lastStats was stale) and the new source
+    // treats that activity as part of its baseline (OTelSource.baselineMs is
+    // captured at construction). Best-effort — a transient OLD-source failure
+    // just leaves the slightly-stale lastStats in place.
+    const oldSourceAtStart = this.source;
+    try {
+      const oldCurrent = await oldSourceAtStart.scan();
+      if (this.source === oldSourceAtStart && !this.disposed) {
+        this.lastSnapshot = oldCurrent;
+        this.lastStats = this.computeStats(oldCurrent);
+      }
+    } catch (err) {
+      log(`swapSource: pre-swap refresh of old source failed: ${String(err)}`);
+    }
+    if (this.disposed) {
+      newSource.dispose();
+      return;
+    }
+
+    // Scan the new source so a failure leaves the OLD source in place
     // without disturbing tracker state. On rejection, dispose the new source
     // ourselves so its reader/handle doesn't leak — the caller only logs.
     let snapshot: RawAggregateBatch;

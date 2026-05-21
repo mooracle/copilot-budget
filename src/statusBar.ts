@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Tracker, TrackingStats } from './tracker';
 import { getDisplayName } from './tokenRates';
-import { getDisplayCurrency } from './config';
+import { getDisplayCurrency, onConfigChanged } from './config';
 import { formatAmount } from './amountFormatter';
 
 const FILES_NOTE = 'Estimate assumes no caching (upper bound).';
@@ -52,11 +52,20 @@ export function createStatusBar(
   item.show();
 
   const subscription = tracker.onStatsChanged(updateText);
+  // Currency lives in settings, not in TrackingStats — without this hook the
+  // status bar would keep rendering in the old unit until the next scan-driven
+  // stats event, which on an idle workspace may be many minutes away.
+  const configSub = onConfigChanged((e) => {
+    if (e.affectsConfiguration('copilot-budget.displayCurrency')) {
+      updateText(tracker.getStats());
+    }
+  });
 
   return {
     item,
     dispose: () => {
       subscription.dispose();
+      configSub.dispose();
       item.dispose();
     },
   };

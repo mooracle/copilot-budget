@@ -97,18 +97,54 @@ export async function installHook(): Promise<boolean> {
     return false;
   }
 
-  // Check if a non-Copilot Budget hook already exists
-  const existing = await readTextFile(hookUri);
-  if (existing && existing.trim()) {
-    log(`[commitHook] Existing hook found (${existing.length} bytes)`);
-    if (!existing.includes(MARKER)) {
-      log('[commitHook] Existing hook is NOT ours, aborting');
-      vscode.window.showWarningMessage(
-        'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
+  // Distinguish "no hook exists" from "hook exists but we cannot read it".
+  // The marker check below is the only thing protecting a third-party hook
+  // (husky, lefthook, hand-written) from being overwritten. If the read
+  // collapses every failure to null (the fsUtils default), a transient
+  // permission/IO error would silently bypass the marker check and let
+  // writeTextFile clobber a hook we cannot identify. Stat first so the
+  // FileNotFound case (genuinely no hook) stays the only "proceed without
+  // marker check" path; any other stat or read failure aborts.
+  let hookExists: boolean;
+  try {
+    await vscode.workspace.fs.stat(hookUri);
+    hookExists = true;
+  } catch (err) {
+    if (err instanceof vscode.FileSystemError && err.code === 'FileNotFound') {
+      hookExists = false;
+    } else {
+      const msg = errorMessage(err);
+      log(`[commitHook] Failed to stat hook file: ${msg}`);
+      vscode.window.showErrorMessage(
+        `Copilot Budget: Failed to check commit hook file: ${msg}`,
       );
       return false;
     }
-    log('[commitHook] Existing hook is ours, will refresh');
+  }
+
+  let existing: string | null = null;
+  if (hookExists) {
+    existing = await readTextFile(hookUri);
+    if (existing === null) {
+      // Stat succeeded but read failed — file is on disk, contents opaque.
+      // Refuse to write so we don't risk overwriting a non-Copilot hook.
+      log('[commitHook] Hook file exists but is unreadable');
+      vscode.window.showErrorMessage(
+        'Copilot Budget: Failed to read commit hook file (permission or filesystem error).',
+      );
+      return false;
+    }
+    if (existing.trim()) {
+      log(`[commitHook] Existing hook found (${existing.length} bytes)`);
+      if (!existing.includes(MARKER)) {
+        log('[commitHook] Existing hook is NOT ours, aborting');
+        vscode.window.showWarningMessage(
+          'Copilot Budget: A prepare-commit-msg hook already exists. Remove it first or install Copilot Budget manually.',
+        );
+        return false;
+      }
+      log('[commitHook] Existing hook is ours, will refresh');
+    }
   }
 
   try {
@@ -137,10 +173,46 @@ export async function uninstallHook(): Promise<boolean> {
     return false;
   }
 
-  const content = await readTextFile(hookUri);
-  if (!content) {
-    log('[commitHook] Cannot read hook for uninstall');
+  // Distinguish "file doesn't exist" from "stat failed for another reason":
+  // only FileNotFound means "uninstall is a no-op". Permission/transient/
+  // provider errors must surface as failure so callers don't persist
+  // commitHook.enabled=false while the hook file may still be on disk
+  // (which would let `onConfigChanged` re-install it on the next config tick
+  // — see budgetPanel.handleHookToggle and the toggleCommitHook command).
+  // Calling vscode.workspace.fs.stat directly (instead of fsUtils.stat) so
+  // we can inspect the error code; the wrapper collapses every failure to null.
+  let hookExists: boolean;
+  try {
+    await vscode.workspace.fs.stat(hookUri);
+    hookExists = true;
+  } catch (err) {
+    if (err instanceof vscode.FileSystemError && err.code === 'FileNotFound') {
+      hookExists = false;
+    } else {
+      const msg = errorMessage(err);
+      log(`[commitHook] Failed to stat hook file: ${msg}`);
+      vscode.window.showErrorMessage(
+        `Copilot Budget: Failed to check commit hook file: ${msg}`,
+      );
+      return false;
+    }
+  }
+
+  if (!hookExists) {
+    // No hook on disk — the user's intent (no Copilot Budget hook present) is
+    // already satisfied. Return true so the caller can safely persist
+    // commitHook.enabled = false without drifting out of sync with disk state.
+    log('[commitHook] No hook on disk; uninstall is a no-op');
     vscode.window.showInformationMessage('Copilot Budget: No commit hook to remove.');
+    return true;
+  }
+
+  const content = await readTextFile(hookUri);
+  if (content === null) {
+    log('[commitHook] Hook file exists but is unreadable');
+    vscode.window.showErrorMessage(
+      'Copilot Budget: Failed to read commit hook file (permission or filesystem error).',
+    );
     return false;
   }
 

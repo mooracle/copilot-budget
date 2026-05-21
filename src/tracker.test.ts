@@ -1904,6 +1904,42 @@ describe('OTelSource', () => {
     ]);
   });
 
+  it('keeps previously seen session ids in the filter even after they age out of discovery', async () => {
+    // Mirrors JsonlSource's `filesToScan = union(discovered, cached)` behavior.
+    // If a session file ages past sessionMaxAgeDays (or the chatSessions dir
+    // is transiently unreadable), discoverSessionFiles drops its id. Without
+    // stickiness, OTelSource would stop counting that session's spans —
+    // current.modelUsage shrinks below baseline.modelUsage and the reported
+    // delta drops. With stickiness, the id remains in the IN-clause and the
+    // spans continue to contribute.
+    const reader = makeMockReader({ latest: 0 });
+    let snapshot: string[] = ['session-A', 'session-B'];
+    const sessionIdsFn = jest.fn(() => snapshot);
+    const src = new OTelSource(reader, sessionIdsFn);
+
+    await src.scan();
+    expect(reader.readSpansSince).toHaveBeenLastCalledWith(0, [
+      'session-A',
+      'session-B',
+    ]);
+
+    // session-B ages out of discovery (or dir is transiently unreadable).
+    snapshot = ['session-A'];
+    await src.scan();
+    expect(reader.readSpansSince).toHaveBeenLastCalledWith(0, [
+      'session-A',
+      'session-B',
+    ]);
+
+    // Even when discovery returns nothing, the sticky set drives the query.
+    snapshot = [];
+    await src.scan();
+    expect(reader.readSpansSince).toHaveBeenLastCalledWith(0, [
+      'session-A',
+      'session-B',
+    ]);
+  });
+
   it('aggregates spans into per-model usage with cache splits honored', async () => {
     const reader = makeMockReader({
       spans: [
@@ -2075,9 +2111,16 @@ describe('Tracker.swapSource', () => {
   } {
     let idx = 0;
     const scan = jest.fn(async () => {
-      const next = batches[idx] ?? makeBatch();
-      idx += 1;
-      return next;
+      if (idx < batches.length) {
+        const next = batches[idx];
+        idx += 1;
+        return next;
+      }
+      // Subsequent scans return the last known state, mirroring real sources
+      // where data on disk persists between scans. swapSource's pre-refresh
+      // scan relies on this so the gap between the last update() and the swap
+      // is folded into previousStats.
+      return batches[batches.length - 1] ?? makeBatch();
     });
     const dispose = jest.fn();
     return { scan, dispose };
@@ -2255,6 +2298,103 @@ describe('Tracker.swapSource', () => {
     tracker.dispose();
   });
 
+  it('folds OLD-source activity between the last poll and the swap into previousStats', async () => {
+    // The gap-closure invariant: with no pre-swap refresh, usage that arrives
+    // on the OLD source between the last update() poll and the swap is lost
+    // — it isn't in `previousStats` (lastStats was stale) and the new source
+    // treats that activity as part of its own baseline. Here, batches[1] is
+    // what update() saw at the last poll; batches[2] is the OLD source's
+    // current state at swap time, including activity that arrived in the gap.
+    // After swap, previousStats must reflect batches[2], not batches[1].
+    const oldSource = makeMockSource([
+      makeBatch(), // initialize: empty baseline
+      makeBatch({
+        interactions: 1,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 500_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 1 },
+      }), // last poll: 1 interaction, 500K tokens
+      makeBatch({
+        interactions: 2,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 1_000_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 2 },
+      }), // swap-time refresh: 2 interactions, 1M tokens (1 new since last poll)
+    ]);
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+    await tracker.update();
+    const preSwap = tracker.getStats();
+    expect(preSwap.interactions).toBe(1);
+    expect(preSwap.models['gpt-4.1']?.inputTokens).toBe(500_000);
+
+    const newSource = makeMockSource([makeBatch()]);
+    await tracker.swapSource(newSource, 'telemetry');
+
+    const postSwap = tracker.getStats();
+    // previousStats must reflect the LATEST OLD-source state (2 interactions,
+    // 1M tokens), not the stale lastStats from the last poll (500K tokens).
+    expect(postSwap.interactions).toBe(2);
+    expect(postSwap.models['gpt-4.1']?.inputTokens).toBe(1_000_000);
+    expect(postSwap.mode).toBe('telemetry');
+    tracker.dispose();
+  });
+
+  it('proceeds with stale lastStats when the OLD-source pre-swap refresh fails', async () => {
+    // Best-effort refresh: a transient OLD-source failure (locked file, I/O
+    // error) must not block the swap. lastStats carries over as-is in that
+    // case, so the user still ends up in Telemetry mode with the prior totals.
+    const baseline = makeBatch({
+      interactions: 3,
+      modelUsage: {
+        'gpt-4.1': {
+          inputTokens: 250_000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      },
+      modelInteractions: { 'gpt-4.1': 3 },
+    });
+    let scanCount = 0;
+    const scan = jest.fn(async () => {
+      scanCount += 1;
+      if (scanCount === 1) return makeBatch(); // initialize baseline
+      if (scanCount === 2) return baseline; // update
+      throw new Error('transient I/O'); // pre-swap refresh fails
+    });
+    const dispose = jest.fn();
+    const oldSource: Source = { scan, dispose };
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+    await tracker.update();
+    const preSwap = tracker.getStats();
+    expect(preSwap.interactions).toBe(3);
+
+    const newSource = makeMockSource([makeBatch()]);
+    await expect(
+      tracker.swapSource(newSource, 'telemetry'),
+    ).resolves.not.toThrow();
+    const postSwap = tracker.getStats();
+    // Fallback path: stale lastStats carried into previousStats unchanged.
+    expect(postSwap.interactions).toBe(3);
+    expect(postSwap.models['gpt-4.1']?.inputTokens).toBe(250_000);
+    expect(postSwap.mode).toBe('telemetry');
+    tracker.dispose();
+  });
+
   it('disposes the new source if tracker.dispose lands during scan', async () => {
     const oldSource = makeMockSource([makeBatch()]);
     const tracker = new Tracker(oldSource, 'files');
@@ -2277,5 +2417,183 @@ describe('Tracker.swapSource', () => {
     await swap;
 
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Tracker race-vs-swap guards', () => {
+  // Each scenario uses a deferred OLD-source scan so we can interleave a
+  // swapSource() call between the await and the post-await mutation. Without
+  // the guards, the OLD-source snapshot would clobber the NEW source's
+  // baseline (set by swapSource) and the tracker would report OLD-source
+  // delta against NEW-source identity until reload.
+  function makeDeferredSource(): {
+    source: Source;
+    resolve: (batch: RawAggregateBatch) => void;
+    scan: jest.Mock;
+    dispose: jest.Mock;
+  } {
+    // Only the FIRST scan is deferred — that's the in-flight scan from
+    // initialize/reset/consume that the race-vs-swap invariant tests. Later
+    // scans (swapSource's pre-refresh) resolve immediately with an empty
+    // batch so swap can proceed; in real sources the second scan would just
+    // be a fast follow-up against the same on-disk state.
+    let resolve: (b: RawAggregateBatch) => void = () => {};
+    let firstScanCalled = false;
+    const scan = jest.fn(() => {
+      if (!firstScanCalled) {
+        firstScanCalled = true;
+        return new Promise<RawAggregateBatch>((r) => {
+          resolve = r;
+        });
+      }
+      return Promise.resolve<RawAggregateBatch>({
+        interactions: 0,
+        modelUsage: {},
+        modelInteractions: {},
+      });
+    });
+    const dispose = jest.fn();
+    return { source: { scan, dispose }, resolve: (b) => resolve(b), scan, dispose };
+  }
+
+  function makeImmediateSource(batch: RawAggregateBatch): Source & {
+    scan: jest.Mock;
+    dispose: jest.Mock;
+  } {
+    const scan = jest.fn(async () => batch);
+    const dispose = jest.fn();
+    return { scan, dispose };
+  }
+
+  const emptyBatch: RawAggregateBatch = {
+    interactions: 0,
+    modelUsage: {},
+    modelInteractions: {},
+  };
+
+  it('initialize() bails out when swapSource lands during the await', async () => {
+    const old = makeDeferredSource();
+    const tracker = new Tracker(old.source, 'files');
+    const init = tracker.initialize();
+    const newSource = makeImmediateSource({
+      interactions: 42,
+      modelUsage: {},
+      modelInteractions: {},
+    });
+    await tracker.swapSource(newSource, 'telemetry');
+    // After swap, baseline reflects the new source (42 interactions). Resolve
+    // the OLD scan with a different value to prove initialize() doesn't write
+    // it over the swap-installed baseline.
+    old.resolve({ interactions: 999, modelUsage: {}, modelInteractions: {} });
+    await init;
+    // computeStats(current=42 against baseline=42) = 0 delta. Stats unchanged.
+    expect(tracker.mode).toBe('telemetry');
+    expect(tracker.getStats().interactions).toBe(0);
+    tracker.dispose();
+  });
+
+  it('reset() bails out when swapSource lands during the await', async () => {
+    const old = makeDeferredSource();
+    const tracker = new Tracker(old.source, 'files');
+    // Prime initial baseline synchronously via a separate route.
+    (tracker as unknown as { baseline: RawAggregateBatch }).baseline = emptyBatch;
+    (tracker as unknown as { lastSnapshot: RawAggregateBatch }).lastSnapshot = emptyBatch;
+
+    const reset = tracker.reset();
+    const newSource = makeImmediateSource(emptyBatch);
+    await tracker.swapSource(newSource, 'telemetry');
+    // Set `since` to a sentinel that reset() would normally overwrite, so we
+    // can detect whether the bail actually happened. swapSource preserves it.
+    const sinceAfterSwap = tracker.getStats().since;
+
+    old.resolve({ interactions: 7, modelUsage: {}, modelInteractions: {} });
+    await reset;
+    // Reset bailed: `since` remains as swapSource left it (not the wall-clock
+    // value reset would have written).
+    expect(tracker.getStats().since).toBe(sinceAfterSwap);
+    expect(tracker.mode).toBe('telemetry');
+    tracker.dispose();
+  });
+
+  it('consume() bails out when swapSource lands during the await', async () => {
+    // Prime tracker so consume() has a lastSnapshot. Scan #1 (initialize) and
+    // scan #3 (swapSource pre-refresh) resolve immediately; scan #2 — the
+    // `current` scan inside consume() — is deferred so swapSource can land
+    // during that await without consume completing first.
+    let scanCount = 0;
+    let deferredResolve: (b: RawAggregateBatch) => void = () => {};
+    const scan = jest.fn(() => {
+      scanCount += 1;
+      if (scanCount === 2) {
+        return new Promise<RawAggregateBatch>((r) => {
+          deferredResolve = r;
+        });
+      }
+      return Promise.resolve(emptyBatch);
+    });
+    const dispose = jest.fn();
+    const oldSource: Source = { scan, dispose };
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+    // Accumulate stats that swapSource will carry over as previousStats.
+    tracker.setPreviousStats({
+      since: '2024-01-01T00:00:00Z',
+      interactions: 5,
+      models: {},
+    });
+
+    const consume = tracker.consume();
+    const newSource = makeImmediateSource(emptyBatch);
+    await tracker.swapSource(newSource, 'telemetry');
+    const carriedInteractions = tracker.getStats().interactions;
+    // Resolve the OLD scan; consume() must bail without wiping previousStats.
+    deferredResolve({ interactions: 999, modelUsage: {}, modelInteractions: {} });
+    // consume() reports `false` so the caller (checkCommitReset) skips the
+    // log-success + write-back path that would otherwise re-introduce the
+    // pre-truncation cumulative trailers and double count on the next commit.
+    await expect(consume).resolves.toBe(false);
+    // previousStats survives the bail (swapSource's carry is intact).
+    expect(tracker.getStats().interactions).toBe(carriedInteractions);
+    expect(tracker.mode).toBe('telemetry');
+    tracker.dispose();
+  });
+});
+
+describe('Tracker.start resilience', () => {
+  it('installs the poll timer even when initialize() rejects', async () => {
+    jest.useFakeTimers();
+    try {
+      let scanCallCount = 0;
+      const scan = jest.fn(async () => {
+        scanCallCount += 1;
+        if (scanCallCount === 1) {
+          throw new Error('transient OTel DB lock');
+        }
+        return {
+          interactions: 1,
+          modelUsage: {},
+          modelInteractions: {},
+        };
+      });
+      const dispose = jest.fn();
+      const source: Source = { scan, dispose };
+      const tracker = new Tracker(source, 'telemetry');
+
+      // start() must resolve (not reject) and must install the timer so the
+      // next poll can recover. Without the catch in start(), the rejection
+      // would short-circuit timer installation and leave the tracker silent.
+      await expect(tracker.start(30_000)).resolves.toBeUndefined();
+      expect(scanCallCount).toBe(1);
+
+      // Advance to the next poll — update() runs and the source recovers.
+      jest.advanceTimersByTime(30_000);
+      // Drain any microtasks queued by the timer callback.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(scanCallCount).toBeGreaterThanOrEqual(2);
+      tracker.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -14,6 +14,10 @@ const mockVscode = vscode as any;
 const mockResolveGitCommonDir = gitDir.resolveGitCommonDir as jest.MockedFunction<typeof gitDir.resolveGitCommonDir>;
 const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
 const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
+const mockVscodeStat = mockVscode.workspace.fs.stat as jest.Mock;
+
+const FAKE_STAT = { type: 1, ctime: 0, mtime: 0, size: 100 } as any;
+const FILE_NOT_FOUND_ERROR = vscode.FileSystemError.FileNotFound();
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
@@ -76,6 +80,7 @@ describe('commitHook', () => {
   describe('installHook', () => {
     it('writes hook script with marker', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
       mockReadTextFile.mockResolvedValue(null);
       mockWriteTextFile.mockResolvedValue(undefined);
       mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
@@ -98,6 +103,7 @@ describe('commitHook', () => {
 
     it('creates hooks directory via vscode.workspace.fs.createDirectory', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
       mockReadTextFile.mockResolvedValue(null);
       mockWriteTextFile.mockResolvedValue(undefined);
       mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
@@ -112,6 +118,7 @@ describe('commitHook', () => {
 
     it('refuses to overwrite a non-Copilot Budget hook', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockResolvedValue(FAKE_STAT);
       mockReadTextFile.mockResolvedValue('#!/bin/sh\n# husky hook\nexit 0\n');
 
       const result = await installHook();
@@ -125,6 +132,7 @@ describe('commitHook', () => {
 
     it('refreshes an existing Copilot Budget hook silently', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockResolvedValue(FAKE_STAT);
       mockReadTextFile.mockResolvedValue(`#!/bin/sh\n${MARKER}\nold script`);
       mockWriteTextFile.mockResolvedValue(undefined);
       mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
@@ -145,6 +153,7 @@ describe('commitHook', () => {
 
     it('installs hook in common git dir for worktrees', async () => {
       setupWorkspace('/worktrees/feature', '/repo/.git');
+      mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
       mockReadTextFile.mockResolvedValue(null);
       mockWriteTextFile.mockResolvedValue(undefined);
       mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
@@ -158,6 +167,7 @@ describe('commitHook', () => {
 
     it('returns false when write fails', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
       mockReadTextFile.mockResolvedValue(null);
       mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
       mockWriteTextFile.mockRejectedValue(new Error('EACCES'));
@@ -169,11 +179,47 @@ describe('commitHook', () => {
         expect.stringContaining('Failed to install'),
       );
     });
+
+    it('refuses to install when stat fails with a non-FileNotFound error', async () => {
+      // A permission / transient / provider stat error must NOT be treated
+      // as "no hook exists". Proceeding would bypass the marker check and
+      // potentially overwrite a third-party hook.
+      setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(
+        vscode.FileSystemError.NoPermissions('hook dir locked'),
+      );
+
+      const result = await installHook();
+
+      expect(result).toBe(false);
+      expect(mockWriteTextFile).not.toHaveBeenCalled();
+      expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to check commit hook file'),
+      );
+    });
+
+    it('refuses to install when hook file exists but is unreadable', async () => {
+      // stat() reports the file exists but read failed (permission/IO).
+      // Without this check, the marker check below would be skipped and a
+      // third-party hook could be silently overwritten.
+      setupWorkspace('/project');
+      mockVscodeStat.mockResolvedValue(FAKE_STAT);
+      mockReadTextFile.mockResolvedValue(null);
+
+      const result = await installHook();
+
+      expect(result).toBe(false);
+      expect(mockWriteTextFile).not.toHaveBeenCalled();
+      expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to read commit hook file'),
+      );
+    });
   });
 
   describe('uninstallHook', () => {
     it('removes a Copilot Budget hook', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockResolvedValue(FAKE_STAT);
       mockReadTextFile.mockResolvedValue(`#!/bin/sh\n${MARKER}\nscript`);
       mockVscode.workspace.fs.delete.mockResolvedValue(undefined);
 
@@ -190,6 +236,7 @@ describe('commitHook', () => {
 
     it('refuses to remove a non-Copilot Budget hook', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockResolvedValue(FAKE_STAT);
       mockReadTextFile.mockResolvedValue('#!/bin/sh\n# husky hook\n');
 
       const result = await uninstallHook();
@@ -201,15 +248,57 @@ describe('commitHook', () => {
       );
     });
 
-    it('handles no hook file gracefully', async () => {
+    it('returns true when there is no hook file to remove (intent already met)', async () => {
+      // Treating "nothing to remove" as success lets the panel/toggleCommitHook
+      // command safely persist commitHook.enabled=false without drifting out
+      // of sync with disk state. Only a FileNotFound error counts as "missing".
       setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
+
+      const result = await uninstallHook();
+
+      expect(result).toBe(true);
+      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
+        'Copilot Budget: No commit hook to remove.',
+      );
+    });
+
+    it('returns false when stat fails with a non-FileNotFound error', async () => {
+      // Permission / transient / provider errors must surface as failure —
+      // collapsing them to "no hook to remove" would let the caller persist
+      // commitHook.enabled=false while the hook may still exist on disk
+      // (then `onConfigChanged` would re-install it on the next config tick).
+      setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(
+        vscode.FileSystemError.NoPermissions('hook dir locked'),
+      );
+
+      const result = await uninstallHook();
+
+      expect(result).toBe(false);
+      expect(mockVscode.window.showInformationMessage).not.toHaveBeenCalled();
+      expect(mockVscode.workspace.fs.delete).not.toHaveBeenCalled();
+      expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to check commit hook file'),
+      );
+    });
+
+    it('returns false when hook file exists but is unreadable', async () => {
+      // stat() succeeds (file is on disk) but readTextFile returns null —
+      // a permission or transient FS error. We must NOT report "no hook to
+      // remove" here, because the file is still in place and the caller
+      // would persist commitHook.enabled=false out of sync with disk.
+      setupWorkspace('/project');
+      mockVscodeStat.mockResolvedValue(FAKE_STAT);
       mockReadTextFile.mockResolvedValue(null);
 
       const result = await uninstallHook();
 
       expect(result).toBe(false);
-      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'Copilot Budget: No commit hook to remove.',
+      expect(mockVscode.window.showInformationMessage).not.toHaveBeenCalled();
+      expect(mockVscode.workspace.fs.delete).not.toHaveBeenCalled();
+      expect(mockVscode.window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to read commit hook file'),
       );
     });
 
@@ -222,6 +311,7 @@ describe('commitHook', () => {
 
     it('returns false when delete fails', async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockResolvedValue(FAKE_STAT);
       mockReadTextFile.mockResolvedValue(`#!/bin/sh\n${MARKER}\nscript`);
       mockVscode.workspace.fs.delete.mockRejectedValue(new Error('EACCES'));
 
@@ -239,6 +329,7 @@ describe('commitHook', () => {
 
     beforeEach(async () => {
       setupWorkspace('/project');
+      mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
       mockReadTextFile.mockResolvedValue(null);
       mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
       writtenContent = '';

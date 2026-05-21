@@ -335,10 +335,32 @@ describe('createOTelReader — DB with spans', () => {
     });
   });
 
-  it('respects sinceMs filter', () => {
+  it('respects sinceMs filter (end_time > sinceMs)', () => {
+    // Filter is on end_time_ms with strict inequality. Spans 1 and 2 ended
+    // before 2_500 and must be excluded; span 3 ended at 3_800 and is the
+    // only chat row that survives.
     const rows = reader.readSpansSince(2_500, null);
     expect(rows).toHaveLength(1);
     expect(rows[0].sessionId).toBe('session-B');
+  });
+
+  it('includes spans that started before sinceMs but ended after (boundary-spanning case)', () => {
+    // Regression for the start_time vs end_time mismatch: a request in flight
+    // at construction time materializes later with a start_time that pre-dates
+    // the baseline. Filtering on end_time correctly surfaces it.
+    // Span 3 starts at 3_000 — pre-dates the threshold below — but ends at
+    // 3_800, well after it, so it must appear in the result.
+    const rows = reader.readSpansSince(3_500, null);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].startTimeMs).toBe(3_000);
+    expect(rows[0].endTimeMs).toBe(3_800);
+  });
+
+  it('excludes the span whose end_time equals sinceMs (strict inequality)', () => {
+    // The high-water mark is "already counted" in the baseline; including the
+    // boundary row would double-count it on the next scan.
+    const rows = reader.readSpansSince(3_800, null);
+    expect(rows).toEqual([]);
   });
 
   it('respects sessionIds filter', () => {

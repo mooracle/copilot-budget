@@ -9,7 +9,7 @@ jest.mock('./sessionDiscovery');
 jest.mock('./otelReader');
 
 import * as vscode from 'vscode';
-import { __commandCallbacks, createMockExtensionContext } from './__mocks__/vscode';
+import { __commandCallbacks, __workspaceUpdate, createMockExtensionContext } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
 import { Tracker, JsonlSource, OTelSource } from './tracker';
 import { createStatusBar } from './statusBar';
@@ -139,7 +139,7 @@ beforeEach(async () => {
     start: jest.fn().mockResolvedValue(undefined),
     stop: jest.fn(),
     reset: jest.fn().mockResolvedValue(undefined),
-    consume: jest.fn().mockResolvedValue(undefined),
+    consume: jest.fn().mockResolvedValue(true),
     update: jest.fn().mockResolvedValue(undefined),
     dispose: jest.fn(),
     setPreviousStats: jest.fn(),
@@ -383,6 +383,33 @@ describe('extension', () => {
       expect(mockWriteTrackingFile).toHaveBeenCalledWith(trackerInstance.getStats());
 
       // Clean up: dispose subscriptions to clear the interval
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
+
+    it('skips the post-rebase write when consume() bails (source swap mid-await)', async () => {
+      // If a source swap lands during consume()'s await, consume() returns
+      // false without rebasing. tracker.getStats() in that window still holds
+      // the pre-truncation cumulative totals (swapSource carried them into
+      // previousStats). Writing those back would re-introduce the trailers
+      // the hook just consumed and double count on the next commit.
+      jest.useFakeTimers();
+      mockIsTrackingFileTruncated.mockResolvedValue(true);
+      trackerInstance.consume.mockResolvedValue(false);
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+      trackerInstance.consume.mockClear();
+
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+      // No write — the next 5s poll will retry on the still-truncated file.
+      expect(mockWriteTrackingFile).not.toHaveBeenCalled();
+
       for (const sub of ctx.subscriptions) sub.dispose();
       jest.useRealTimers();
     });
@@ -739,6 +766,111 @@ describe('extension', () => {
       );
       expect(ctx.workspaceState.update).not.toHaveBeenCalled();
     });
+
+    it('serializes overlapping swap triggers and re-evaluates mode after each completes', async () => {
+      // Race scenario: a Files→Telemetry swap is mid-flight when the user
+      // disables OTel upstream. Without serialization, the disable event sees
+      // tracker.mode === 'files' (not yet updated), getEstimationMode returns
+      // 'files', so the disable is a no-op. The in-flight enable then
+      // completes, locking us into Telemetry mode. The auto-poll only runs
+      // while mode === 'files', so there's no recovery path.
+      //
+      // With serialization, the disable trigger queues behind the in-flight
+      // enable. When it runs, it re-picks pickSource against the now-current
+      // upstream=off state and correctly swaps back to Files.
+      const ctx = makeContext();
+      // Pre-set the one-time mode-swap flag so the showInformationMessage
+      // path is skipped — it adds awaits that obscure the chain timing.
+      (ctx.workspaceState.get as any) = jest.fn().mockReturnValue(true);
+      await activate(ctx);
+
+      let resolveFirstSwap: () => void = () => {};
+      const swapCalls: Array<'telemetry' | 'files'> = [];
+      trackerInstance.swapSource.mockImplementation(
+        async (_src: any, mode: 'files' | 'telemetry') => {
+          swapCalls.push(mode);
+          if (swapCalls.length === 1) {
+            await new Promise<void>((resolve) => {
+              resolveFirstSwap = resolve;
+            });
+          }
+          trackerInstance.mode = mode;
+        },
+      );
+
+      // First trigger: user enables OTel.
+      mockGetEstimationMode.mockReturnValue('telemetry');
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+      otelSettingChangedCallback!();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.swapSource).toHaveBeenCalledTimes(1);
+      expect(swapCalls[0]).toBe('telemetry');
+
+      // Second trigger arrives while the first is still in flight: user
+      // disables OTel. tracker.mode is still 'files' at this instant.
+      mockGetEstimationMode.mockReturnValue('files');
+      mockIsOTelDbExporterEnabled.mockReturnValue(false);
+      otelSettingChangedCallback!();
+      await Promise.resolve();
+      await Promise.resolve();
+      // No second swapSource call yet — it's queued behind the in-flight one.
+      expect(trackerInstance.swapSource).toHaveBeenCalledTimes(1);
+
+      // Let the first swap complete. Tracker mode is now 'telemetry'.
+      resolveFirstSwap();
+      // Flush enough microtasks for the chained handler to run pickSource,
+      // dispatch the second swap, and have it resolve.
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+
+      // The queued trigger re-evaluates pickSource. getEstimationMode now
+      // returns 'files', tracker.mode is 'telemetry' — they differ, so a
+      // second swap fires to restore Files mode.
+      expect(trackerInstance.swapSource).toHaveBeenCalledTimes(2);
+      expect(swapCalls).toEqual(['telemetry', 'files']);
+      expect(trackerInstance.mode).toBe('files');
+    });
+
+    it('re-probes truncation per caller instead of memoizing a stale negative', async () => {
+      // Race scenario: caller A starts checkCommitReset and its
+      // isTrackingFileTruncated probe runs against the pre-truncation file
+      // (returns false on slow/remote fs). Caller B arrives after the hook
+      // truncates. With a function-level promise cache including the
+      // negative probe, B would reuse A's stale `false` and write
+      // pre-consume stats over the truncated signal. Probing per-caller
+      // (memoizing only consume) ensures B sees the truncation and rebases.
+      jest.useFakeTimers();
+
+      // First call: probe returns false (pre-truncation snapshot).
+      // Subsequent calls: probe returns true (post-truncation).
+      let probeCallCount = 0;
+      mockIsTrackingFileTruncated.mockImplementation(async () => {
+        probeCallCount += 1;
+        return probeCallCount > 1;
+      });
+
+      const ctx = makeContext();
+      await activate(ctx);
+      mockWriteTrackingFile.mockClear();
+      trackerInstance.consume.mockClear();
+
+      // Fire stats-change listener — first probe returns false, no consume.
+      statsChangedListeners[0](trackerInstance.getStats());
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).not.toHaveBeenCalled();
+
+      // 5s poll fires — second probe returns true, consume runs.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(trackerInstance.consume).toHaveBeenCalledTimes(1);
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
+    });
   });
 
   describe('empty-window activation (storageUri undefined)', () => {
@@ -910,6 +1042,29 @@ describe('extension', () => {
 
       __commandCallbacks['copilot-budget.uninstallHook']();
       expect(mockUninstallHook).toHaveBeenCalledTimes(1);
+    });
+
+    it('toggleCommitHook warns the user when the settings write rejects', async () => {
+      // If the install/uninstall succeeds on disk but the follow-up
+      // configuration.update() rejects (locked settings.json, Sync provider
+      // error), the user must know — otherwise the next onConfigChanged tick
+      // acts on stale config (e.g. re-installs the hook the user just removed
+      // because the setting is still `true`).
+      mockIsCommitHookEnabled.mockReturnValue(false);
+      mockInstallHook.mockResolvedValue(true);
+      const showWarning = vscode.window.showWarningMessage as jest.Mock;
+      showWarning.mockClear();
+      __workspaceUpdate.mockRejectedValueOnce(new Error('settings.json is read-only'));
+
+      const ctx = makeContext();
+      await activate(ctx);
+
+      await __commandCallbacks['copilot-budget.toggleCommitHook']();
+
+      expect(mockInstallHook).toHaveBeenCalled();
+      expect(showWarning).toHaveBeenCalledWith(
+        expect.stringMatching(/Hook installed.*failed to save the commitHook\.enabled setting/i),
+      );
     });
 
     it('showDiagnostics command outputs diagnostics and shows channel', async () => {

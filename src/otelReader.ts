@@ -18,6 +18,15 @@ import * as vscode from 'vscode';
 // constant — the value used for billable LLM inferences. The `sessions` view
 // in upstream sums tokens under the same filter, confirming this is the right
 // row set for cost attribution (not 'execute_tool', 'invoke_agent', etc.).
+//
+// Time-boundary filter uses `end_time_ms > sinceMs` (strict) rather than
+// `start_time_ms >= sinceMs`. OTel writers materialize a span row when the
+// span ends (onEnd), so a request in flight at construction time isn't in the
+// DB yet; its row appears later with a start_time that pre-dates our baseline.
+// Filtering by start_time would silently drop those spans from both the
+// baseline snapshot AND every subsequent scan. Filtering by end_time matches
+// the natural arrival order and pairs cleanly with `MAX(end_time_ms)` as the
+// high-water mark.
 const OPERATION_NAME_CHAT = 'chat';
 const ATTR_CACHE_CREATION = 'gen_ai.usage.cache_creation.input_tokens';
 
@@ -131,7 +140,7 @@ class OTelReaderImpl implements OTelReader {
       ' LEFT JOIN span_attributes a' +
       ' ON a.span_id = s.span_id AND a.key = ?' +
       ' WHERE s.operation_name = ?' +
-      ' AND s.start_time_ms >= ?';
+      ' AND s.end_time_ms > ?';
     const params: Array<string | number> = [
       ATTR_CACHE_CREATION,
       OPERATION_NAME_CHAT,
@@ -144,7 +153,7 @@ class OTelReaderImpl implements OTelReader {
       params.push(...sessionIds);
     }
 
-    sql += ' ORDER BY s.start_time_ms';
+    sql += ' ORDER BY s.end_time_ms';
 
     const rows = db.prepare(sql).all(...params) as Array<{
       sessionId: string | null;

@@ -72,6 +72,7 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
 function makeTracker(stats: TrackingStats): Tracker {
   return {
     getStats: jest.fn().mockReturnValue(stats),
+    update: jest.fn().mockResolvedValue(undefined),
   } as unknown as Tracker;
 }
 
@@ -96,6 +97,7 @@ beforeEach(() => {
   // after one render. Individual tests override this for action paths.
   mockWindow.showQuickPick = jest.fn().mockResolvedValue(undefined);
   mockWindow.showInformationMessage = jest.fn().mockResolvedValue(undefined);
+  mockWindow.showWarningMessage = jest.fn().mockResolvedValue(undefined);
   mockCommands.executeCommand = jest.fn().mockResolvedValue(undefined);
 });
 
@@ -127,15 +129,31 @@ describe('budgetPanel', () => {
       expect(otel.label).toContain('Enable accurate cost tracking');
     });
 
-    it('renders the OTel-on row when upstream setting is true', async () => {
+    it('renders the OTel-on row when upstream setting is true AND mode is telemetry', async () => {
       mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      const tracker = makeTracker(makeStats());
+      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
       await showBudgetPanel({ tracker });
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
       const otel = items.find((i: any) => i.label?.includes('OTel'));
       expect(otel.label).toContain('$(check)');
       expect(otel.label).toContain('enabled');
+      expect(otel.label).not.toContain('DB unavailable');
+    });
+
+    it('renders the OTel-unavailable row when setting is true but mode is still files', async () => {
+      // Setting flipped on but the OTel DB has not materialized in this
+      // window (remote-host mismatch, or Copilot Chat hasn't written it yet).
+      // The panel must not claim accurate tracking is active.
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+      const tracker = makeTracker(makeStats({ mode: 'files' }));
+      await showBudgetPanel({ tracker });
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const otel = items.find((i: any) => i.label?.includes('OTel'));
+      expect(otel.label).toContain('$(warning)');
+      expect(otel.label).toContain('DB unavailable');
+      expect(otel.label).not.toContain('$(check)');
     });
 
     it('renders currency row reflecting AIC state', async () => {
@@ -344,7 +362,7 @@ describe('budgetPanel', () => {
         items.find((i) => i.label?.includes('OTel') && i.label?.includes('enabled')),
       );
 
-      const tracker = makeTracker(makeStats());
+      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
       await showBudgetPanel({ tracker });
 
       // The whole point: clicking the already-enabled row must NEVER flip
@@ -352,18 +370,63 @@ describe('budgetPanel', () => {
       expect(__workspaceUpdate).not.toHaveBeenCalled();
     });
 
-    it('shows the open-settings info message when OTel-on row is picked', async () => {
+    it('does NOT call configuration.update when the unavailable-DB row is picked', async () => {
+      // Asymmetric invariant also holds in the "enabled but DB missing" state:
+      // the panel must never write `false` upstream, even from this branch.
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.includes('DB unavailable')),
+      );
+
+      const tracker = makeTracker(makeStats({ mode: 'files' }));
+      await showBudgetPanel({ tracker });
+
+      expect(__workspaceUpdate).not.toHaveBeenCalled();
+    });
+
+    it('shows the open-settings info message when OTel-on row is picked (telemetry mode)', async () => {
       mockIsOTelDbExporterEnabled.mockReturnValue(true);
       mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
         items.find((i) => i.label?.includes('OTel') && i.label?.includes('enabled')),
       );
 
-      const tracker = makeTracker(makeStats());
+      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
       await showBudgetPanel({ tracker });
 
       expect(mockWindow.showInformationMessage).toHaveBeenCalledWith(
         expect.stringMatching(/already enabled/i),
         'Open Settings',
+      );
+    });
+
+    it('shows the DB-unavailable info message when the warning row is picked', async () => {
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.includes('DB unavailable')),
+      );
+
+      const tracker = makeTracker(makeStats({ mode: 'files' }));
+      await showBudgetPanel({ tracker });
+
+      expect(mockWindow.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringMatching(/database is not available/i),
+        'Reload',
+        'Open Settings',
+      );
+    });
+
+    it('reloads when user picks Reload from the unavailable-DB prompt', async () => {
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.includes('DB unavailable')),
+      );
+      mockWindow.showInformationMessage.mockResolvedValueOnce('Reload');
+
+      const tracker = makeTracker(makeStats({ mode: 'files' }));
+      await showBudgetPanel({ tracker });
+
+      expect(mockCommands.executeCommand).toHaveBeenCalledWith(
+        'workbench.action.reloadWindow',
       );
     });
 
@@ -374,13 +437,35 @@ describe('budgetPanel', () => {
       );
       mockWindow.showInformationMessage.mockResolvedValueOnce('Open Settings');
 
-      const tracker = makeTracker(makeStats());
+      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
       await showBudgetPanel({ tracker });
 
       expect(mockCommands.executeCommand).toHaveBeenCalledWith(
         'workbench.action.openSettings',
         'github.copilot.chat.otel.dbSpanExporter.enabled',
       );
+    });
+
+    it('warns the user and skips the reload prompt when the OTel settings write rejects', async () => {
+      // The command wrapper in extension.ts only logs a rejected
+      // showBudgetPanel() promise. Without an explicit catch here, a locked
+      // settings.json / Settings Sync failure would silently swallow the
+      // user's click — the panel would close with no toast and no settings
+      // change. Mirror the hook-toggle path's warning so the user knows.
+      mockIsOTelDbExporterEnabled.mockReturnValue(false);
+      __workspaceUpdate.mockRejectedValueOnce(new Error('settings.json is read-only'));
+      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
+        items.find((i) => i.label?.includes('Enable accurate')),
+      );
+
+      const tracker = makeTracker(makeStats());
+      await expect(showBudgetPanel({ tracker })).resolves.toBeUndefined();
+
+      expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+        expect.stringMatching(/Failed to enable accurate cost tracking/i),
+      );
+      // No reload prompt — the setting didn't actually get written.
+      expect(mockWindow.showInformationMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -464,6 +549,28 @@ describe('budgetPanel', () => {
       // Second showQuickPick call confirms the loop continued past the toggle.
       expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(2);
     });
+
+    it('warns the user and continues the render loop when the currency settings write rejects', async () => {
+      // Same rationale as the OTel-enable rejection path: extension.ts only
+      // logs the panel's rejection, so the user wouldn't see anything if the
+      // settings write fails. Mirror the hook-toggle warning here.
+      mockGetDisplayCurrency.mockReturnValue('aic');
+      __workspaceUpdate.mockRejectedValueOnce(new Error('settings.json is read-only'));
+      mockWindow.showQuickPick
+        .mockImplementationOnce(async (items: any[]) =>
+          items.find((i) => i.label?.includes('Display')),
+        )
+        .mockResolvedValueOnce(undefined);
+
+      const tracker = makeTracker(makeStats());
+      await expect(showBudgetPanel({ tracker })).resolves.toBeUndefined();
+
+      expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+        expect.stringMatching(/Failed to change display currency/i),
+      );
+      // Render loop continues so the user isn't stranded on a closed panel.
+      expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('hook toggle', () => {
@@ -522,10 +629,86 @@ describe('budgetPanel', () => {
 
       expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(2);
     });
+
+    it('does NOT persist commitHook.enabled=true when installHook fails', async () => {
+      // Regression: if we persisted the setting before knowing whether the
+      // hook landed on disk, a failure would leave the setting and reality
+      // out of sync — every later config change would re-attempt the failing
+      // install via onConfigChanged.
+      mockIsHookInstalled.mockResolvedValue(false);
+      mockInstallHook.mockResolvedValue(false);
+      mockWindow.showQuickPick
+        .mockImplementationOnce(async (items: any[]) =>
+          items.find((i) => i.label?.includes('Append AI Credits trailer')),
+        )
+        .mockResolvedValueOnce(undefined);
+
+      const tracker = makeTracker(makeStats());
+      await showBudgetPanel({ tracker });
+
+      expect(mockInstallHook).toHaveBeenCalledTimes(1);
+      expect(__workspaceUpdate).not.toHaveBeenCalledWith(
+        'copilot-budget',
+        'commitHook.enabled',
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('does NOT persist commitHook.enabled=false when uninstallHook fails', async () => {
+      // Same rationale in the inverse direction — a failed uninstall must
+      // not leave the setting claiming "off" while the hook stays on disk.
+      mockIsHookInstalled.mockResolvedValue(true);
+      mockUninstallHook.mockResolvedValue(false);
+      mockWindow.showQuickPick
+        .mockImplementationOnce(async (items: any[]) =>
+          items.find((i) => i.label?.includes('Append AI Credits trailer')),
+        )
+        .mockResolvedValueOnce(undefined);
+
+      const tracker = makeTracker(makeStats());
+      await showBudgetPanel({ tracker });
+
+      expect(mockUninstallHook).toHaveBeenCalledTimes(1);
+      expect(__workspaceUpdate).not.toHaveBeenCalledWith(
+        'copilot-budget',
+        'commitHook.enabled',
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('warns the user when the settings write rejects after a successful hook action', async () => {
+      // The install/uninstall already changed disk state; if the follow-up
+      // configuration.update() rejects (locked settings.json, Sync provider
+      // error, etc), the user must be told that the setting and disk state
+      // have drifted. Otherwise the rejection is just swallowed by the
+      // showBudgetPanel().catch() in extension.ts and the next config-change
+      // tick acts on stale state — most dangerously, a `true` setting after
+      // a successful uninstall would re-install the hook.
+      mockIsHookInstalled.mockResolvedValue(false);
+      mockInstallHook.mockResolvedValue(true);
+      __workspaceUpdate.mockRejectedValueOnce(new Error('settings.json is read-only'));
+      mockWindow.showQuickPick
+        .mockImplementationOnce(async (items: any[]) =>
+          items.find((i) => i.label?.includes('Append AI Credits trailer')),
+        )
+        .mockResolvedValueOnce(undefined);
+
+      const tracker = makeTracker(makeStats());
+      await expect(showBudgetPanel({ tracker })).resolves.toBeUndefined();
+
+      expect(mockInstallHook).toHaveBeenCalledTimes(1);
+      expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
+        expect.stringMatching(/Hook installed.*failed to save the commitHook\.enabled setting/i),
+      );
+    });
   });
 
   describe('refresh action', () => {
-    it('re-renders without writing any configuration', async () => {
+    it('triggers tracker.update() and re-renders without writing any configuration', async () => {
+      // Refresh must force a fresh scan so the next render shows the latest
+      // numbers, not just whatever the 30s poll happened to cache.
       mockWindow.showQuickPick
         .mockImplementationOnce(async (items: any[]) =>
           items.find((i) => i.label?.includes('Refresh')),
@@ -535,8 +718,27 @@ describe('budgetPanel', () => {
       const tracker = makeTracker(makeStats());
       await showBudgetPanel({ tracker });
 
+      expect(tracker.update).toHaveBeenCalledTimes(1);
       expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(2);
       expect(__workspaceUpdate).not.toHaveBeenCalled();
+    });
+
+    it('still re-renders when tracker.update() rejects', async () => {
+      // A transient scan failure must not strand the user on a stale panel —
+      // swallow the rejection and re-render with whatever stats survive.
+      mockWindow.showQuickPick
+        .mockImplementationOnce(async (items: any[]) =>
+          items.find((i) => i.label?.includes('Refresh')),
+        )
+        .mockResolvedValueOnce(undefined);
+
+      const tracker = makeTracker(makeStats());
+      (tracker.update as jest.Mock).mockRejectedValueOnce(new Error('scan failed'));
+
+      await expect(showBudgetPanel({ tracker })).resolves.toBeUndefined();
+
+      expect(tracker.update).toHaveBeenCalledTimes(1);
+      expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(2);
     });
   });
 

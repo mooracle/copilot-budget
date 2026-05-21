@@ -143,6 +143,33 @@ export class Uri {
   }
 }
 
+export class FileSystemError extends Error {
+  readonly code: string;
+  constructor(messageOrUri?: string | Uri, code: string = 'Unknown') {
+    super(typeof messageOrUri === 'string' ? messageOrUri : messageOrUri?.toString());
+    this.code = code;
+    this.name = 'FileSystemError';
+  }
+  static FileNotFound(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileNotFound');
+  }
+  static FileExists(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileExists');
+  }
+  static FileNotADirectory(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileNotADirectory');
+  }
+  static FileIsADirectory(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileIsADirectory');
+  }
+  static NoPermissions(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'NoPermissions');
+  }
+  static Unavailable(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'Unavailable');
+  }
+}
+
 export class MarkdownString {
   value: string;
   isTrusted: boolean;

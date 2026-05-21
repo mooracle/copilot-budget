@@ -7,14 +7,33 @@ import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
-jest.mock('./config', () => ({
-  getDisplayCurrency: jest.fn().mockReturnValue('aic'),
-}));
+jest.mock('./config', () => {
+  const listeners: Array<(e: { affectsConfiguration: (key: string) => boolean }) => void> = [];
+  return {
+    getDisplayCurrency: jest.fn().mockReturnValue('aic'),
+    onConfigChanged: jest.fn((cb: (e: { affectsConfiguration: (key: string) => boolean }) => void) => {
+      listeners.push(cb);
+      return { dispose: jest.fn(() => {
+        const idx = listeners.indexOf(cb);
+        if (idx >= 0) listeners.splice(idx, 1);
+      }) };
+    }),
+    __fireConfigChange: (key: string) => {
+      const e = { affectsConfiguration: (k: string) => k === key };
+      for (const cb of [...listeners]) cb(e);
+    },
+    __getConfigListenerCount: () => listeners.length,
+  };
+});
 
 import { getDisplayCurrency } from './config';
 const mockGetDisplayCurrency = getDisplayCurrency as jest.MockedFunction<
   typeof getDisplayCurrency
 >;
+const configModule = jest.requireMock('./config') as {
+  __fireConfigChange: (key: string) => void;
+  __getConfigListenerCount: () => number;
+};
 
 const mockWindow = vscode.window as any;
 
@@ -258,6 +277,42 @@ describe('statusBar', () => {
 
       expect(createdItem.dispose).toHaveBeenCalled();
       expect(subDispose).toHaveBeenCalled();
+    });
+
+    it('refreshes text immediately when displayCurrency changes', () => {
+      // Without the config subscription, the status bar would stay in the old
+      // unit until the next stats change — on an idle workspace, that could be
+      // arbitrarily far away.
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      expect(createdItem.text).toBe('$(credit-card) ~2 AIC');
+
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      configModule.__fireConfigChange('copilot-budget.displayCurrency');
+
+      expect(createdItem.text).toBe('$(credit-card) ~$0.02');
+    });
+
+    it('ignores config changes that do not affect displayCurrency', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+      const initialText = createdItem.text;
+
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      configModule.__fireConfigChange('copilot-budget.commitHook.enabled');
+
+      expect(createdItem.text).toBe(initialText);
+    });
+
+    it('disposes the config subscription on dispose', () => {
+      const { tracker } = createMockTracker(makeStats());
+      const { dispose } = createStatusBar(tracker);
+      const before = configModule.__getConfigListenerCount();
+
+      dispose();
+
+      expect(configModule.__getConfigListenerCount()).toBe(before - 1);
     });
 
     it('wires showStats command', () => {
