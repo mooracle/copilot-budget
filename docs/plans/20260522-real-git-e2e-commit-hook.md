@@ -160,31 +160,35 @@ not `squash`; the hook relies on rebase-dir detection instead — see
 **Files:**
 - Modify: `src/hook-git-e2e.test.ts`
 
-- [ ] **Helper**: add `branchWithCommits(repo, branchName, statsArray)` —
+- [x] **Helper**: add `branchWithCommits(repo, branchName, statsArray)` —
       checkout `-b`, then for each stats entry: write stats, make a file
       change, `git commit -m "...."`. Each individual commit runs the hook on
       the normal path so each commit ends up with its own
       `Copilot-AI-Credits:` trailer. Returns when done; tracking file is
       empty.
-- [ ] **Scenario: squash-merge sums two source commits' trailers.** Setup:
+- [x] **Scenario: squash-merge sums two source commits' trailers.** Setup:
       branch `feature` with two commits (3.00, 2.00). Switch to main. `git
       merge --squash feature` populates `.git/SQUASH_MSG` with both commit
-      bodies (including their trailers). `git commit -m 'feat: squash'` fires
-      hook with `$2=squash`. Per hook's awk sum (`src/commitHook.ts:21-47`),
-      the duplicate `Copilot-AI-Credits: 3.00` / `Copilot-AI-Credits: 2.00`
+      bodies (including their trailers). `git commit` (no `-m`, with
+      `GIT_EDITOR=true`) fires hook with `$2=squash`. ⚠️ Discovered during
+      implementation: `git commit -m '...'` after `merge --squash` sets
+      `$2=message`, NOT `squash` (verified empirically); the squash source
+      only fires when git is allowed to read SQUASH_MSG into COMMIT_EDITMSG
+      via the editor. Per hook's awk sum (`src/commitHook.ts:21-47`), the
+      duplicate `Copilot-AI-Credits: 3.00` / `Copilot-AI-Credits: 2.00`
       lines collapse to a single `Copilot-AI-Credits: 5.00`. Assert exactly
       one such line with value `5.00`.
-- [ ] **Scenario: squash with concurrent local tracking file is NOT
+- [x] **Scenario: squash with concurrent local tracking file is NOT
       consumed.** Same setup, but before the final `git commit`, write a
       tracking file with `9.99`. Hook on squash path does NOT consult the
       tracking file (per CLAUDE.md). Assert: trailer total is still `5.00`
       (sum of squashed commits only), and the local tracking file is
       *unchanged* (still contains `9.99`, not truncated).
-- [ ] **Scenario: squash of three commits, two of which lack the trailer.**
+- [x] **Scenario: squash of three commits, two of which lack the trailer.**
       Branch with commits A (with trailer 1.00), B (no tracking file at
       commit time → no trailer), C (trailer 2.00). After squash: assert
       exactly one trailer line `Copilot-AI-Credits: 3.00`.
-- [ ] **Scenario: `Copilot-AI-Credits-Models:` aggregate trailer is NOT
+- [x] **Scenario: `Copilot-AI-Credits-Models:` aggregate trailer is NOT
       summed during squash (regex match, non-numeric value).** Per
       `commitHook.ts:23,35` the awk regex matches the name
       `Copilot-AI-Credits(-[A-Za-z0-9._-]+)?:` but requires a purely numeric
@@ -198,7 +202,7 @@ not `squash`; the hook relies on rebase-dir detection instead — see
       and TWO `Copilot-AI-Credits-Models:` lines (one per source commit,
       unchanged). Build the stats with synthetic `models: { 'gpt-4': {...} }`
       so the writer emits the aggregate.
-- [ ] **Scenario: `Copilot-Est-Cost:` trailer is NOT summed (regex doesn't
+- [x] **Scenario: `Copilot-Est-Cost:` trailer is NOT summed (regex doesn't
       match name).** The awk regex name pattern is anchored at
       `Copilot-AI-Credits`, so `Copilot-Est-Cost:` lines pass through
       untouched even though their value is numeric. Setup: enable
@@ -206,12 +210,12 @@ not `squash`; the hook relies on rebase-dir detection instead — see
       both `Copilot-AI-Credits:` and `Copilot-Est-Cost:` lines, squash-merge.
       Assert: ONE summed `Copilot-AI-Credits:` line, TWO `Copilot-Est-Cost:`
       lines (one per source, unchanged).
-- [ ] **Indented-trailer assertion** (covered implicitly by the scenarios
+- [x] **Indented-trailer assertion** (covered implicitly by the scenarios
       above — `git merge --squash` writes inherited commit bodies with
       4-space indentation in `.git/SQUASH_MSG`, so the leading `[ \t]*` in
       the awk regex is exercised). No new test needed; document this in a
       comment on the squash-sum scenario.
-- [ ] Run `npm test` — must pass before Task 4.
+- [x] Run `npm test` — must pass before Task 4.
 
 ### Task 4: `git rebase -i` squash/fixup scenarios (the real gap)
 
