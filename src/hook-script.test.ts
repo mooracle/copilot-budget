@@ -179,6 +179,41 @@ describe('hook script (runtime behaviour)', () => {
       const { message } = runHook(msg, 'squash');
       expect(message).toBe(msg);
     });
+
+    it('sums trailers from a real git merge --squash SQUASH_MSG (4-space indent)', () => {
+      // git merge --squash writes SQUASH_MSG using git's standard log format,
+      // which indents inherited commit bodies (including their trailers) with
+      // four spaces. The leading [ \t]* in the regex matches them. Emitted
+      // trailers are unindented so downstream tooling that greps for
+      // `^Copilot-AI-Credits:` can find them.
+      const msg = [
+        'Squashed commit of the following:',
+        '',
+        'commit b2d09dc7d1951bff23fa50bfd3c0bc21ef82bfb5',
+        'Author: t <t@t>',
+        'Date:   Fri May 22 00:29:06 2026 +0200',
+        '',
+        '    feature two',
+        '    ',
+        '    Copilot-AI-Credits: 3.00',
+        '',
+        'commit 03bcaf239abf0e269e89ca7963f820835196e5fd',
+        'Author: t <t@t>',
+        'Date:   Fri May 22 00:29:06 2026 +0200',
+        '',
+        '    feature one',
+        '    ',
+        '    Copilot-AI-Credits: 5.00',
+        '',
+      ].join('\n');
+      const { message } = runHook(msg, 'squash');
+      const matches = message.match(/^Copilot-AI-Credits: .*$/gm) ?? [];
+      expect(matches).toEqual(['Copilot-AI-Credits: 8.00']);
+      // The original indented trailer lines are gone — no duplicates left in
+      // the body (even with leading whitespace).
+      const anyIndentedTrailer = message.match(/^[ \t]+Copilot-AI-Credits:/gm) ?? [];
+      expect(anyIndentedTrailer).toEqual([]);
+    });
   });
 
   describe('rebase in progress: sums trailers, leaves tracking file alone', () => {

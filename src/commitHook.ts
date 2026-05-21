@@ -15,11 +15,15 @@ COMMIT_SOURCE="$2"
 squash_sum_trailers() {
   msg_file="$1"
   tmp="$(mktemp "\${TMPDIR:-/tmp}/copilot-budget.XXXXXX")" || exit 0
+  # Leading [ \\t]* tolerates the 4-space indentation git applies to inherited
+  # commit bodies in SQUASH_MSG (git merge --squash) and other places where a
+  # trailer may appear inside an indented log-format block.
   awk '
     NR == FNR {
-      if ($0 ~ /^Copilot-AI-Credits(-[A-Za-z0-9._-]+)?:[ \\t]*[0-9]+(\\.[0-9]+)?[ \\t]*$/) {
+      if ($0 ~ /^[ \\t]*Copilot-AI-Credits(-[A-Za-z0-9._-]+)?:[ \\t]*[0-9]+(\\.[0-9]+)?[ \\t]*$/) {
         colon = index($0, ":")
         name = substr($0, 1, colon - 1)
+        sub(/^[ \\t]+/, "", name)
         val  = substr($0, colon + 1)
         sub(/^[ \\t]+/, "", val)
         sub(/[ \\t]+$/, "", val)
@@ -28,9 +32,10 @@ squash_sum_trailers() {
       next
     }
     {
-      if ($0 ~ /^Copilot-AI-Credits(-[A-Za-z0-9._-]+)?:[ \\t]*[0-9]+(\\.[0-9]+)?[ \\t]*$/) {
+      if ($0 ~ /^[ \\t]*Copilot-AI-Credits(-[A-Za-z0-9._-]+)?:[ \\t]*[0-9]+(\\.[0-9]+)?[ \\t]*$/) {
         colon = index($0, ":")
         name  = substr($0, 1, colon - 1)
+        sub(/^[ \\t]+/, "", name)
         if (!(name in printed)) {
           printf "%s: %.2f\\n", name, sums[name]
           printed[name] = 1
