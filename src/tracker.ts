@@ -8,7 +8,7 @@ import {
   ModelUsage,
   ParserState,
 } from './sessionParser';
-import { computeCost, normalizeModelId } from './tokenRates';
+import { computeCost, normalizeModelId, stripModelPrefix } from './tokenRates';
 import { OTelReader } from './otelReader';
 import { log } from './logger';
 
@@ -406,8 +406,8 @@ export class JsonlSource implements Source {
 // last-writer-wins on the tracking file (pre-existing limitation, per
 // CLAUDE.md). A span whose JSONL companion hasn't materialized yet is
 // excluded — acceptable tradeoff. The session-id filter test in
-// tracker.test.ts ("OTelSource — applies session-id filter") confirms this
-// scoping behavior.
+// tracker.test.ts ("passes the construction-time baseline and resolver-
+// provided session ids to readSpansSince") confirms this scoping behavior.
 export class OTelSource implements Source {
   private readonly reader: OTelReader;
   private readonly sessionIdsFn: () => string[];
@@ -434,7 +434,13 @@ export class OTelSource implements Source {
 
     for (const span of spans) {
       interactions += 1;
-      const modelKey = span.model ? normalizeModelId(span.model) : 'unknown';
+      // Match JsonlSource canonicalization: strip Copilot's request-routing
+      // prefixes (`copilot/`, `copilotcli/`, `claude-code/`) before lowercasing.
+      // Without this, OTel spans reporting `copilot/gpt-4o` would aggregate
+      // under a different key than JSONL data and split totals on swap.
+      const modelKey = span.model
+        ? normalizeModelId(stripModelPrefix(span.model))
+        : 'unknown';
       let usage = modelUsage[modelKey];
       if (!usage) {
         usage = {

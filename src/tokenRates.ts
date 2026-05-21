@@ -140,7 +140,7 @@ function ensureLoaded(): Map<string, RateCard> {
   return rateMap;
 }
 
-function stripPrefix(modelId: string): string {
+export function stripModelPrefix(modelId: string): string {
   for (const prefix of KNOWN_PREFIXES) {
     if (modelId.startsWith(prefix)) {
       return modelId.slice(prefix.length);
@@ -163,7 +163,7 @@ export function getRateCard(modelId: string): RateCard | null {
     return null;
   }
   const map = ensureLoaded();
-  const stripped = normalizeModelId(stripPrefix(modelId));
+  const stripped = normalizeModelId(stripModelPrefix(modelId));
   const direct = map.get(stripped);
   if (direct) {
     return direct;
@@ -208,7 +208,7 @@ export function getDisplayName(modelId: string): string {
   if (card) {
     return card.displayName;
   }
-  return normalizeModelId(stripPrefix(modelId));
+  return normalizeModelId(stripModelPrefix(modelId));
 }
 
 export function getAllRates(): ReadonlyMap<string, RateCard> {

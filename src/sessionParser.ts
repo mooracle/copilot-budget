@@ -1,4 +1,4 @@
-import { normalizeModelId as canonicalizeRateName } from './tokenRates';
+import { normalizeModelId as canonicalizeRateName, stripModelPrefix } from './tokenRates';
 
 export interface ModelTokens {
   inputTokens: number;
@@ -34,17 +34,6 @@ function isSafePathSegment(seg: string): boolean {
 
 function isArrayIndexSegment(seg: string): boolean {
   return /^\d+$/.test(seg);
-}
-
-const KNOWN_PREFIXES = ['copilot/', 'copilotcli/', 'claude-code/'];
-
-function stripModelPrefix(id: string): string {
-  for (const prefix of KNOWN_PREFIXES) {
-    if (id.startsWith(prefix)) {
-      return id.slice(prefix.length);
-    }
-  }
-  return id;
 }
 
 const DEFAULT_MODEL = 'unknown';

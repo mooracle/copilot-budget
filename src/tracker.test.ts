@@ -146,12 +146,19 @@ beforeEach(() => {
   mockTokenRates.computeCost.mockImplementation((modelId, tokens) =>
     fixtureCost(modelId, tokens) * 100,
   );
-  // OTelSource calls normalizeModelId on each span. With the module mocked,
-  // default to the same lowercase-and-trim shape the real impl produces so
-  // assertions can compare against known model ids.
+  // OTelSource calls stripModelPrefix + normalizeModelId on each span. With
+  // the module mocked, default to the same lowercase-and-trim + known-prefix
+  // strip shape the real impls produce so assertions can compare against
+  // known model ids.
   mockTokenRates.normalizeModelId.mockImplementation((raw: string) =>
     raw.trim().toLowerCase().replace(/\s+/g, '-'),
   );
+  mockTokenRates.stripModelPrefix.mockImplementation((raw: string) => {
+    for (const prefix of ['copilot/', 'copilotcli/', 'claude-code/']) {
+      if (raw.startsWith(prefix)) return raw.slice(prefix.length);
+    }
+    return raw;
+  });
 });
 
 afterEach(() => {
@@ -1968,6 +1975,30 @@ describe('OTelSource', () => {
     const src = new OTelSource(reader, () => ['session-A']);
     const batch = await src.scan();
     expect(Object.keys(batch.modelUsage)).toEqual(['unknown']);
+  });
+
+  it('strips Copilot request-routing prefixes so keys match JsonlSource', async () => {
+    // Without prefix strip, `copilot/gpt-4o` and `gpt-4o` would aggregate under
+    // separate keys — splitting per-model totals after a Files→Telemetry swap
+    // and exposing the prefix in panel labels.
+    const reader = makeMockReader({
+      spans: [
+        span({ model: 'copilot/gpt-4o', inputTokens: 100, outputTokens: 50 }),
+        span({ model: 'gpt-4o', inputTokens: 200, outputTokens: 100 }),
+        span({
+          model: 'copilotcli/Claude-Sonnet-4.6',
+          inputTokens: 300,
+          outputTokens: 150,
+        }),
+      ],
+    });
+    const src = new OTelSource(reader, () => ['session-A']);
+    const batch = await src.scan();
+    expect(Object.keys(batch.modelUsage).sort()).toEqual([
+      'claude-sonnet-4.6',
+      'gpt-4o',
+    ]);
+    expect(batch.modelInteractions['gpt-4o']).toBe(2);
   });
 
   it('returns empty batch when reader returns no spans', async () => {

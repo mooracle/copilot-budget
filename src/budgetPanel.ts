@@ -1,16 +1,19 @@
 import * as vscode from 'vscode';
 import { Tracker, ModelStats, TrackingStats } from './tracker';
 import { getDisplayName } from './tokenRates';
-import { isOTelDbExporterEnabled, getDisplayCurrency } from './config';
+import {
+  isOTelDbExporterEnabled,
+  getDisplayCurrency,
+  OTEL_SECTION,
+  OTEL_KEY,
+  OTEL_FULL_KEY,
+} from './config';
 import { isHookInstalled, installHook, uninstallHook } from './commitHook';
 import { formatAmount } from './amountFormatter';
 
 // Strictly asymmetric upstream-write invariant: we only ever flip the OTel
 // exporter setting to `true` via this panel — never to `false`. To stop using
 // telemetry data, users disable the upstream setting in VS Code settings.
-const OTEL_SECTION = 'github.copilot.chat.otel';
-const OTEL_KEY = 'dbSpanExporter.enabled';
-const OTEL_FULL_KEY = `${OTEL_SECTION}.${OTEL_KEY}`;
 
 const ACTION = {
   OTelEnable: 'otel-enable',

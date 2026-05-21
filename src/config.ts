@@ -6,9 +6,9 @@ const SECTION = 'copilot-budget';
 // true, Copilot Chat writes per-request spans (with measured cache splits) to
 // `agent-traces.db` next to its globalStorage folder. We only ever flip this
 // to true via our budget panel — never to false (see CLAUDE.md / plan §246).
-const OTEL_SECTION = 'github.copilot.chat.otel';
-const OTEL_KEY = 'dbSpanExporter.enabled';
-const OTEL_FULL_KEY = `${OTEL_SECTION}.${OTEL_KEY}`;
+export const OTEL_SECTION = 'github.copilot.chat.otel';
+export const OTEL_KEY = 'dbSpanExporter.enabled';
+export const OTEL_FULL_KEY = `${OTEL_SECTION}.${OTEL_KEY}`;
 
 function cfg(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration(SECTION);

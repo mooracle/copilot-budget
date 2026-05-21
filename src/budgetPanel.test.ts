@@ -11,6 +11,9 @@ jest.mock('./sessionParser');
 jest.mock('./config', () => ({
   getDisplayCurrency: jest.fn().mockReturnValue('aic'),
   isOTelDbExporterEnabled: jest.fn().mockReturnValue(false),
+  OTEL_SECTION: 'github.copilot.chat.otel',
+  OTEL_KEY: 'dbSpanExporter.enabled',
+  OTEL_FULL_KEY: 'github.copilot.chat.otel.dbSpanExporter.enabled',
 }));
 jest.mock('./commitHook', () => ({
   isHookInstalled: jest.fn().mockResolvedValue(false),

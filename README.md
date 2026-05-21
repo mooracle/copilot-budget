@@ -30,6 +30,7 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 | `Copilot Budget: Reset Tracking` | Reset the counter to zero (re-baselines from current session files) |
 | `Copilot Budget: Install Commit Hook` | Install the `prepare-commit-msg` hook that appends AI budget info to commits |
 | `Copilot Budget: Uninstall Commit Hook` | Remove the Copilot Budget commit hook |
+| `Copilot Budget: Toggle Commit Hook` | Flip `copilot-budget.commitHook.enabled` and install/uninstall the hook in one step |
 | `Copilot Budget: Show Diagnostics` | Show diagnostic info (scanned paths, discovered files, current stats) in the Output panel |
 
 ## Settings
@@ -112,25 +113,27 @@ By default (`copilot-budget.commitHook.enabled: false`), the hook is **not** ins
 
 ### What Gets Appended
 
-With default settings, a commit message looks like:
+With default settings (Files mode), a commit message looks like:
 
 ```
 feat: add user authentication
 
-Copilot-AI-Credits: 42.31
+Copilot-AI-Credits: ~42.31
 ```
 
-With the opt-in per-model trailer and the opt-in USD trailer both enabled:
+The leading `~` marks the AIC value as an upper-bound estimate from Files mode. In Telemetry mode the tilde is dropped (`Copilot-AI-Credits: 42.31`).
+
+With the opt-in per-model trailer and the opt-in USD trailer both enabled (still Files mode):
 
 ```
 feat: add user authentication
 
-Copilot-AI-Credits: 42.31
-Copilot-AI-Credits-Models: Claude Sonnet 4.6=40.81,GPT-4.1=1.50
+Copilot-AI-Credits: ~42.31
+Copilot-AI-Credits-Models: Claude Sonnet 4.6=~40.81,GPT-4.1=~1.50
 Copilot-Est-Cost: $0.42
 ```
 
-The per-model trailer value is a comma-separated list of `<model>=<aic>` entries sorted by descending credits, using display names from the upstream rate card.
+The per-model trailer value is a comma-separated list of `<model>=<aic>` entries sorted by descending credits, using display names from the upstream rate card. The `Copilot-Est-Cost` USD trailer is not tilde-prefixed.
 
 ### Hook Skip Conditions
 
@@ -176,7 +179,7 @@ Also works in remote environments (Codespaces, WSL, SSH Remote) for Files mode. 
 ## Requirements
 
 - GitHub Copilot extension (provides the session files that Copilot Budget reads)
-- The extension bundles [js-yaml](https://github.com/nodeca/js-yaml) for parsing the rate card. No additional installation is required.
+- VS Code 1.103+ (Telemetry mode uses Node 22's built-in `node:sqlite`)
 
 ## Contributing
 
