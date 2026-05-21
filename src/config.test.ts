@@ -7,6 +7,9 @@ import {
   getTrailerConfig,
   onConfigChanged,
   getDisplayCurrency,
+  isOTelDbExporterEnabled,
+  getEstimationMode,
+  onDidChangeOTelSetting,
 } from './config';
 
 beforeEach(() => {
@@ -153,6 +156,79 @@ describe('config', () => {
       const callback = jest.fn();
       const disposable = onConfigChanged(callback);
 
+      expect(__configChangeListeners.length).toBe(1);
+      disposable.dispose();
+      expect(__configChangeListeners.length).toBe(0);
+    });
+  });
+
+  describe('isOTelDbExporterEnabled', () => {
+    it('returns false by default (upstream setting is opt-in)', () => {
+      expect(isOTelDbExporterEnabled()).toBe(false);
+    });
+
+    it('returns true when the upstream setting is enabled', () => {
+      __configStore['github.copilot.chat.otel.dbSpanExporter.enabled'] = true;
+      expect(isOTelDbExporterEnabled()).toBe(true);
+    });
+  });
+
+  describe('getEstimationMode', () => {
+    it('returns "files" when otelReader is null', () => {
+      expect(getEstimationMode(null, true)).toBe('files');
+    });
+
+    it('returns "files" when upstream setting is disabled, even if DB exists', () => {
+      const reader = { isAvailable: () => true };
+      expect(getEstimationMode(reader, false)).toBe('files');
+    });
+
+    it('returns "files" when upstream is enabled but DB is unavailable (remote-host mismatch)', () => {
+      const reader = { isAvailable: () => false };
+      expect(getEstimationMode(reader, true)).toBe('files');
+    });
+
+    it('returns "telemetry" only when upstream enabled AND DB available', () => {
+      const reader = { isAvailable: () => true };
+      expect(getEstimationMode(reader, true)).toBe('telemetry');
+    });
+
+    it('defaults upstreamEnabled to the current setting when omitted', () => {
+      const reader = { isAvailable: () => true };
+      // Setting off → mode is files
+      expect(getEstimationMode(reader)).toBe('files');
+      // Setting on → mode is telemetry
+      __configStore['github.copilot.chat.otel.dbSpanExporter.enabled'] = true;
+      expect(getEstimationMode(reader)).toBe('telemetry');
+    });
+  });
+
+  describe('onDidChangeOTelSetting', () => {
+    it('fires the callback when the upstream key changes', () => {
+      const callback = jest.fn();
+      onDidChangeOTelSetting(callback);
+      expect(__configChangeListeners.length).toBe(1);
+
+      const event = {
+        affectsConfiguration: (section: string) =>
+          section === 'github.copilot.chat.otel.dbSpanExporter.enabled',
+      };
+      __configChangeListeners[0](event);
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not fire for unrelated config changes', () => {
+      const callback = jest.fn();
+      onDidChangeOTelSetting(callback);
+      const event = {
+        affectsConfiguration: (section: string) => section === 'copilot-budget',
+      };
+      __configChangeListeners[0](event);
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('returns a disposable that removes the listener', () => {
+      const disposable = onDidChangeOTelSetting(() => {});
       expect(__configChangeListeners.length).toBe(1);
       disposable.dispose();
       expect(__configChangeListeners.length).toBe(0);

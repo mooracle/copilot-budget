@@ -3,6 +3,7 @@ import {
   TrackingStats,
   ModelStats,
   JsonlSource,
+  OTelSource,
   Source,
   RawAggregateBatch,
 } from './tracker';
@@ -11,6 +12,7 @@ import * as vscode from 'vscode';
 import * as sessionDiscovery from './sessionDiscovery';
 import * as sessionParser from './sessionParser';
 import * as tokenRates from './tokenRates';
+import { OTelReader, SpanRow } from './otelReader';
 
 jest.mock('fs');
 jest.mock('./sessionDiscovery');
@@ -143,6 +145,12 @@ beforeEach(() => {
   jest.useFakeTimers({ doNotFake: ['setImmediate'] });
   mockTokenRates.computeCost.mockImplementation((modelId, tokens) =>
     fixtureCost(modelId, tokens) * 100,
+  );
+  // OTelSource calls normalizeModelId on each span. With the module mocked,
+  // default to the same lowercase-and-trim shape the real impl produces so
+  // assertions can compare against known model ids.
+  mockTokenRates.normalizeModelId.mockImplementation((raw: string) =>
+    raw.trim().toLowerCase().replace(/\s+/g, '-'),
   );
 });
 
@@ -1819,6 +1827,381 @@ describe('Tracker — Source strategy', () => {
     const tracker = new Tracker(source, 'telemetry');
     await tracker.initialize();
     expect(tracker.getFileDiagnostics()).toEqual([]);
+    tracker.dispose();
+  });
+});
+
+describe('OTelSource', () => {
+  function makeMockReader(opts: {
+    latest?: number;
+    spans?: SpanRow[];
+    isAvailable?: boolean;
+  }): jest.Mocked<OTelReader> {
+    return {
+      isAvailable: jest.fn(() => opts.isAvailable ?? true),
+      readSpansSince: jest.fn((_sinceMs: number, _sessionIds: string[] | null) =>
+        opts.spans ?? [],
+      ),
+      getLatestTimestamp: jest.fn(() => opts.latest ?? 0),
+      close: jest.fn(),
+    } as jest.Mocked<OTelReader>;
+  }
+
+  function span(overrides: Partial<SpanRow> = {}): SpanRow {
+    return {
+      sessionId: 'session-A',
+      model: 'gpt-4o',
+      inputTokens: 1000,
+      outputTokens: 200,
+      cachedTokens: 0,
+      cacheCreationTokens: 0,
+      startTimeMs: 1_000,
+      endTimeMs: 1_500,
+      ...overrides,
+    };
+  }
+
+  it('captures baseline timestamp at construction via getLatestTimestamp', () => {
+    const reader = makeMockReader({ latest: 12_345 });
+    const sessionIdsFn = jest.fn(() => ['session-A']);
+    new OTelSource(reader, sessionIdsFn);
+    expect(reader.getLatestTimestamp).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes the construction-time baseline and resolver-provided session ids to readSpansSince', async () => {
+    const reader = makeMockReader({ latest: 5_000 });
+    const sessionIdsFn = jest.fn(() => ['session-A', 'session-B']);
+    const src = new OTelSource(reader, sessionIdsFn);
+    await src.scan();
+    expect(sessionIdsFn).toHaveBeenCalled();
+    expect(reader.readSpansSince).toHaveBeenCalledWith(5_000, [
+      'session-A',
+      'session-B',
+    ]);
+  });
+
+  it('re-resolves session ids on each scan (delta correctness across scans)', async () => {
+    const reader = makeMockReader({ latest: 0 });
+    let snapshot: string[] = ['session-A'];
+    const sessionIdsFn = jest.fn(() => snapshot);
+    const src = new OTelSource(reader, sessionIdsFn);
+
+    await src.scan();
+    expect(reader.readSpansSince).toHaveBeenLastCalledWith(0, ['session-A']);
+
+    snapshot = ['session-A', 'session-B'];
+    await src.scan();
+    expect(reader.readSpansSince).toHaveBeenLastCalledWith(0, [
+      'session-A',
+      'session-B',
+    ]);
+  });
+
+  it('aggregates spans into per-model usage with cache splits honored', async () => {
+    const reader = makeMockReader({
+      spans: [
+        span({
+          model: 'gpt-4o',
+          inputTokens: 1000,
+          outputTokens: 200,
+          cachedTokens: 600,
+          cacheCreationTokens: 100,
+        }),
+        span({
+          model: 'gpt-4o',
+          inputTokens: 500,
+          outputTokens: 80,
+          cachedTokens: 0,
+          cacheCreationTokens: 0,
+        }),
+        span({
+          model: 'Claude-Sonnet-4.6',
+          inputTokens: 2000,
+          outputTokens: 500,
+          cachedTokens: 1500,
+          cacheCreationTokens: 200,
+        }),
+      ],
+    });
+    const src = new OTelSource(reader, () => ['session-A']);
+    const batch = await src.scan();
+
+    expect(batch.interactions).toBe(3);
+    // Cache splits: pureInput = inputTokens - cachedTokens - cacheCreationTokens
+    expect(batch.modelUsage['gpt-4o']).toEqual({
+      inputTokens: 300 + 500, // (1000-600-100) + (500-0-0)
+      outputTokens: 280,
+      cacheReadTokens: 600,
+      cacheCreationTokens: 100,
+    });
+    expect(batch.modelUsage['claude-sonnet-4.6']).toEqual({
+      inputTokens: 300, // 2000-1500-200
+      outputTokens: 500,
+      cacheReadTokens: 1500,
+      cacheCreationTokens: 200,
+    });
+    expect(batch.modelInteractions).toEqual({
+      'gpt-4o': 2,
+      'claude-sonnet-4.6': 1,
+    });
+  });
+
+  it('clamps input tokens at 0 when cached + cache_creation exceed input (defensive)', async () => {
+    const reader = makeMockReader({
+      spans: [
+        span({
+          inputTokens: 100,
+          cachedTokens: 80,
+          cacheCreationTokens: 50,
+        }),
+      ],
+    });
+    const src = new OTelSource(reader, () => ['session-A']);
+    const batch = await src.scan();
+    expect(batch.modelUsage['gpt-4o'].inputTokens).toBe(0);
+  });
+
+  it('routes null model id to "unknown" rather than crashing', async () => {
+    const reader = makeMockReader({
+      spans: [span({ model: null, inputTokens: 100, outputTokens: 50 })],
+    });
+    const src = new OTelSource(reader, () => ['session-A']);
+    const batch = await src.scan();
+    expect(Object.keys(batch.modelUsage)).toEqual(['unknown']);
+  });
+
+  it('returns empty batch when reader returns no spans', async () => {
+    const reader = makeMockReader({ spans: [] });
+    const src = new OTelSource(reader, () => ['session-A']);
+    const batch = await src.scan();
+    expect(batch.interactions).toBe(0);
+    expect(batch.modelUsage).toEqual({});
+    expect(batch.modelInteractions).toEqual({});
+  });
+
+  it('passes an empty session-id array verbatim (window has no JSONL companions yet)', async () => {
+    // Per plan §172 — a span whose JSONL companion hasn't materialized yet is
+    // excluded. The reader honors empty array as "filter to no sessions".
+    const reader = makeMockReader({});
+    const src = new OTelSource(reader, () => []);
+    await src.scan();
+    expect(reader.readSpansSince).toHaveBeenCalledWith(0, []);
+  });
+
+  it('dispose closes the reader', () => {
+    const reader = makeMockReader({});
+    const src = new OTelSource(reader, () => []);
+    src.dispose();
+    expect(reader.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('integrates with Tracker — telemetry mode delta surfaces in stats', async () => {
+    const reader = makeMockReader({
+      latest: 1_000,
+      spans: [],
+    });
+    const src = new OTelSource(reader, () => ['session-A']);
+    const tracker = new Tracker(src, 'telemetry');
+    await tracker.initialize();
+    expect(tracker.getStats().totalTokens).toBe(0);
+    expect(tracker.getStats().mode).toBe('telemetry');
+
+    // Next scan: a chat span lands. Update should pick it up as delta.
+    reader.readSpansSince.mockReturnValue([
+      span({
+        model: 'gpt-4o',
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        cachedTokens: 0,
+        cacheCreationTokens: 0,
+      }),
+    ]);
+    await tracker.update();
+    const stats = tracker.getStats();
+    expect(stats.interactions).toBe(1);
+    expect(stats.models['gpt-4o'].inputTokens).toBe(1_000_000);
+    // gpt-4o rate isn't in the fixture; cost just needs to be non-negative.
+    expect(stats.totalAiCredits).toBeGreaterThanOrEqual(0);
+    tracker.dispose();
+  });
+});
+
+describe('Tracker.swapSource', () => {
+  function makeBatch(
+    overrides: Partial<RawAggregateBatch> = {},
+  ): RawAggregateBatch {
+    return {
+      interactions: 0,
+      modelUsage: {},
+      modelInteractions: {},
+      ...overrides,
+    };
+  }
+
+  function makeMockSource(batches: RawAggregateBatch[]): Source & {
+    scan: jest.Mock<Promise<RawAggregateBatch>, []>;
+    dispose: jest.Mock<void, []>;
+  } {
+    let idx = 0;
+    const scan = jest.fn(async () => {
+      const next = batches[idx] ?? makeBatch();
+      idx += 1;
+      return next;
+    });
+    const dispose = jest.fn();
+    return { scan, dispose };
+  }
+
+  it('disposes the old source and adopts the new one', async () => {
+    const oldSource = makeMockSource([makeBatch()]);
+    const newSource = makeMockSource([makeBatch()]);
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+    expect(oldSource.dispose).not.toHaveBeenCalled();
+
+    await tracker.swapSource(newSource, 'telemetry');
+    expect(oldSource.dispose).toHaveBeenCalledTimes(1);
+    expect(newSource.scan).toHaveBeenCalledTimes(1);
+    expect(tracker.mode).toBe('telemetry');
+    expect(tracker.getStats().mode).toBe('telemetry');
+    tracker.dispose();
+    // The new source's dispose should also fire on tracker.dispose().
+    expect(newSource.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves cumulative interactions and AIC across swap', async () => {
+    // Files mode session accumulates some activity:
+    //   baseline = 0; current = 1M input tokens on gpt-4.1 → 200 AIC (per fixture)
+    const oldSource = makeMockSource([
+      makeBatch(),
+      makeBatch({
+        interactions: 1,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 1_000_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 1 },
+      }),
+    ]);
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+    await tracker.update();
+    const preSwap = tracker.getStats();
+    expect(preSwap.interactions).toBe(1);
+    expect(preSwap.totalAiCredits).toBeCloseTo(200, 6);
+
+    // Swap into Telemetry mode. New source contributes nothing initially.
+    const newSource = makeMockSource([makeBatch()]);
+    await tracker.swapSource(newSource, 'telemetry');
+
+    const postSwap = tracker.getStats();
+    // Cumulative interactions and AIC carry over via previousStats.
+    expect(postSwap.interactions).toBe(1);
+    expect(postSwap.totalAiCredits).toBeCloseTo(200, 6);
+    expect(postSwap.models['gpt-4.1']?.inputTokens).toBe(1_000_000);
+    expect(postSwap.mode).toBe('telemetry');
+    tracker.dispose();
+  });
+
+  it('adds post-swap delta on top of carried-over cumulative', async () => {
+    const oldSource = makeMockSource([
+      makeBatch({
+        interactions: 2,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 500_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 2 },
+      }),
+    ]);
+    // initialize() sets baseline; lastStats reflects 0 delta but previousStats=null
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+    // Force a stat with non-zero "previous session" carryover so the test
+    // proves prior accumulation survives the swap.
+    tracker.setPreviousStats({
+      since: '2024-01-01T00:00:00Z',
+      interactions: 2,
+      models: {
+        'gpt-4.1': {
+          inputTokens: 500_000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          costAic: 100, // arbitrary fixture-aligned value
+        },
+      },
+    });
+    const preSwap = tracker.getStats();
+    expect(preSwap.interactions).toBe(2);
+    expect(preSwap.models['gpt-4.1'].inputTokens).toBe(500_000);
+
+    // Swap with new source delivering additional measured activity.
+    const newSource = makeMockSource([
+      makeBatch({
+        interactions: 0,
+        modelUsage: {},
+        modelInteractions: {},
+      }),
+      makeBatch({
+        interactions: 3,
+        modelUsage: {
+          'gpt-4.1': {
+            inputTokens: 200_000,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+          },
+        },
+        modelInteractions: { 'gpt-4.1': 3 },
+      }),
+    ]);
+    await tracker.swapSource(newSource, 'telemetry');
+    // First post-swap scan = baseline → carried-over total only.
+    expect(tracker.getStats().interactions).toBe(2);
+
+    await tracker.update();
+    const final = tracker.getStats();
+    // 2 (carried) + 3 (new) = 5 total interactions
+    expect(final.interactions).toBe(5);
+    expect(final.models['gpt-4.1'].inputTokens).toBe(500_000 + 200_000);
+    tracker.dispose();
+  });
+
+  it('notifies listeners after swap completes', async () => {
+    const oldSource = makeMockSource([makeBatch()]);
+    const tracker = new Tracker(oldSource, 'files');
+    await tracker.initialize();
+
+    const listener = jest.fn();
+    tracker.onStatsChanged(listener);
+    expect(listener).not.toHaveBeenCalled();
+
+    const newSource = makeMockSource([makeBatch()]);
+    await tracker.swapSource(newSource, 'telemetry');
+    expect(listener).toHaveBeenCalled();
+    const finalStats = listener.mock.calls[listener.mock.calls.length - 1][0];
+    expect(finalStats.mode).toBe('telemetry');
+    tracker.dispose();
+  });
+
+  it('swap with no prior stats sets previousStats to null without crashing', async () => {
+    const oldSource = makeMockSource([]);
+    const tracker = new Tracker(oldSource, 'files');
+    // No initialize() — lastStats is still null.
+    const newSource = makeMockSource([makeBatch()]);
+    await expect(
+      tracker.swapSource(newSource, 'telemetry'),
+    ).resolves.not.toThrow();
+    expect(tracker.mode).toBe('telemetry');
     tracker.dispose();
   });
 });

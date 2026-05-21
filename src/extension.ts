@@ -1,5 +1,6 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
-import { Tracker, JsonlSource } from './tracker';
+import { Tracker, JsonlSource, OTelSource, Source } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
 import {
   writeTrackingFile,
@@ -7,9 +8,58 @@ import {
   isTrackingFileTruncated,
 } from './trackingFile';
 import { installHook, uninstallHook } from './commitHook';
-import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
-import { getDiscoveryDiagnostics } from './sessionDiscovery';
+import {
+  isEnabled,
+  isCommitHookEnabled,
+  onConfigChanged,
+  getEstimationMode,
+  isOTelDbExporterEnabled,
+  onDidChangeOTelSetting,
+} from './config';
+import { discoverSessionFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
+import {
+  createOTelReader,
+  diagnoseUnavailable,
+  OTelReader,
+} from './otelReader';
 import { getOutputChannel, disposeLogger, log } from './logger';
+
+const MODE_SWAP_SHOWN_KEY = 'copilot-budget.modeSwapMessageShown';
+
+function resolveCurrentSessionIds(storageUri: vscode.Uri | undefined): string[] {
+  return discoverSessionFiles(storageUri).map((p) =>
+    path.basename(p).replace(/\.jsonl$/i, ''),
+  );
+}
+
+interface PickedSource {
+  source: Source;
+  mode: 'files' | 'telemetry';
+}
+
+function pickSource(
+  context: vscode.ExtensionContext,
+  sessionIdsFn: () => string[],
+): PickedSource {
+  // Re-create the reader each pick so the previous source (and its reader, if
+  // any) can be cleanly disposed before we evaluate availability again. The
+  // file-existence check inside `getEstimationMode` is cheap.
+  const reader: OTelReader = createOTelReader(context.globalStorageUri);
+  const upstreamEnabled = isOTelDbExporterEnabled();
+  const mode = getEstimationMode(reader, upstreamEnabled);
+  if (mode === 'telemetry') {
+    return { source: new OTelSource(reader, sessionIdsFn), mode: 'telemetry' };
+  }
+  // Files mode — log the remote-host mismatch diagnostic if relevant, then
+  // release the reader handle (we don't need it).
+  const diag = diagnoseUnavailable(context.globalStorageUri, upstreamEnabled);
+  if (diag) log(diag);
+  reader.close();
+  return {
+    source: new JsonlSource(context.storageUri),
+    mode: 'files',
+  };
+}
 
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
@@ -168,7 +218,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
-  tracker = new Tracker(new JsonlSource(context.storageUri), 'files');
+  const sessionIdsFn = () => resolveCurrentSessionIds(context.storageUri);
+  const picked = pickSource(context, sessionIdsFn);
+  tracker = new Tracker(picked.source, picked.mode);
+  log(`Estimation mode at activation: ${picked.mode}`);
 
   // Restore stats from previous session (if tracking file exists)
   const trackingFile = await readTrackingFile();
@@ -282,6 +335,42 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
   context.subscriptions.push(configSub);
+
+  // Hot-swap the source-of-truth when the upstream OTel setting flips. We
+  // re-evaluate `getEstimationMode` (which checks the upstream setting AND
+  // file presence) rather than blindly trusting the change event — the setting
+  // can be true while the DB is missing on remote-host setups, in which case
+  // we stay in Files mode and log the diagnostic.
+  const otelSub = onDidChangeOTelSetting(() => {
+    if (!tracker) return;
+    const next = pickSource(context, sessionIdsFn);
+    if (next.mode === tracker.mode) {
+      // No effective mode change — release the freshly created reader/source
+      // without disturbing the running tracker.
+      next.source.dispose();
+      return;
+    }
+    const prevMode = tracker.mode;
+    tracker
+      .swapSource(next.source, next.mode)
+      .then(async () => {
+        log(`Estimation mode swapped: ${prevMode} → ${next.mode}`);
+        if (prevMode === 'files' && next.mode === 'telemetry') {
+          const shown = context.workspaceState.get<boolean>(
+            MODE_SWAP_SHOWN_KEY,
+            false,
+          );
+          if (!shown) {
+            await context.workspaceState.update(MODE_SWAP_SHOWN_KEY, true);
+            vscode.window.showInformationMessage(
+              'Switched to Telemetry mode — historical totals stay as-is; new activity uses measured tokens.',
+            );
+          }
+        }
+      })
+      .catch((err) => log(`swapSource failed: ${String(err)}`));
+  });
+  context.subscriptions.push(otelSub);
 }
 
 export async function deactivate(): Promise<void> {

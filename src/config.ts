@@ -2,6 +2,14 @@ import * as vscode from 'vscode';
 
 const SECTION = 'copilot-budget';
 
+// Upstream Copilot Chat setting that turns the OTel SQLite exporter on. When
+// true, Copilot Chat writes per-request spans (with measured cache splits) to
+// `agent-traces.db` next to its globalStorage folder. We only ever flip this
+// to true via our budget panel — never to false (see CLAUDE.md / plan §246).
+const OTEL_SECTION = 'github.copilot.chat.otel';
+const OTEL_KEY = 'dbSpanExporter.enabled';
+const OTEL_FULL_KEY = `${OTEL_SECTION}.${OTEL_KEY}`;
+
 function cfg(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration(SECTION);
 }
@@ -53,6 +61,36 @@ export function onConfigChanged(
   return vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration(SECTION)) {
       callback(e);
+    }
+  });
+}
+
+export function isOTelDbExporterEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration(OTEL_SECTION)
+    .get<boolean>(OTEL_KEY, false);
+}
+
+// Telemetry mode requires BOTH the upstream exporter setting AND a readable
+// `agent-traces.db` next to Copilot Chat's globalStorage. Either missing →
+// fall back to Files mode. The `upstreamEnabled` arg is injectable so callers
+// can probe without re-reading the setting (and so tests stay deterministic).
+export function getEstimationMode(
+  otelReader: { isAvailable(): boolean } | null,
+  upstreamEnabled: boolean = isOTelDbExporterEnabled(),
+): 'files' | 'telemetry' {
+  if (!otelReader) return 'files';
+  if (!upstreamEnabled) return 'files';
+  if (!otelReader.isAvailable()) return 'files';
+  return 'telemetry';
+}
+
+export function onDidChangeOTelSetting(
+  callback: () => void,
+): vscode.Disposable {
+  return vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration(OTEL_FULL_KEY)) {
+      callback();
     }
   });
 }

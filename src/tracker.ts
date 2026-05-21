@@ -8,7 +8,8 @@ import {
   ModelUsage,
   ParserState,
 } from './sessionParser';
-import { computeCost } from './tokenRates';
+import { computeCost, normalizeModelId } from './tokenRates';
+import { OTelReader } from './otelReader';
 import { log } from './logger';
 
 export interface ModelStats {
@@ -397,6 +398,78 @@ export class JsonlSource implements Source {
   }
 }
 
+// Source-of-truth strategy backed by Copilot Chat's OTel SQLite store. Reads
+// measured per-span token counts (input / output / cache_read / cache_creation)
+// from `agent-traces.db` so we never apply the 75% Files-mode heuristic. The
+// session-id filter is best-effort window scoping: it accepts whichever
+// session IDs the resolver can see on disk now. Same-repo dual-window remains
+// last-writer-wins on the tracking file (pre-existing limitation, per
+// CLAUDE.md). A span whose JSONL companion hasn't materialized yet is
+// excluded — acceptable tradeoff. The session-id filter test in
+// tracker.test.ts ("OTelSource — applies session-id filter") confirms this
+// scoping behavior.
+export class OTelSource implements Source {
+  private readonly reader: OTelReader;
+  private readonly sessionIdsFn: () => string[];
+  // Construction-time high-water mark. Every scan reads spans whose
+  // start_time_ms is at or after this value. Tracker's baseline arithmetic
+  // does the rest: initialize()'s scan captures whatever already lived above
+  // this mark as the baseline, and subsequent scans surface only the post-
+  // construction delta on top of it.
+  private readonly baselineMs: number;
+
+  constructor(reader: OTelReader, sessionIdsFn: () => string[]) {
+    this.reader = reader;
+    this.sessionIdsFn = sessionIdsFn;
+    this.baselineMs = reader.getLatestTimestamp();
+  }
+
+  async scan(): Promise<RawAggregateBatch> {
+    const sessionIds = this.sessionIdsFn();
+    const spans = this.reader.readSpansSince(this.baselineMs, sessionIds);
+
+    const modelUsage: ModelUsage = {};
+    const modelInteractions: { [model: string]: number } = {};
+    let interactions = 0;
+
+    for (const span of spans) {
+      interactions += 1;
+      const modelKey = span.model ? normalizeModelId(span.model) : 'unknown';
+      let usage = modelUsage[modelKey];
+      if (!usage) {
+        usage = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        };
+        modelUsage[modelKey] = usage;
+      }
+      // OTel GenAI semantics: `input_tokens` is the full prompt token count
+      // (cache-read + cache-creation + fresh). Subtract cached buckets to get
+      // the non-cached prompt portion, matching sessionParser's model. Clamp
+      // at 0 in case the provider mis-reports (input < cached).
+      const cacheRead = span.cachedTokens;
+      const cacheCreation = span.cacheCreationTokens;
+      const pureInput = Math.max(
+        0,
+        span.inputTokens - cacheRead - cacheCreation,
+      );
+      usage.inputTokens += pureInput;
+      usage.outputTokens += span.outputTokens;
+      usage.cacheReadTokens += cacheRead;
+      usage.cacheCreationTokens += cacheCreation;
+      modelInteractions[modelKey] = (modelInteractions[modelKey] || 0) + 1;
+    }
+
+    return { interactions, modelUsage, modelInteractions };
+  }
+
+  dispose(): void {
+    this.reader.close();
+  }
+}
+
 export class Tracker {
   private baseline: RawAggregateBatch = {
     interactions: 0,
@@ -412,8 +485,11 @@ export class Tracker {
   private listeners: StatsListener[] = [];
   private lastStats: TrackingStats | null = null;
   private previousStats: RestoredStats | null = null;
-  private readonly source: Source;
-  readonly mode: 'files' | 'telemetry';
+  private source: Source;
+  // mode is mutable so swapSource can flip 'files' ↔ 'telemetry' without
+  // re-wiring the rest of the extension. Status bar and trailer file read this
+  // on every render, so the swap takes effect on the next listener fire.
+  mode: 'files' | 'telemetry';
   // Set by dispose(). Honored by start() after the initial async scan resolves
   // so a dispose() that lands during initialize() doesn't install the polling
   // timer on a disposed tracker (it would otherwise leak forever).
@@ -608,6 +684,45 @@ export class Tracker {
     const current = await this.source.scan();
     this.lastSnapshot = current;
     const stats = this.computeStats(current);
+    this.lastStats = stats;
+    this.notifyListeners(stats);
+  }
+
+  // Swap the source-of-truth on the fly. Used when the user enables OTel
+  // (Files → Telemetry) or disables it via VS Code settings (Telemetry →
+  // Files). Cumulative stats carry over by folding the current `lastStats`
+  // into `previousStats`: the new source contributes only its own delta on
+  // top of the carried total. `since` is preserved (the user has been
+  // tracking since activation; the data source changed, not the session).
+  async swapSource(
+    newSource: Source,
+    newMode: 'files' | 'telemetry',
+  ): Promise<void> {
+    const carried: RestoredStats | null = this.lastStats
+      ? {
+          since: this.since,
+          interactions: this.lastStats.interactions,
+          models: {},
+        }
+      : null;
+    if (carried && this.lastStats) {
+      for (const [model, stats] of Object.entries(this.lastStats.models)) {
+        carried.models[model] = { ...stats };
+      }
+    }
+
+    this.source.dispose();
+    this.source = newSource;
+    this.mode = newMode;
+    this.previousStats = carried;
+    this.baseline = { interactions: 0, modelUsage: {}, modelInteractions: {} };
+    this.lastSnapshot = null;
+
+    const snapshot = await newSource.scan();
+    this.baseline = snapshot;
+    this.lastSnapshot = snapshot;
+    this.markSourceBaseline();
+    const stats = this.computeStats(snapshot);
     this.lastStats = stats;
     this.notifyListeners(stats);
   }

@@ -5,11 +5,12 @@ jest.mock('./commitHook');
 jest.mock('./config');
 jest.mock('./logger');
 jest.mock('./sessionDiscovery');
+jest.mock('./otelReader');
 
 import * as vscode from 'vscode';
 import { __commandCallbacks, createMockExtensionContext } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
-import { Tracker, JsonlSource } from './tracker';
+import { Tracker, JsonlSource, OTelSource } from './tracker';
 import { createStatusBar, showStatsQuickPick } from './statusBar';
 import {
   writeTrackingFile,
@@ -17,8 +18,16 @@ import {
   isTrackingFileTruncated,
 } from './trackingFile';
 import { installHook, uninstallHook, isHookInstalled } from './commitHook';
-import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
-import { getDiscoveryDiagnostics } from './sessionDiscovery';
+import {
+  isEnabled,
+  isCommitHookEnabled,
+  onConfigChanged,
+  getEstimationMode,
+  isOTelDbExporterEnabled,
+  onDidChangeOTelSetting,
+} from './config';
+import { getDiscoveryDiagnostics, discoverSessionFiles } from './sessionDiscovery';
+import { createOTelReader, diagnoseUnavailable } from './otelReader';
 import { getOutputChannel, disposeLogger } from './logger';
 
 const MockTracker = Tracker as jest.MockedClass<typeof Tracker>;
@@ -51,8 +60,26 @@ const mockIsCommitHookEnabled = isCommitHookEnabled as jest.MockedFunction<
 const mockOnConfigChanged = onConfigChanged as jest.MockedFunction<
   typeof onConfigChanged
 >;
+const mockGetEstimationMode = getEstimationMode as jest.MockedFunction<
+  typeof getEstimationMode
+>;
+const mockIsOTelDbExporterEnabled = isOTelDbExporterEnabled as jest.MockedFunction<
+  typeof isOTelDbExporterEnabled
+>;
+const mockOnDidChangeOTelSetting = onDidChangeOTelSetting as jest.MockedFunction<
+  typeof onDidChangeOTelSetting
+>;
 const mockGetDiscoveryDiagnostics = getDiscoveryDiagnostics as jest.MockedFunction<
   typeof getDiscoveryDiagnostics
+>;
+const mockDiscoverSessionFiles = discoverSessionFiles as jest.MockedFunction<
+  typeof discoverSessionFiles
+>;
+const mockCreateOTelReader = createOTelReader as jest.MockedFunction<
+  typeof createOTelReader
+>;
+const mockDiagnoseUnavailable = diagnoseUnavailable as jest.MockedFunction<
+  typeof diagnoseUnavailable
 >;
 const mockGetOutputChannel = getOutputChannel as jest.MockedFunction<
   typeof getOutputChannel
@@ -76,6 +103,8 @@ function makeEmptyWindowContext(): vscode.ExtensionContext {
 let trackerInstance: any;
 let statsChangedListeners: Array<(stats: any) => void>;
 let configChangedCallback: ((e: any) => void) | null;
+let otelSettingChangedCallback: (() => void) | null;
+let mockOTelReader: any;
 
 const SAMPLE_STATS = {
   since: '2024-01-01T00:00:00Z',
@@ -102,6 +131,7 @@ beforeEach(async () => {
 
   statsChangedListeners = [];
   configChangedCallback = null;
+  otelSettingChangedCallback = null;
 
   trackerInstance = {
     start: jest.fn().mockResolvedValue(undefined),
@@ -111,8 +141,10 @@ beforeEach(async () => {
     update: jest.fn().mockResolvedValue(undefined),
     dispose: jest.fn(),
     setPreviousStats: jest.fn(),
+    swapSource: jest.fn().mockResolvedValue(undefined),
     getStats: jest.fn().mockReturnValue(SAMPLE_STATS),
     getFileDiagnostics: jest.fn().mockReturnValue([]),
+    mode: 'files' as 'files' | 'telemetry',
     onStatsChanged: jest.fn((listener: any) => {
       statsChangedListeners.push(listener);
       return {
@@ -145,6 +177,22 @@ beforeEach(async () => {
     configChangedCallback = cb;
     return { dispose: jest.fn() };
   });
+  mockOnDidChangeOTelSetting.mockImplementation((cb: any) => {
+    otelSettingChangedCallback = cb;
+    return { dispose: jest.fn() };
+  });
+  // Default to Files mode (upstream off, no DB). Individual tests flip these.
+  mockGetEstimationMode.mockReturnValue('files');
+  mockIsOTelDbExporterEnabled.mockReturnValue(false);
+  mockDiagnoseUnavailable.mockReturnValue(null);
+  mockOTelReader = {
+    isAvailable: jest.fn(() => false),
+    readSpansSince: jest.fn(() => []),
+    getLatestTimestamp: jest.fn(() => 0),
+    close: jest.fn(),
+  };
+  mockCreateOTelReader.mockReturnValue(mockOTelReader);
+  mockDiscoverSessionFiles.mockReturnValue([]);
   mockGetDiscoveryDiagnostics.mockReturnValue({
     platform: 'darwin',
     homedir: '/home/test',
@@ -178,6 +226,15 @@ beforeEach(async () => {
     configChangedCallback = cb;
     return { dispose: jest.fn() };
   });
+  mockOnDidChangeOTelSetting.mockImplementation((cb: any) => {
+    otelSettingChangedCallback = cb;
+    return { dispose: jest.fn() };
+  });
+  mockGetEstimationMode.mockReturnValue('files');
+  mockIsOTelDbExporterEnabled.mockReturnValue(false);
+  mockDiagnoseUnavailable.mockReturnValue(null);
+  mockCreateOTelReader.mockReturnValue(mockOTelReader);
+  mockDiscoverSessionFiles.mockReturnValue([]);
   mockWriteTrackingFile.mockResolvedValue(true);
   mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
   mockIsTrackingFileTruncated.mockResolvedValue(false);
@@ -536,6 +593,149 @@ describe('extension', () => {
         MockJsonlSource.mock.instances[0],
         'files',
       );
+    });
+
+    it('constructs Tracker with OTelSource when getEstimationMode returns "telemetry"', async () => {
+      mockGetEstimationMode.mockReturnValue('telemetry');
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+
+      const ctx = makeContext();
+      await activate(ctx);
+
+      const MockOTelSource = OTelSource as jest.MockedClass<typeof OTelSource>;
+      expect(MockOTelSource).toHaveBeenCalled();
+      expect(MockTracker).toHaveBeenCalledWith(
+        MockOTelSource.mock.instances[0],
+        'telemetry',
+      );
+    });
+
+    it('logs the remote-host diagnostic and closes the reader when DB missing but upstream enabled', async () => {
+      mockGetEstimationMode.mockReturnValue('files');
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+      mockDiagnoseUnavailable.mockReturnValue(
+        'OTel exporter enabled upstream but agent-traces.db not found at /tmp/x — possible remote-host mismatch',
+      );
+
+      const ctx = makeContext();
+      await activate(ctx);
+
+      expect(mockDiagnoseUnavailable).toHaveBeenCalledWith(
+        ctx.globalStorageUri,
+        true,
+      );
+      // The reader created during pickSource is closed when we fall back to
+      // Files mode — we don't hold onto a handle we won't use.
+      expect(mockOTelReader.close).toHaveBeenCalled();
+    });
+
+    it('registers an onDidChangeOTelSetting listener', async () => {
+      const ctx = makeContext();
+      await activate(ctx);
+      expect(mockOnDidChangeOTelSetting).toHaveBeenCalledTimes(1);
+      expect(otelSettingChangedCallback).not.toBeNull();
+    });
+  });
+
+  describe('OTel hot-swap on config change', () => {
+    it('swaps Tracker to telemetry source when upstream setting enables OTel', async () => {
+      const ctx = makeContext();
+      await activate(ctx);
+      // Initial mode = files.
+      const MockOTelSource = OTelSource as jest.MockedClass<typeof OTelSource>;
+      MockOTelSource.mockClear();
+
+      // Simulate upstream enabling OTel: getEstimationMode now returns telemetry.
+      mockGetEstimationMode.mockReturnValue('telemetry');
+      mockIsOTelDbExporterEnabled.mockReturnValue(true);
+      trackerInstance.mode = 'files';
+
+      otelSettingChangedCallback!();
+      // swapSource is awaited internally; flush microtasks so we can assert.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(MockOTelSource).toHaveBeenCalledTimes(1);
+      expect(trackerInstance.swapSource).toHaveBeenCalledWith(
+        MockOTelSource.mock.instances[0],
+        'telemetry',
+      );
+    });
+
+    it('does not call swapSource when the effective mode is unchanged', async () => {
+      const ctx = makeContext();
+      await activate(ctx);
+
+      // OTel setting changed (e.g., user toggled DB on then off rapidly) but
+      // effective mode resolves to the same value — no swap should occur.
+      mockGetEstimationMode.mockReturnValue('files');
+      trackerInstance.mode = 'files';
+
+      otelSettingChangedCallback!();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trackerInstance.swapSource).not.toHaveBeenCalled();
+    });
+
+    it('shows the one-time mode-swap info message on first Files→Telemetry swap', async () => {
+      const ctx = makeContext();
+      const wsUpdate = ctx.workspaceState.update as jest.Mock;
+      (ctx.workspaceState.get as any) = jest.fn().mockReturnValue(false);
+      (ctx.workspaceState.update as any) = jest.fn().mockResolvedValue(undefined);
+
+      await activate(ctx);
+
+      mockGetEstimationMode.mockReturnValue('telemetry');
+      trackerInstance.mode = 'files';
+      // swapSource resolves successfully — trigger the then-handler.
+      trackerInstance.swapSource.mockImplementation(async () => {
+        trackerInstance.mode = 'telemetry';
+      });
+
+      otelSettingChangedCallback!();
+      // Drain the chained promises inside the hot-swap handler.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(ctx.workspaceState.update).toHaveBeenCalledWith(
+        'copilot-budget.modeSwapMessageShown',
+        true,
+      );
+      const showInfo = vscode.window.showInformationMessage as jest.Mock;
+      expect(showInfo).toHaveBeenCalledWith(
+        expect.stringMatching(/Switched to Telemetry mode/i),
+      );
+      // Sanity: the flag default-overwrite via fresh assignment didn't lose wsUpdate type
+      void wsUpdate;
+    });
+
+    it('does NOT show the swap message a second time once workspaceState flag is set', async () => {
+      const ctx = makeContext();
+      (ctx.workspaceState.get as any) = jest.fn().mockReturnValue(true);
+      (ctx.workspaceState.update as any) = jest.fn().mockResolvedValue(undefined);
+
+      await activate(ctx);
+
+      mockGetEstimationMode.mockReturnValue('telemetry');
+      trackerInstance.mode = 'files';
+      trackerInstance.swapSource.mockImplementation(async () => {
+        trackerInstance.mode = 'telemetry';
+      });
+
+      otelSettingChangedCallback!();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const showInfo = vscode.window.showInformationMessage as jest.Mock;
+      expect(showInfo).not.toHaveBeenCalledWith(
+        expect.stringMatching(/Switched to Telemetry mode/i),
+      );
+      expect(ctx.workspaceState.update).not.toHaveBeenCalled();
     });
   });
 
