@@ -133,16 +133,16 @@ not `squash`; the hook relies on rebase-dir detection instead — see
 **Files:**
 - Modify: `src/hook-git-e2e.test.ts`
 
-- [ ] **Scenario: normal commit appends trailer and truncates tracking file.**
+- [x] **Scenario: normal commit appends trailer and truncates tracking file.**
       Write stats with `totalAiCredits = 5.00`, `git commit -m 'feat: x'`,
       assert `Copilot-AI-Credits: 5.00` in message and tracking file size === 0.
-- [ ] **Scenario: empty tracking file produces no trailer.** After Task 2.1
+- [x] **Scenario: empty tracking file produces no trailer.** After Task 2.1
       runs the hook leaves an empty file. Make another commit without writing
       stats → assert NO `Copilot-AI-Credits:` line in the new commit.
-- [ ] **Scenario: no tracking file at all → no trailer.** Fresh repo, install
+- [x] **Scenario: no tracking file at all → no trailer.** Fresh repo, install
       hook, do NOT write tracking file, `git commit` → assert no
       `Copilot-AI-Credits:` line.
-- [ ] **Scenario: `git commit --amend --no-edit` does NOT duplicate the
+- [x] **Scenario: `git commit --amend --no-edit` does NOT duplicate the
       trailer.** Setup: stats written, normal commit (trailer present, file
       truncated). Then write a *new* tracking file with `3.00`, run `git
       commit --amend --no-edit -m 'feat: x'`. Git passes `$2=commit`. Per the
@@ -150,10 +150,10 @@ not `squash`; the hook relies on rebase-dir detection instead — see
       message still has exactly one `Copilot-AI-Credits:` line with the
       ORIGINAL value (5.00, not 3.00 or 8.00), AND the new tracking file is
       still intact (not truncated, because the hook short-circuited).
-- [ ] **Scenario: `git commit --amend` with new stats and editor change** —
+- [x] **Scenario: `git commit --amend` with new stats and editor change** —
       same as above but with `--no-edit` removed and `GIT_EDITOR=true`. Same
       expectations (amend is amend regardless of `-m`/`--no-edit`).
-- [ ] Run `npm test` — must pass before Task 3.
+- [x] Run `npm test` — must pass before Task 3.
 
 ### Task 3: `git merge --squash` scenarios (`$COMMIT_SOURCE=squash`)
 

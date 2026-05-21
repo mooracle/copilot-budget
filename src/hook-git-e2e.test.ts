@@ -77,11 +77,26 @@ function commit(
   execFileSync('git', args, { env: repo.env, stdio: 'pipe' });
 }
 
+// Amend rewrites the existing commit; no tree change is required, so this
+// stays distinct from `commit` to avoid restaging an unrelated dummy file.
+function amend(repo: Repo, ...extraFlags: string[]): void {
+  const args = ['-C', repo.dir, 'commit', '--amend', ...extraFlags];
+  execFileSync('git', args, { env: repo.env, stdio: 'pipe' });
+}
+
 function lastCommitMessage(repo: Repo): string {
   return execFileSync('git', ['-C', repo.dir, 'log', '-1', '--format=%B'], {
     env: repo.env,
     encoding: 'utf8',
   });
+}
+
+function trackingFilePath(repo: Repo): string {
+  return path.join(repo.gitDir, 'copilot-budget');
+}
+
+function countAiCreditsTrailers(message: string): number {
+  return (message.match(/^Copilot-AI-Credits:/gm) ?? []).length;
 }
 
 function makeStats(totalAiCredits: number): TrackingStats {
@@ -126,6 +141,79 @@ describeE2E('hook E2E (real git)', () => {
     const msg = lastCommitMessage(repo);
     expect(msg).toContain('init');
     expect(msg).not.toMatch(/Copilot-AI-Credits:/);
+  });
+
+  it('normal commit appends trailer and truncates tracking file', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+    writeStats(repo.gitDir, makeStats(5.0));
+    commit(repo, 'feat: x');
+
+    const msg = lastCommitMessage(repo);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+    expect(countAiCreditsTrailers(msg)).toBe(1);
+    expect(fs.statSync(trackingFilePath(repo)).size).toBe(0);
+  });
+
+  it('empty tracking file produces no trailer on the next commit', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+    writeStats(repo.gitDir, makeStats(5.0));
+    commit(repo, 'feat: first');
+    // Hook truncated the tracking file; second commit must not append anything.
+    commit(repo, 'feat: second');
+
+    const msg = lastCommitMessage(repo);
+    expect(msg).toContain('feat: second');
+    expect(msg).not.toMatch(/Copilot-AI-Credits:/);
+  });
+
+  it('no tracking file at all produces no trailer', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+    commit(repo, 'feat: x');
+
+    const msg = lastCommitMessage(repo);
+    expect(msg).not.toMatch(/Copilot-AI-Credits:/);
+  });
+
+  it('git commit --amend --no-edit does not duplicate the trailer', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+    writeStats(repo.gitDir, makeStats(5.0));
+    commit(repo, 'feat: x');
+
+    // New stats arrive between commit and amend. The hook gets $2=commit and
+    // exits early, leaving both the message trailer and the tracking file alone.
+    writeStats(repo.gitDir, makeStats(3.0));
+    amend(repo, '--no-edit');
+
+    const msg = lastCommitMessage(repo);
+    expect(countAiCreditsTrailers(msg)).toBe(1);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+
+    const trackingContent = fs.readFileSync(trackingFilePath(repo), 'utf8');
+    expect(trackingContent).toContain('TR_Copilot-AI-Credits=3.00');
+    expect(fs.statSync(trackingFilePath(repo)).size).toBeGreaterThan(0);
+  });
+
+  it('git commit --amend (editor path) does not duplicate the trailer', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+    writeStats(repo.gitDir, makeStats(5.0));
+    commit(repo, 'feat: x');
+
+    writeStats(repo.gitDir, makeStats(3.0));
+    // No --no-edit; rely on GIT_EDITOR=true to accept the existing message.
+    amend(repo);
+
+    const msg = lastCommitMessage(repo);
+    expect(countAiCreditsTrailers(msg)).toBe(1);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+
+    const trackingContent = fs.readFileSync(trackingFilePath(repo), 'utf8');
+    expect(trackingContent).toContain('TR_Copilot-AI-Credits=3.00');
+    expect(fs.statSync(trackingFilePath(repo)).size).toBeGreaterThan(0);
   });
 });
 
