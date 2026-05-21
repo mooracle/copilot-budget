@@ -127,13 +127,13 @@ Amend / reword / edit (`$2 == commit`) and merge (`$2 == merge`) are already cor
 **Files:**
 - Modify: `CHANGELOG.md`
 
-- [ ] In the existing 2.0.0 entry, **edit the headline paragraph** (currently at the top of the section, mentions "cost displays carry a `~` prefix end-to-end ... including into the `Copilot-AI-Credits` git trailer"): remove "including into the `Copilot-AI-Credits` git trailer" and clarify that the tilde is editor-only. Reword roughly as: "… and cost displays carry a `~` prefix in editor surfaces (status bar, tooltip, panel) so the upper-bound signal travels with the number. Commit trailers and the tracking-file `TR_` lines carry bare numeric values regardless of mode."
-- [ ] **Edit the "Files mode tilde signal" Added entry** to remove the trailer claim. Reword roughly as: "Status bar, tooltip, and panel carry a leading `~` when the value comes from JSONL (Files mode). The trailer and the tracking file's `TR_` lines stay bare numbers so they remain unambiguous to downstream tooling."
-- [ ] **Remove the Breaking bullet at `CHANGELOG.md:36`** that reads "Files mode AIC trailer values now carry a leading `~`. Downstream parsers that expect a bare number after `Copilot-AI-Credits:` must strip the optional `~`. Telemetry mode trailers are unchanged." — that bullet contradicts the rewritten Added entries above and would leave the CHANGELOG internally inconsistent. The other Breaking bullets (minimum VS Code version, panel/showStats) stay
-- [ ] **Add a new "Added" bullet for the squash-sum behaviour**, e.g.: "Squash sums trailers — `git rebase -i` with `squash`/`fixup` lines now leaves one `Copilot-AI-Credits:` trailer per name in the resulting commit (sum of the originals), instead of N duplicates."
-- [ ] Verify the rest of the 2.0.0 entry (Currency toggle, OTel toggle, Mode-swap signal, Cache-hit heuristic removed, etc.) is unchanged
-- [ ] No tests for CHANGELOG edits
-- [ ] Run `npm run compile` and verify the bundle builds cleanly
+- [x] In the existing 2.0.0 entry, **edit the headline paragraph** (currently at the top of the section, mentions "cost displays carry a `~` prefix end-to-end ... including into the `Copilot-AI-Credits` git trailer"): remove "including into the `Copilot-AI-Credits` git trailer" and clarify that the tilde is editor-only. Reword roughly as: "… and cost displays carry a `~` prefix in editor surfaces (status bar, tooltip, panel) so the upper-bound signal travels with the number. Commit trailers and the tracking-file `TR_` lines carry bare numeric values regardless of mode."
+- [x] **Edit the "Files mode tilde signal" Added entry** to remove the trailer claim. Reword roughly as: "Status bar, tooltip, and panel carry a leading `~` when the value comes from JSONL (Files mode). The trailer and the tracking file's `TR_` lines stay bare numbers so they remain unambiguous to downstream tooling."
+- [x] **Remove the Breaking bullet at `CHANGELOG.md:36`** that reads "Files mode AIC trailer values now carry a leading `~`. Downstream parsers that expect a bare number after `Copilot-AI-Credits:` must strip the optional `~`. Telemetry mode trailers are unchanged." — that bullet contradicts the rewritten Added entries above and would leave the CHANGELOG internally inconsistent. The other Breaking bullets (minimum VS Code version, panel/showStats) stay
+- [x] **Add a new "Added" bullet for the squash-sum behaviour**, e.g.: "Squash sums trailers — `git rebase -i` with `squash`/`fixup` lines now leaves one `Copilot-AI-Credits:` trailer per name in the resulting commit (sum of the originals), instead of N duplicates."
+- [x] Verify the rest of the 2.0.0 entry (Currency toggle, OTel toggle, Mode-swap signal, Cache-hit heuristic removed, etc.) is unchanged
+- [x] No tests for CHANGELOG edits
+- [x] Run `npm run compile` and verify the bundle builds cleanly
 
 ### Task 5: Verify acceptance criteria
 
