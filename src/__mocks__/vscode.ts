@@ -2,6 +2,13 @@
 // Store for overriding config values in tests
 export const __configStore: Record<string, any> = {};
 export const __configChangeListeners: Array<(e: any) => void> = [];
+// Spy capturing every `getConfiguration(section).update(key, value, target)` call so
+// tests can assert configuration writes (panel currency/OTel toggles, etc).
+// Tests using this should call `__workspaceUpdate.mockClear()` in beforeEach
+// since it persists across tests within the module.
+export const __workspaceUpdate = jest.fn(
+  async (_section: string | undefined, _key: string, _value: any, _target?: any) => {},
+);
 
 export const workspace = {
   getConfiguration: (section?: string) => ({
@@ -11,7 +18,8 @@ export const workspace = {
     },
     has: () => false,
     inspect: () => undefined,
-    update: async () => {},
+    update: (key: string, value: any, target?: any) =>
+      __workspaceUpdate(section, key, value, target),
   }),
   workspaceFolders: undefined as any,
   onDidChangeConfiguration: (listener: (e: any) => void) => {
@@ -85,6 +93,12 @@ export enum FileType {
   File = 1,
   Directory = 2,
   SymbolicLink = 64,
+}
+
+export enum ConfigurationTarget {
+  Global = 1,
+  Workspace = 2,
+  WorkspaceFolder = 3,
 }
 
 export class Uri {

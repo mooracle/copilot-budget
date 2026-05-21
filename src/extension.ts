@@ -1,7 +1,8 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Tracker, JsonlSource, OTelSource, Source } from './tracker';
-import { createStatusBar, showStatsQuickPick } from './statusBar';
+import { createStatusBar } from './statusBar';
+import { showBudgetPanel } from './budgetPanel';
 import {
   writeTrackingFile,
   readTrackingFile,
@@ -282,7 +283,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.showStats', () => {
-      if (tracker) showStatsQuickPick(tracker);
+      if (tracker) showBudgetPanel({ tracker });
     }),
   );
 

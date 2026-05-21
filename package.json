@@ -46,7 +46,7 @@
     "commands": [
       {
         "command": "copilot-budget.showStats",
-        "title": "Copilot Budget: Show Token Stats"
+        "title": "Copilot Budget: Open Panel"
       },
       {
         "command": "copilot-budget.resetTracking",

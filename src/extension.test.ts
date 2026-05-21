@@ -1,5 +1,6 @@
 jest.mock('./tracker');
 jest.mock('./statusBar');
+jest.mock('./budgetPanel');
 jest.mock('./trackingFile');
 jest.mock('./commitHook');
 jest.mock('./config');
@@ -11,7 +12,8 @@ import * as vscode from 'vscode';
 import { __commandCallbacks, createMockExtensionContext } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
 import { Tracker, JsonlSource, OTelSource } from './tracker';
-import { createStatusBar, showStatsQuickPick } from './statusBar';
+import { createStatusBar } from './statusBar';
+import { showBudgetPanel } from './budgetPanel';
 import {
   writeTrackingFile,
   readTrackingFile,
@@ -34,8 +36,8 @@ const MockTracker = Tracker as jest.MockedClass<typeof Tracker>;
 const mockCreateStatusBar = createStatusBar as jest.MockedFunction<
   typeof createStatusBar
 >;
-const mockShowStatsQuickPick = showStatsQuickPick as jest.MockedFunction<
-  typeof showStatsQuickPick
+const mockShowBudgetPanel = showBudgetPanel as jest.MockedFunction<
+  typeof showBudgetPanel
 >;
 const mockWriteTrackingFile = writeTrackingFile as jest.MockedFunction<
   typeof writeTrackingFile
@@ -164,7 +166,7 @@ beforeEach(async () => {
     item: { text: '', dispose: jest.fn() },
   };
   mockCreateStatusBar.mockReturnValue(mockStatusBarItem as any);
-  mockShowStatsQuickPick.mockResolvedValue(undefined);
+  mockShowBudgetPanel.mockResolvedValue(undefined);
   mockWriteTrackingFile.mockResolvedValue(true);
   mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
   mockIsTrackingFileTruncated.mockResolvedValue(false);
@@ -828,7 +830,7 @@ describe('extension', () => {
       }
       expect(mockInstallHook).not.toHaveBeenCalled();
       expect(mockUninstallHook).not.toHaveBeenCalled();
-      expect(mockShowStatsQuickPick).not.toHaveBeenCalled();
+      expect(mockShowBudgetPanel).not.toHaveBeenCalled();
     });
 
     it('showDiagnostics works in empty-window mode and passes undefined storageUri', async () => {
@@ -878,12 +880,12 @@ describe('extension', () => {
   });
 
   describe('commands', () => {
-    it('showStats command calls showStatsQuickPick', async () => {
+    it('showStats command calls showBudgetPanel', async () => {
       const ctx = makeContext();
       await activate(ctx);
 
       __commandCallbacks['copilot-budget.showStats']();
-      expect(mockShowStatsQuickPick).toHaveBeenCalledWith(trackerInstance);
+      expect(mockShowBudgetPanel).toHaveBeenCalledWith({ tracker: trackerInstance });
     });
 
     it('resetTracking command calls tracker.reset', async () => {
