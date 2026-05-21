@@ -301,16 +301,17 @@ not `squash`; the hook relies on rebase-dir detection instead — see
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Verify every scenario group from Overview has at least one passing test:
-      normal+amend (Task 2), merge --squash (Task 3), rebase -i (Task 4),
-      cherry-pick + revert + real merge (Task 5).
-- [ ] Run full suite: `npm test`. All tests pass.
-- [ ] Run `npm run lint`. Clean.
-- [ ] Measure E2E suite runtime: `npx jest src/hook-git-e2e.test.ts
-      --verbose`. If it exceeds ~10s, note in plan whether to gate behind an
-      env var; otherwise leave on by default.
-- [ ] Confirm `hook-script.test.ts` still passes unchanged (no overlap
-      regressions).
+- [x] Verify every scenario group from Overview has at least one passing test:
+      normal+amend (Task 2 — 6 tests), merge --squash (Task 3 — 5 tests),
+      rebase -i (Task 4 — 3 tests), cherry-pick + revert + real merge
+      (Task 5 — 4 tests). All 18 E2E scenarios pass.
+- [x] Run full suite: `npm test`. All tests pass (473 tests, 17 suites).
+- [x] Run `npm run lint`. Clean.
+- [x] Measure E2E suite runtime: `npx jest src/hook-git-e2e.test.ts
+      --verbose`. ~6.7s wall-clock — under the 10s threshold, no env gate
+      needed; leave on by default.
+- [x] Confirm `hook-script.test.ts` still passes unchanged (18 tests pass,
+      no overlap regressions).
 
 ### Task 7: Update docs and archive plan
 
