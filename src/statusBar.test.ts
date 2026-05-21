@@ -1,8 +1,4 @@
-import {
-  createStatusBar,
-  formatAicShort,
-  showStatsQuickPick,
-} from './statusBar';
+import { createStatusBar, showStatsQuickPick } from './statusBar';
 import { Tracker, TrackingStats } from './tracker';
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -13,11 +9,15 @@ jest.mock('./sessionDiscovery');
 jest.mock('./sessionParser');
 jest.mock('./config', () => ({
   isCommitHookEnabled: jest.fn().mockReturnValue(true),
+  getDisplayCurrency: jest.fn().mockReturnValue('aic'),
 }));
 
-import { isCommitHookEnabled } from './config';
+import { isCommitHookEnabled, getDisplayCurrency } from './config';
 const mockIsCommitHookEnabled = isCommitHookEnabled as jest.MockedFunction<
   typeof isCommitHookEnabled
+>;
+const mockGetDisplayCurrency = getDisplayCurrency as jest.MockedFunction<
+  typeof getDisplayCurrency
 >;
 
 const mockWindow = vscode.window as any;
@@ -45,6 +45,7 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
     totalTokens: 4300,
     interactions: 15,
     totalAiCredits: 1.726,
+    mode: 'files',
     ...overrides,
   };
 }
@@ -86,6 +87,7 @@ describe('statusBar', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockIsCommitHookEnabled.mockReturnValue(true);
+    mockGetDisplayCurrency.mockReturnValue('aic');
     createdItem = {
       text: '',
       tooltip: '' as any,
@@ -111,20 +113,44 @@ describe('statusBar', () => {
       expect(createdItem.name).toBe('Copilot Budget');
     });
 
-    it('sets initial text with AIC integer (no commit-hook suffix)', () => {
+    it('sets initial text with tilde-prefixed AIC integer in files mode', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
-      expect(createdItem.text).toBe('$(credit-card) 2 AIC');
+      expect(createdItem.text).toBe('$(credit-card) ~2 AIC');
     });
 
-    it('shows 0 AIC for empty stats', () => {
+    it('shows 0 AIC for empty stats (no tilde even in files mode)', () => {
       const { tracker } = createMockTracker(
         makeStats({ totalAiCredits: 0, models: {} }),
       );
       createStatusBar(tracker);
 
       expect(createdItem.text).toBe('$(credit-card) 0 AIC');
+    });
+
+    it('drops tilde in telemetry mode', () => {
+      const { tracker } = createMockTracker(makeStats({ mode: 'telemetry' }));
+      createStatusBar(tracker);
+
+      expect(createdItem.text).toBe('$(credit-card) 2 AIC');
+    });
+
+    it('renders USD when displayCurrency is usd', () => {
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      // 1.726 AIC → Math.ceil → 2 AIC → $0.02; files mode adds tilde.
+      expect(createdItem.text).toBe('$(credit-card) ~$0.02');
+    });
+
+    it('USD without tilde in telemetry mode', () => {
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      const { tracker } = createMockTracker(makeStats({ mode: 'telemetry' }));
+      createStatusBar(tracker);
+
+      expect(createdItem.text).toBe('$(credit-card) $0.02');
     });
 
     it('does not include commit-hook indicator in status bar text', () => {
@@ -143,19 +169,31 @@ describe('statusBar', () => {
       expect(value).not.toContain('Commit hook');
     });
 
-    it('sets tooltip as a MarkdownString with total AIC', () => {
+    it('sets tooltip as a MarkdownString with total AIC (files mode → tilde)', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
       expect(createdItem.tooltip).toBeInstanceOf(vscode.MarkdownString);
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
       expect(value).toContain('Total:');
-      expect(value).toContain('1.73 AIC');
+      expect(value).toContain('~1.73 AIC');
       expect(value).not.toContain('$');
     });
 
-    it('tooltip lists per-model rows with AIC only', () => {
+    it('tooltip lists per-model rows with tilde-prefixed AIC in files mode', () => {
       const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('GPT-4.1');
+      expect(value).toContain('~0.94 AIC');
+      expect(value).toContain('Claude Sonnet 4.6');
+      expect(value).toContain('~0.79 AIC');
+      expect(value).not.toContain('$');
+    });
+
+    it('tooltip lists per-model rows without tilde in telemetry mode', () => {
+      const { tracker } = createMockTracker(makeStats({ mode: 'telemetry' }));
       createStatusBar(tracker);
 
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
@@ -163,10 +201,26 @@ describe('statusBar', () => {
       expect(value).toContain('0.94 AIC');
       expect(value).toContain('Claude Sonnet 4.6');
       expect(value).toContain('0.79 AIC');
-      expect(value).not.toContain('$');
+      expect(value).not.toContain('~');
     });
 
-    it('tooltip does not include the heuristic disclosure note', () => {
+    it('tooltip includes the files-mode disclosure note', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain('Estimate assumes no caching');
+    });
+
+    it('tooltip includes the telemetry-mode disclosure note', () => {
+      const { tracker } = createMockTracker(makeStats({ mode: 'telemetry' }));
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).toContain("Measured via Copilot's OTel database");
+    });
+
+    it('tooltip does not include the old 75% heuristic note', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -192,9 +246,9 @@ describe('statusBar', () => {
 
       fireStatsChanged(makeStats({ totalAiCredits: 123.4, models: {} }));
 
-      expect(createdItem.text).toBe('$(credit-card) 124 AIC');
+      expect(createdItem.text).toBe('$(credit-card) ~124 AIC');
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
-      expect(value).toContain('123.40 AIC');
+      expect(value).toContain('~123.40 AIC');
       expect(value).not.toContain('$1.23');
     });
 
@@ -221,7 +275,7 @@ describe('statusBar', () => {
   });
 
   describe('showStatsQuickPick', () => {
-    it('shows total AIC in header', async () => {
+    it('shows total AIC in header with tilde in files mode', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
@@ -229,9 +283,31 @@ describe('statusBar', () => {
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
       const totalItem = items.find((i: any) => i.label?.includes('Total'));
       expect(totalItem).toBeDefined();
-      expect(totalItem.label).toContain('1.73 AIC');
+      expect(totalItem.label).toContain('~1.73 AIC');
       expect(totalItem.label).not.toMatch(/\$\d/);
       expect(totalItem.description).toBeUndefined();
+    });
+
+    it('shows total without tilde in telemetry mode', async () => {
+      const { tracker } = createMockTracker(makeStats({ mode: 'telemetry' }));
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const totalItem = items.find((i: any) => i.label?.includes('Total'));
+      expect(totalItem.label).toContain('1.73 AIC');
+      expect(totalItem.label).not.toContain('~');
+    });
+
+    it('shows total in USD when currency is usd', async () => {
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      const { tracker } = createMockTracker(makeStats());
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const totalItem = items.find((i: any) => i.label?.includes('Total'));
+      // 1.726 AIC / 100 → toFixed(2) → '$0.02'; files mode adds tilde.
+      expect(totalItem.label).toContain('~$0.02');
+      expect(totalItem.label).not.toContain('AIC');
     });
 
     it('shows tracking since timestamp', async () => {
@@ -245,7 +321,7 @@ describe('statusBar', () => {
       expect(sinceItem).toBeDefined();
     });
 
-    it('shows per-model AIC, with all four token buckets in detail', async () => {
+    it('shows per-model AIC with tilde in files mode, all four token buckets in detail', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
@@ -254,7 +330,7 @@ describe('statusBar', () => {
         i.label?.includes('Claude Sonnet 4.6'),
       );
       expect(claudeItem).toBeDefined();
-      expect(claudeItem.description).toBe('0.79 AIC');
+      expect(claudeItem.description).toBe('~0.79 AIC');
       expect(claudeItem.description).not.toContain('$');
       expect(claudeItem.detail).toContain('in:');
       expect(claudeItem.detail).toContain('cache_read:');
@@ -264,6 +340,31 @@ describe('statusBar', () => {
       expect(claudeItem.detail).toContain('1,200');
       expect(claudeItem.detail).toContain('300');
       expect(claudeItem.detail).toContain('2,000');
+    });
+
+    it('shows per-model AIC without tilde in telemetry mode', async () => {
+      const { tracker } = createMockTracker(makeStats({ mode: 'telemetry' }));
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const claudeItem = items.find((i: any) =>
+        i.label?.includes('Claude Sonnet 4.6'),
+      );
+      expect(claudeItem.description).toBe('0.79 AIC');
+      expect(claudeItem.description).not.toContain('~');
+    });
+
+    it('shows per-model in USD when currency is usd', async () => {
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      const { tracker } = createMockTracker(makeStats({ mode: 'telemetry' }));
+      await showStatsQuickPick(tracker);
+
+      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
+      const claudeItem = items.find((i: any) =>
+        i.label?.includes('Claude Sonnet 4.6'),
+      );
+      // 0.786 / 100 → $0.01 (toFixed(2) of 0.00786)
+      expect(claudeItem.description).toMatch(/^\$0\.0\d$/);
     });
 
     it('does not include premium-request column anywhere', async () => {
@@ -306,7 +407,7 @@ describe('statusBar', () => {
       expect(totalItem.label).not.toMatch(/\$\d/);
     });
 
-    it('does not include the heuristic disclosure note', async () => {
+    it('does not include the heuristic disclosure note in the quick pick', async () => {
       const { tracker } = createMockTracker(makeStats());
       await showStatsQuickPick(tracker);
 
@@ -376,26 +477,5 @@ describe('statusBar', () => {
       expect(options.title).toBe('Copilot Budget');
       expect(options.placeHolder).toBeTruthy();
     });
-  });
-
-  describe('formatAicShort', () => {
-    const cases: Array<[number, string]> = [
-      [0, '0 AIC'],
-      [1e-6, '1 AIC'],
-      [0.0001, '1 AIC'],
-      [0.4, '1 AIC'],
-      [0.5, '1 AIC'],
-      [1.0, '1 AIC'],
-      [14.5, '15 AIC'],
-      [15.0, '15 AIC'],
-      [-1, '0 AIC'],
-      [-0.0001, '0 AIC'],
-    ];
-
-    for (const [input, expected] of cases) {
-      it(`formats ${input} as ${expected}`, () => {
-        expect(formatAicShort(input)).toBe(expected);
-      });
-    }
   });
 });

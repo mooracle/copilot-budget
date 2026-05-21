@@ -66,6 +66,7 @@ const sampleStats: TrackingStats = {
   totalTokens: 4600,
   interactions: 15,
   totalAiCredits: 42.31,
+  mode: 'files',
 };
 
 beforeEach(() => {
@@ -99,6 +100,7 @@ describe('trackingFile', () => {
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
       expect(content).toContain('INTERACTIONS=15');
       expect(content).toContain('TOTAL_AI_CREDITS=42.31');
+      expect(content).toContain('MODE=files');
       expect(content).not.toContain('TOTAL_COST_USD');
 
       expect(content).toContain('MODEL_gpt-4.1_INPUT_TOKENS=1500');
@@ -177,6 +179,7 @@ describe('trackingFile', () => {
         totalTokens: 450,
         interactions: 2,
         totalAiCredits: 3.0,
+        mode: 'files',
       };
 
       await writeTrackingFile(unsafeStats);
@@ -191,7 +194,8 @@ describe('trackingFile', () => {
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      expect(content).toContain('TR_Copilot-AI-Credits=42.31');
+      // Files mode prepends tilde to flag the upper-bound estimate.
+      expect(content).toContain('TR_Copilot-AI-Credits=~42.31');
       expect(content).not.toContain('TR_Copilot-Est-Cost');
       expect(content).not.toContain('TR_Copilot-AI-Credits-Models');
     });
@@ -212,16 +216,25 @@ describe('trackingFile', () => {
       expect(line).toBe('TR_Copilot-Est-Cost=$0.42');
     });
 
-    it('aiCredits TR_ value has no $ prefix and 2 decimals', async () => {
+    it('aiCredits TR_ value has no $ prefix and 2 decimals (tilde-prefixed in files mode)', async () => {
       setupWorkspace('/project');
       await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-AI-Credits='));
+      expect(line).toBe('TR_Copilot-AI-Credits=~42.31');
+    });
+
+    it('aiCredits TR_ value has no tilde in telemetry mode', async () => {
+      setupWorkspace('/project');
+      await writeTrackingFile({ ...sampleStats, mode: 'telemetry' });
       const content = mockWriteTextFile.mock.calls[0][1];
 
       const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-AI-Credits='));
       expect(line).toBe('TR_Copilot-AI-Credits=42.31');
     });
 
-    it('writes aiCreditsPerModel TR_ line using display names, sorted descending', async () => {
+    it('writes aiCreditsPerModel TR_ line using display names, sorted descending, tilde-prefixed in files mode', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -232,11 +245,28 @@ describe('trackingFile', () => {
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      // Claude Sonnet 4.6 has 0.3497 cost = 34.97 credits, GPT-4.1 has 0.0734 = 7.34 credits.
-      // Sorted descending by credits.
+      // Claude Sonnet 4.6 has 34.97 credits, GPT-4.1 has 7.34. Sorted descending.
+      // Each value is tilde-prefixed in files mode.
+      expect(content).toContain(
+        'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=~34.97,GPT-4.1=~7.34',
+      );
+    });
+
+    it('writes aiCreditsPerModel TR_ line without tilde in telemetry mode', async () => {
+      setupWorkspace('/project');
+      mockGetTrailerConfig.mockReturnValue({
+        estimatedCost: 'Copilot-Est-Cost',
+        aiCredits: 'Copilot-AI-Credits',
+        aiCreditsPerModel: 'Copilot-AI-Credits-Models',
+      });
+
+      await writeTrackingFile({ ...sampleStats, mode: 'telemetry' });
+      const content = mockWriteTextFile.mock.calls[0][1];
+
       expect(content).toContain(
         'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
       );
+      expect(content).not.toContain('=~');
     });
 
     it('omits aiCreditsPerModel TR_ line when no models tracked', async () => {
@@ -254,6 +284,7 @@ describe('trackingFile', () => {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
+        mode: 'files',
       };
 
       await writeTrackingFile(emptyStats);
@@ -287,10 +318,22 @@ describe('trackingFile', () => {
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
+      // Estimated-cost USD trailer is unaffected by the tilde flag (the dollar
+      // sign is the value marker). AI-Credits trailers are tilde-prefixed in
+      // files mode.
       expect(content).toContain('TR_AI-Cost=$0.42');
-      expect(content).toContain('TR_AI-Credits=42.31');
+      expect(content).toContain('TR_AI-Credits=~42.31');
       expect(content).toMatch(/TR_AI-Credits-Per-Model=/);
       expect(content).not.toContain('Copilot-');
+    });
+
+    it('writes MODE=telemetry when stats.mode is telemetry', async () => {
+      setupWorkspace('/project');
+      await writeTrackingFile({ ...sampleStats, mode: 'telemetry' });
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).toContain('MODE=telemetry');
+      expect(content).not.toContain('MODE=files');
     });
 
     it('handles stats with no models', async () => {
@@ -303,6 +346,7 @@ describe('trackingFile', () => {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
+        mode: 'files',
       };
 
       await writeTrackingFile(emptyStats);
@@ -330,6 +374,7 @@ describe('trackingFile', () => {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
+        mode: 'files',
       };
 
       await writeTrackingFile(zeroStats);
@@ -536,6 +581,54 @@ describe('trackingFile', () => {
       expect(claudeCost).toBeCloseTo(claudeExpectedCost, 8);
     });
 
+    it('silently ignores MODE=files line (parser is mode-agnostic at restore time)', () => {
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=15',
+        'TOTAL_AI_CREDITS=42.31',
+        'MODE=files',
+        'MODEL_gpt-4.1_INPUT_TOKENS=1500',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_AIC=7.34',
+        '',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe('2024-01-15T10:30:00Z');
+      expect(result!.interactions).toBe(15);
+      expect(result!.models['gpt-4.1']).toMatchObject({
+        inputTokens: 1500,
+        outputTokens: 800,
+        cacheReadTokens: 200,
+        cacheCreationTokens: 0,
+      });
+    });
+
+    it('silently ignores MODE=telemetry line', () => {
+      const content = [
+        'SINCE=2024-01-15T10:30:00Z',
+        'INTERACTIONS=15',
+        'TOTAL_AI_CREDITS=42.31',
+        'MODE=telemetry',
+        'MODEL_gpt-4.1_INPUT_TOKENS=1500',
+        'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
+        'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
+        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
+        'MODEL_gpt-4.1_COST_AIC=7.34',
+        '',
+      ].join('\n');
+
+      const result = parseTrackingFileContent(content);
+
+      expect(result).not.toBeNull();
+      expect(result!.since).toBe('2024-01-15T10:30:00Z');
+      expect(result!.models['gpt-4.1'].inputTokens).toBe(1500);
+    });
+
     it('tolerates legacy 0.6.x file with TOTAL_COST_USD and per-model _COST_USD keys', () => {
       // Dev-host tracking files written before this commit have legacy USD
       // keys alongside TOTAL_AI_CREDITS + *_TOKENS. The new parser must
@@ -590,6 +683,7 @@ describe('trackingFile', () => {
         totalTokens: 15,
         interactions: 1,
         totalAiCredits: 0.002,
+        mode: 'files',
       };
 
       await writeTrackingFile(tinyStats);

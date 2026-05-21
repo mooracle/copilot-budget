@@ -110,14 +110,14 @@ Remove the 75%-on-turn-2+ heuristic. When `cacheReadTokens` is absent in metadat
 
 Connect the new formatter so user-visible AIC values reflect mode + currency immediately, even before OTel mode exists. Files mode is now end-to-end correct.
 
-- [ ] in `src/statusBar.ts` replace `formatAic` / `formatAicShort` call sites with `formatAmount(amount, { mode, currency, precision })`. Mode is passed in from the Tracker (Tracker will start always-files in this task; OTel-aware tracker arrives in Task 5). Currency comes from `getDisplayCurrency()`.
-- [ ] update the tooltip header line and per-model rows to use `formatAmount`. Update the heuristic-disclosure note: in Files mode read *"Estimate assumes no caching (upper bound)."*, in Telemetry mode read *"Measured via Copilot's OTel database."*.
-- [ ] in `src/trackingFile.ts` `writeTrackingFile`, prepend tilde to the `Copilot-AI-Credits` trailer value (`TR_Copilot-AI-Credits=~42`) when `stats.mode === 'files'`. Also tilde-prepend the per-model `TR_Copilot-AI-Credits-<Model>` lines when present. The `_COST_AIC` and `_COST_USD` numeric keys in the tracking file (machine-readable, not trailers) stay unprefixed.
-- [ ] add `mode: 'files' | 'telemetry'` to `TrackingStats` and thread it through `writeTrackingFile`. Tracker will set this; for Task 3 default to `'files'` everywhere.
-- [ ] update existing trailer tests to cover both modes. Add specific tests asserting tilde presence in Files mode and absence in Telemetry mode.
-- [ ] update existing status bar tests to cover currency switching + tilde presence.
-- [ ] add `trackingFile.test.ts` case: `parseTrackingFileContent` silently ignores an unknown `MODE=` line (writes both `MODE=files` and `MODE=telemetry` fixtures, asserts other keys parse correctly).
-- [ ] run `npm test` — must pass before next task.
+- [x] in `src/statusBar.ts` replace `formatAic` / `formatAicShort` call sites with `formatAmount(amount, { mode, currency, precision })`. Mode is passed in from the Tracker (Tracker will start always-files in this task; OTel-aware tracker arrives in Task 5). Currency comes from `getDisplayCurrency()`.
+- [x] update the tooltip header line and per-model rows to use `formatAmount`. Update the heuristic-disclosure note: in Files mode read *"Estimate assumes no caching (upper bound)."*, in Telemetry mode read *"Measured via Copilot's OTel database."*.
+- [x] in `src/trackingFile.ts` `writeTrackingFile`, prepend tilde to the `Copilot-AI-Credits` trailer value (`TR_Copilot-AI-Credits=~42`) when `stats.mode === 'files'`. Also tilde-prepend the per-model `TR_Copilot-AI-Credits-<Model>` lines when present. The `_COST_AIC` and `_COST_USD` numeric keys in the tracking file (machine-readable, not trailers) stay unprefixed.
+- [x] add `mode: 'files' | 'telemetry'` to `TrackingStats` and thread it through `writeTrackingFile`. Tracker will set this; for Task 3 default to `'files'` everywhere.
+- [x] update existing trailer tests to cover both modes. Add specific tests asserting tilde presence in Files mode and absence in Telemetry mode.
+- [x] update existing status bar tests to cover currency switching + tilde presence.
+- [x] add `trackingFile.test.ts` case: `parseTrackingFileContent` silently ignores an unknown `MODE=` line (writes both `MODE=files` and `MODE=telemetry` fixtures, asserts other keys parse correctly).
+- [x] run `npm test` — must pass before next task.
 
 **Release marker:** Tasks 1–3 form "Files mode v1" and are shippable as a standalone release. The heuristic is gone, the upper-bound estimate carries a tilde signal end-to-end, currency toggle works. If Tasks 4+ slip, release here as a minor version.
 

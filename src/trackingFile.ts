@@ -34,6 +34,9 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
     `SINCE=${stats.since}`,
     `INTERACTIONS=${stats.interactions}`,
     `TOTAL_AI_CREDITS=${stats.totalAiCredits.toFixed(2)}`,
+    // MODE is machine-readable only; the hook ignores it. parseTrackingFileContent
+    // silently drops unknown keys, so adding this is a no-op for restore.
+    `MODE=${stats.mode}`,
   ];
 
   for (const [model, usage] of Object.entries(stats.models)) {
@@ -54,18 +57,22 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
   // append "Copilot-Est-Cost: $0.00" to every commit on idle sessions.
   if (stats.totalAiCredits > 0) {
     const trailers = getTrailerConfig();
+    // In files mode the AIC numbers are an upper-bound estimate (heuristic
+    // dropped, no cache-read attribution). The tilde flags that downstream:
+    // the trailer remains parseable, just visibly marked as estimated.
+    const tilde = stats.mode === 'files' ? '~' : '';
     if (trailers.estimatedCost) {
       lines.push(`TR_${trailers.estimatedCost}=$${(stats.totalAiCredits / 100).toFixed(2)}`);
     }
     if (trailers.aiCredits) {
-      lines.push(`TR_${trailers.aiCredits}=${stats.totalAiCredits.toFixed(2)}`);
+      lines.push(`TR_${trailers.aiCredits}=${tilde}${stats.totalAiCredits.toFixed(2)}`);
     }
     if (trailers.aiCreditsPerModel) {
       const entries = Object.entries(stats.models)
         .map(([id, usage]) => ({ name: getDisplayName(id), credits: usage.costAic }))
         .sort((a, b) => b.credits - a.credits);
       if (entries.length > 0) {
-        const value = entries.map((e) => `${e.name}=${e.credits.toFixed(2)}`).join(',');
+        const value = entries.map((e) => `${e.name}=${tilde}${e.credits.toFixed(2)}`).join(',');
         lines.push(`TR_${trailers.aiCreditsPerModel}=${value}`);
       }
     }

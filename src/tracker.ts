@@ -26,6 +26,11 @@ export interface TrackingStats {
   totalTokens: number;
   interactions: number;
   totalAiCredits: number;
+  // Source of the numbers: 'files' = derived from chatSessions/*.jsonl with the
+  // cache heuristic dropped (upper bound); 'telemetry' = measured via Copilot's
+  // OTel SQLite store. Threaded into status bar, tooltip, and trailer value so
+  // the audit signal (tilde prefix in files mode) propagates end-to-end.
+  mode: 'files' | 'telemetry';
 }
 
 export interface RestoredStats {
@@ -458,6 +463,7 @@ export class Tracker {
       totalTokens,
       interactions,
       totalAiCredits,
+      mode: 'files',
     };
   }
 
@@ -578,6 +584,7 @@ export class Tracker {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
+        mode: 'files',
       };
     }
     return this.lastStats;

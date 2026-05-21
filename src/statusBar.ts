@@ -1,21 +1,14 @@
 import * as vscode from 'vscode';
 import { Tracker, TrackingStats, ModelStats } from './tracker';
 import { getDisplayName } from './tokenRates';
-import { isCommitHookEnabled } from './config';
+import { isCommitHookEnabled, getDisplayCurrency } from './config';
+import { formatAmount } from './amountFormatter';
+
+const FILES_NOTE = 'Estimate assumes no caching (upper bound).';
+const TELEMETRY_NOTE = "Measured via Copilot's OTel database.";
 
 function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
-}
-
-function formatAic(n: number): string {
-  return `${n.toFixed(2)} AIC`;
-}
-
-export function formatAicShort(n: number): string {
-  if (!(n > 0)) {
-    return '0 AIC';
-  }
-  return `${Math.ceil(n)} AIC`;
 }
 
 function totalModelTokens(usage: ModelStats): number {
@@ -30,16 +23,23 @@ function totalModelTokens(usage: ModelStats): number {
 function buildTooltip(stats: TrackingStats): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
-  md.appendMarkdown(`**Total:** ${formatAic(stats.totalAiCredits)}\n\n`);
+  const currency = getDisplayCurrency();
+  const mode = stats.mode;
+  md.appendMarkdown(
+    `**Total:** ${formatAmount(stats.totalAiCredits, { mode, currency, precision: 'full' })}\n\n`,
+  );
 
   const entries = Object.entries(stats.models);
   if (entries.length > 0) {
     for (const [model, usage] of entries) {
       md.appendMarkdown(
-        `- ${getDisplayName(model)}: ${formatAic(usage.costAic)}\n`,
+        `- ${getDisplayName(model)}: ${formatAmount(usage.costAic, { mode, currency, precision: 'full' })}\n`,
       );
     }
+    md.appendMarkdown('\n');
   }
+
+  md.appendMarkdown(`_${mode === 'files' ? FILES_NOTE : TELEMETRY_NOTE}_\n`);
 
   return md;
 }
@@ -56,7 +56,8 @@ export function createStatusBar(
   item.command = 'copilot-budget.showStats';
 
   function updateText(stats: TrackingStats): void {
-    item.text = `$(credit-card) ${formatAicShort(stats.totalAiCredits)}`;
+    const currency = getDisplayCurrency();
+    item.text = `$(credit-card) ${formatAmount(stats.totalAiCredits, { mode: stats.mode, currency, precision: 'short' })}`;
     item.tooltip = buildTooltip(stats);
   }
 
@@ -76,10 +77,12 @@ export function createStatusBar(
 
 export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
   const stats = tracker.getStats();
+  const currency = getDisplayCurrency();
+  const mode = stats.mode;
   const items: vscode.QuickPickItem[] = [];
 
   items.push({
-    label: `$(credit-card) Total: ${formatAic(stats.totalAiCredits)}`,
+    label: `$(credit-card) Total: ${formatAmount(stats.totalAiCredits, { mode, currency, precision: 'full' })}`,
   });
 
   items.push({
@@ -94,7 +97,7 @@ export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
       const totalTokens = totalModelTokens(usage);
       items.push({
         label: `$(hubot) ${getDisplayName(model)}`,
-        description: formatAic(usage.costAic),
+        description: formatAmount(usage.costAic, { mode, currency, precision: 'full' }),
         detail:
           `Tokens: ${formatNumber(totalTokens)} ` +
           `(in: ${formatNumber(usage.inputTokens)} / ` +
