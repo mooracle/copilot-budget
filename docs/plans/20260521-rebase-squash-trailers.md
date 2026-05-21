@@ -137,14 +137,14 @@ Amend / reword / edit (`$2 == commit`) and merge (`$2 == merge`) are already cor
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] Confirm `writeTrackingFile` emits bare-number trailer values in both Files and Telemetry modes (no `~`, no `$`)
-- [ ] Confirm `squash_sum_trailers` correctly merges duplicates without touching unrelated lines
-- [ ] Confirm amend/reword/edit/merge still preserve the existing trailer untouched (regression)
-- [ ] Confirm fixup leaves the tracking file accumulating (manual sandbox test in Post-Completion)
-- [ ] Confirm the hook script is POSIX-portable: run `sh -n` on a written copy as a minimum gate; if `shellcheck` is available, also run `shellcheck -s sh <hookPath>`
-- [ ] Run full test suite: `npm test`
-- [ ] Run lint: `npm run lint`
-- [ ] Build: `npm run compile`
+- [x] Confirm `writeTrackingFile` emits bare-number trailer values in both Files and Telemetry modes (no `~`, no `$`)
+- [x] Confirm `squash_sum_trailers` correctly merges duplicates without touching unrelated lines
+- [x] Confirm amend/reword/edit/merge still preserve the existing trailer untouched (regression)
+- [x] Confirm fixup leaves the tracking file accumulating (manual sandbox test in Post-Completion) — design verified; end-to-end deferred to Post-Completion
+- [x] Confirm the hook script is POSIX-portable: `sh -n` passed on the extracted script; `shellcheck` not installed locally
+- [x] Run full test suite: `npm test` — 448/448 pass across 16 suites
+- [x] Run lint: `npm run lint` — clean
+- [x] Build: `npm run compile` — clean
 
 ### Task 6: [Final] Mark complete
 
