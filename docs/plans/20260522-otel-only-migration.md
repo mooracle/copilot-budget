@@ -167,9 +167,9 @@ Cleanup task — only safe after Task 4 removes the only importer.
 
 Decision: **keep the `mode` param on the options interface but ignore it inside `formatAmount`**. The param is dropped in Task 10 alongside `TrackingStats.mode`, in one coordinated cut. Avoids touching statusBar/budgetPanel/tracker call sites twice.
 
-- [ ] remove the `mode === 'files'` branch in `formatAmount` (line 33 region); the function no longer reads the `mode` field — the parameter remains in the options type until Task 10
-- [ ] update tests in `src/amountFormatter.test.ts`: remove all tilde-prefix expectations (both `mode: 'files'` and `mode: 'telemetry'` now produce identical output); assert AIC/USD short/full formats unchanged
-- [ ] run `npm test -- amountFormatter` — must pass before Task 7
+- [x] remove the `mode === 'files'` branch in `formatAmount` (line 33 region); the function no longer reads the `mode` field — the parameter remains in the options type until Task 10
+- [x] update tests in `src/amountFormatter.test.ts`: remove all tilde-prefix expectations (both `mode: 'files'` and `mode: 'telemetry'` now produce identical output); assert AIC/USD short/full formats unchanged
+- [x] run `npm test -- amountFormatter` — must pass before Task 7
 
 ### Task 7: Simplify statusBar tooltip and decoration
 

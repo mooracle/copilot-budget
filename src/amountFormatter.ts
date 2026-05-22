@@ -29,6 +29,5 @@ export function formatAmount(amountAic: number, opts: FormatAmountOpts): string 
     }
   }
 
-  if (isZero) return body;
-  return opts.mode === 'files' ? `~${body}` : body;
+  return body;
 }
