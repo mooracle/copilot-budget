@@ -5,6 +5,13 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-05-22
+
+### Fixed
+
+- **Commit hook now respects `core.hooksPath`.** The installer previously wrote `prepare-commit-msg` to `<gitdir>/hooks/` unconditionally, so users with husky, lefthook, or any custom `core.hooksPath` configuration ended up with a hook that git never executed. `resolveHooksDir` now reads `core.hooksPath` (resolving relative paths against the worktree root, matching git's own behavior) and falls back to `<gitCommonDir>/hooks` when unset. Install, uninstall, and `isHookInstalled` all stay aligned with where git actually looks.
+- `extensionKind` reordered to `["workspace", "ui"]` so VS Code prefers the workspace install in remote contexts (SSH, WSL, devcontainers, Codespaces), where both `chatSessions` and the OTel DB live workspace-side. Empty-window activation still falls back to the UI host.
+
 ## [2.0.0] - 2026-05-21
 
 Accurate cost tracking via Copilot's OTel database (opt-in upstream setting; auto-detected). When `github.copilot.chat.otel.dbSpanExporter.enabled = true` AND `<globalStorage>/github.copilot-chat/agent-traces.db` exists, Copilot Budget reads measured `input_tokens` / `output_tokens` / `cached_tokens` per request from upstream's OTel SQLite store and reports them verbatim. Otherwise the extension runs in Files mode and never undercounts — every prompt token is treated as fresh `input`, and cost displays carry a `~` prefix in editor surfaces (status bar, tooltip, panel) so the upper-bound signal travels with the number. Commit trailers and the tracking-file `TR_` lines carry bare numeric values regardless of mode.

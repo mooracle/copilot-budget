@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -38,8 +38,8 @@
     "onStartupFinished"
   ],
   "extensionKind": [
-    "ui",
-    "workspace"
+    "workspace",
+    "ui"
   ],
   "main": "./dist/extension.js",
   "contributes": {
