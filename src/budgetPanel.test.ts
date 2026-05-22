@@ -9,10 +9,6 @@ jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
 jest.mock('./config', () => ({
   getDisplayCurrency: jest.fn().mockReturnValue('aic'),
-  isOTelDbExporterEnabled: jest.fn().mockReturnValue(false),
-  OTEL_SECTION: 'github.copilot.chat.otel',
-  OTEL_KEY: 'dbSpanExporter.enabled',
-  OTEL_FULL_KEY: 'github.copilot.chat.otel.dbSpanExporter.enabled',
 }));
 jest.mock('./commitHook', () => ({
   isHookInstalled: jest.fn().mockResolvedValue(false),
@@ -20,14 +16,11 @@ jest.mock('./commitHook', () => ({
   uninstallHook: jest.fn().mockResolvedValue(true),
 }));
 
-import { getDisplayCurrency, isOTelDbExporterEnabled } from './config';
+import { getDisplayCurrency } from './config';
 import { isHookInstalled, installHook, uninstallHook } from './commitHook';
 
 const mockGetDisplayCurrency = getDisplayCurrency as jest.MockedFunction<
   typeof getDisplayCurrency
->;
-const mockIsOTelDbExporterEnabled = isOTelDbExporterEnabled as jest.MockedFunction<
-  typeof isOTelDbExporterEnabled
 >;
 const mockIsHookInstalled = isHookInstalled as jest.MockedFunction<
   typeof isHookInstalled
@@ -63,7 +56,7 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
     totalTokens: 4300,
     interactions: 15,
     totalAiCredits: 1.726,
-    mode: 'files',
+    mode: 'telemetry',
     ...overrides,
   };
 }
@@ -88,7 +81,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   __workspaceUpdate.mockClear();
   mockGetDisplayCurrency.mockReturnValue('aic');
-  mockIsOTelDbExporterEnabled.mockReturnValue(false);
   mockIsHookInstalled.mockResolvedValue(false);
   mockInstallHook.mockResolvedValue(true);
   mockUninstallHook.mockResolvedValue(true);
@@ -102,57 +94,25 @@ beforeEach(() => {
 
 describe('budgetPanel', () => {
   describe('panel rendering', () => {
-    it('renders three toggle rows at the top in declared order', async () => {
+    it('renders two toggle rows at the top in declared order', async () => {
       const tracker = makeTracker(makeStats());
       await showBudgetPanel({ tracker });
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      // Skip past separators when verifying — first three non-separator items
-      // are OTel, Currency, Hook in that order.
       const toggleRows = items.filter(
         (i: any) => i.kind !== vscode.QuickPickItemKind.Separator,
       );
-      expect(toggleRows[0].label).toContain('OTel');
-      expect(toggleRows[1].label).toContain('Display');
-      expect(toggleRows[2].label).toContain('Append AI Credits trailer');
+      expect(toggleRows[0].label).toContain('Display');
+      expect(toggleRows[1].label).toContain('Append AI Credits trailer');
     });
 
-    it('renders the OTel-off row when upstream setting is false', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(false);
+    it('does not render any OTel toggle row', async () => {
       const tracker = makeTracker(makeStats());
       await showBudgetPanel({ tracker });
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
       const otel = items.find((i: any) => i.label?.includes('OTel'));
-      expect(otel.label).toContain('$(circle-large-outline)');
-      expect(otel.label).toContain('Enable accurate cost tracking');
-    });
-
-    it('renders the OTel-on row when upstream setting is true AND mode is telemetry', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
-      await showBudgetPanel({ tracker });
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const otel = items.find((i: any) => i.label?.includes('OTel'));
-      expect(otel.label).toContain('$(check)');
-      expect(otel.label).toContain('enabled');
-      expect(otel.label).not.toContain('DB unavailable');
-    });
-
-    it('renders the OTel-unavailable row when setting is true but mode is still files', async () => {
-      // Setting flipped on but the OTel DB has not materialized in this
-      // window (remote-host mismatch, or Copilot Chat hasn't written it yet).
-      // The panel must not claim accurate tracking is active.
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      const tracker = makeTracker(makeStats({ mode: 'files' }));
-      await showBudgetPanel({ tracker });
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const otel = items.find((i: any) => i.label?.includes('OTel'));
-      expect(otel.label).toContain('$(warning)');
-      expect(otel.label).toContain('DB unavailable');
-      expect(otel.label).not.toContain('$(check)');
+      expect(otel).toBeUndefined();
     });
 
     it('renders currency row reflecting AIC state', async () => {
@@ -199,17 +159,8 @@ describe('budgetPanel', () => {
       expect(hook.label).toContain('$(circle-large-outline)');
     });
 
-    it('shows total with tilde in files mode and AIC formatting', async () => {
+    it('shows total without tilde in AIC formatting', async () => {
       const tracker = makeTracker(makeStats());
-      await showBudgetPanel({ tracker });
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const total = items.find((i: any) => i.label?.includes('Total:'));
-      expect(total.label).toContain('~1.73 AIC');
-    });
-
-    it('shows total without tilde in telemetry mode', async () => {
-      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
       await showBudgetPanel({ tracker });
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
@@ -220,7 +171,7 @@ describe('budgetPanel', () => {
 
     it('shows total in USD when currency is usd', async () => {
       mockGetDisplayCurrency.mockReturnValue('usd');
-      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
+      const tracker = makeTracker(makeStats());
       await showBudgetPanel({ tracker });
 
       const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
@@ -237,7 +188,7 @@ describe('budgetPanel', () => {
         i.label?.includes('Claude Sonnet 4.6'),
       );
       expect(claude).toBeDefined();
-      expect(claude.description).toBe('~0.79 AIC');
+      expect(claude.description).toBe('0.79 AIC');
       expect(claude.detail).toContain('in:');
       expect(claude.detail).toContain('cache_read:');
       expect(claude.detail).toContain('cache_creation:');
@@ -289,182 +240,6 @@ describe('budgetPanel', () => {
       const options = mockWindow.showQuickPick.mock.calls[0][1];
       expect(options.title).toBe('Copilot Budget');
       expect(options.placeHolder).toBeTruthy();
-    });
-  });
-
-  describe('OTel toggle (strictly asymmetric)', () => {
-    it('writes upstream setting to true when OTel-off row is picked', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(false);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('Enable accurate')),
-      );
-
-      const tracker = makeTracker(makeStats());
-      await showBudgetPanel({ tracker });
-
-      expect(__workspaceUpdate).toHaveBeenCalledWith(
-        'github.copilot.chat.otel',
-        'dbSpanExporter.enabled',
-        true,
-        vscode.ConfigurationTarget.Workspace,
-      );
-    });
-
-    it('prompts for reload after enabling OTel', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(false);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('Enable accurate')),
-      );
-      mockWindow.showInformationMessage.mockResolvedValueOnce('Later');
-
-      const tracker = makeTracker(makeStats());
-      await showBudgetPanel({ tracker });
-
-      expect(mockWindow.showInformationMessage).toHaveBeenCalledWith(
-        expect.stringMatching(/Reload window now/i),
-        'Reload',
-        'Later',
-      );
-    });
-
-    it('reloads when user picks Reload', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(false);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('Enable accurate')),
-      );
-      mockWindow.showInformationMessage.mockResolvedValueOnce('Reload');
-
-      const tracker = makeTracker(makeStats());
-      await showBudgetPanel({ tracker });
-
-      expect(mockCommands.executeCommand).toHaveBeenCalledWith(
-        'workbench.action.reloadWindow',
-      );
-    });
-
-    it('does not reload when user picks Later', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(false);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('Enable accurate')),
-      );
-      mockWindow.showInformationMessage.mockResolvedValueOnce('Later');
-
-      const tracker = makeTracker(makeStats());
-      await showBudgetPanel({ tracker });
-
-      expect(mockCommands.executeCommand).not.toHaveBeenCalled();
-    });
-
-    it('does NOT call configuration.update when OTel-on row is picked (asymmetric invariant)', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('OTel') && i.label?.includes('enabled')),
-      );
-
-      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
-      await showBudgetPanel({ tracker });
-
-      // The whole point: clicking the already-enabled row must NEVER flip
-      // the upstream setting to anything (and especially never to false).
-      expect(__workspaceUpdate).not.toHaveBeenCalled();
-    });
-
-    it('does NOT call configuration.update when the unavailable-DB row is picked', async () => {
-      // Asymmetric invariant also holds in the "enabled but DB missing" state:
-      // the panel must never write `false` upstream, even from this branch.
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('DB unavailable')),
-      );
-
-      const tracker = makeTracker(makeStats({ mode: 'files' }));
-      await showBudgetPanel({ tracker });
-
-      expect(__workspaceUpdate).not.toHaveBeenCalled();
-    });
-
-    it('shows the open-settings info message when OTel-on row is picked (telemetry mode)', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('OTel') && i.label?.includes('enabled')),
-      );
-
-      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
-      await showBudgetPanel({ tracker });
-
-      expect(mockWindow.showInformationMessage).toHaveBeenCalledWith(
-        expect.stringMatching(/already enabled/i),
-        'Open Settings',
-      );
-    });
-
-    it('shows the DB-unavailable info message when the warning row is picked', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('DB unavailable')),
-      );
-
-      const tracker = makeTracker(makeStats({ mode: 'files' }));
-      await showBudgetPanel({ tracker });
-
-      expect(mockWindow.showInformationMessage).toHaveBeenCalledWith(
-        expect.stringMatching(/database is not available/i),
-        'Reload',
-        'Open Settings',
-      );
-    });
-
-    it('reloads when user picks Reload from the unavailable-DB prompt', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('DB unavailable')),
-      );
-      mockWindow.showInformationMessage.mockResolvedValueOnce('Reload');
-
-      const tracker = makeTracker(makeStats({ mode: 'files' }));
-      await showBudgetPanel({ tracker });
-
-      expect(mockCommands.executeCommand).toHaveBeenCalledWith(
-        'workbench.action.reloadWindow',
-      );
-    });
-
-    it('opens settings when user picks Open Settings', async () => {
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('OTel') && i.label?.includes('enabled')),
-      );
-      mockWindow.showInformationMessage.mockResolvedValueOnce('Open Settings');
-
-      const tracker = makeTracker(makeStats({ mode: 'telemetry' }));
-      await showBudgetPanel({ tracker });
-
-      expect(mockCommands.executeCommand).toHaveBeenCalledWith(
-        'workbench.action.openSettings',
-        'github.copilot.chat.otel.dbSpanExporter.enabled',
-      );
-    });
-
-    it('warns the user and skips the reload prompt when the OTel settings write rejects', async () => {
-      // The command wrapper in extension.ts only logs a rejected
-      // showBudgetPanel() promise. Without an explicit catch here, a locked
-      // settings.json / Settings Sync failure would silently swallow the
-      // user's click — the panel would close with no toast and no settings
-      // change. Mirror the hook-toggle path's warning so the user knows.
-      mockIsOTelDbExporterEnabled.mockReturnValue(false);
-      __workspaceUpdate.mockRejectedValueOnce(new Error('settings.json is read-only'));
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('Enable accurate')),
-      );
-
-      const tracker = makeTracker(makeStats());
-      await expect(showBudgetPanel({ tracker })).resolves.toBeUndefined();
-
-      expect(mockWindow.showWarningMessage).toHaveBeenCalledWith(
-        expect.stringMatching(/Failed to enable accurate cost tracking/i),
-      );
-      // No reload prompt — the setting didn't actually get written.
-      expect(mockWindow.showInformationMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -550,9 +325,6 @@ describe('budgetPanel', () => {
     });
 
     it('warns the user and continues the render loop when the currency settings write rejects', async () => {
-      // Same rationale as the OTel-enable rejection path: extension.ts only
-      // logs the panel's rejection, so the user wouldn't see anything if the
-      // settings write fails. Mirror the hook-toggle warning here.
       mockGetDisplayCurrency.mockReturnValue('aic');
       __workspaceUpdate.mockRejectedValueOnce(new Error('settings.json is read-only'));
       mockWindow.showQuickPick
@@ -678,13 +450,6 @@ describe('budgetPanel', () => {
     });
 
     it('warns the user when the settings write rejects after a successful hook action', async () => {
-      // The install/uninstall already changed disk state; if the follow-up
-      // configuration.update() rejects (locked settings.json, Sync provider
-      // error, etc), the user must be told that the setting and disk state
-      // have drifted. Otherwise the rejection is just swallowed by the
-      // showBudgetPanel().catch() in extension.ts and the next config-change
-      // tick acts on stale state — most dangerously, a `true` setting after
-      // a successful uninstall would re-install the hook.
       mockIsHookInstalled.mockResolvedValue(false);
       mockInstallHook.mockResolvedValue(true);
       __workspaceUpdate.mockRejectedValueOnce(new Error('settings.json is read-only'));

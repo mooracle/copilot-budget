@@ -1,24 +1,11 @@
 import * as vscode from 'vscode';
 import { Tracker, ModelStats, TrackingStats } from './tracker';
 import { getDisplayName } from './tokenRates';
-import {
-  isOTelDbExporterEnabled,
-  getDisplayCurrency,
-  OTEL_SECTION,
-  OTEL_KEY,
-  OTEL_FULL_KEY,
-} from './config';
+import { getDisplayCurrency } from './config';
 import { isHookInstalled, installHook, uninstallHook } from './commitHook';
 import { formatAmount } from './amountFormatter';
 
-// Strictly asymmetric upstream-write invariant: we only ever flip the OTel
-// exporter setting to `true` via this panel — never to `false`. To stop using
-// telemetry data, users disable the upstream setting in VS Code settings.
-
 const ACTION = {
-  OTelEnable: 'otel-enable',
-  OTelAlreadyEnabled: 'otel-already-enabled',
-  OTelEnabledButUnavailable: 'otel-enabled-but-unavailable',
   CurrencyToggle: 'currency-toggle',
   HookToggle: 'hook-toggle',
   Refresh: 'refresh',
@@ -50,35 +37,10 @@ function totalModelTokens(usage: ModelStats): number {
 function buildItems(
   stats: TrackingStats,
   currency: 'aic' | 'usd',
-  otelEnabled: boolean,
   hookInstalled: boolean,
 ): PanelItem[] {
   const items: PanelItem[] = [];
   const mode = stats.mode;
-
-  // Three states for the OTel row, derived from setting × actual mode:
-  //   1. setting=true && mode='telemetry' — happy path, show checkmark.
-  //   2. setting=true && mode='files'     — setting is on but DB not present
-  //      in this window (remote-host mismatch, DB hasn't materialized yet,
-  //      or pending reload). Don't claim accuracy that isn't there.
-  //   3. setting=false                    — offer to enable.
-  if (otelEnabled && mode === 'telemetry') {
-    items.push({
-      label: '$(check) Accurate cost tracking (OTel) — enabled',
-      __action: ACTION.OTelAlreadyEnabled,
-    });
-  } else if (otelEnabled) {
-    items.push({
-      label: '$(warning) Accurate cost tracking (OTel) — enabled, but DB unavailable',
-      description: 'Reload window or check logs',
-      __action: ACTION.OTelEnabledButUnavailable,
-    });
-  } else {
-    items.push({
-      label: '$(circle-large-outline) Enable accurate cost tracking (OTel)',
-      __action: ACTION.OTelEnable,
-    });
-  }
 
   items.push({
     label:
@@ -135,66 +97,6 @@ function buildItems(
   return items;
 }
 
-async function handleOTelEnable(): Promise<void> {
-  // The settings write can fail (locked settings.json, Settings Sync provider
-  // error, ConfigurationTarget rejection). Surface a warning to the user
-  // instead of letting the rejection bubble up to showBudgetPanel().catch()
-  // in extension.ts, which only logs — the user would otherwise see no
-  // feedback that their click had no effect.
-  try {
-    await vscode.workspace
-      .getConfiguration(OTEL_SECTION)
-      .update(OTEL_KEY, true, vscode.ConfigurationTarget.Global);
-  } catch {
-    vscode.window.showWarningMessage(
-      'Copilot Budget: Failed to enable accurate cost tracking — settings could not be saved.',
-    );
-    return;
-  }
-  const action = await vscode.window.showInformationMessage(
-    'Accurate cost tracking enabled. Reload window now?',
-    'Reload',
-    'Later',
-  );
-  if (action === 'Reload') {
-    await vscode.commands.executeCommand('workbench.action.reloadWindow');
-  }
-}
-
-async function handleOTelAlreadyEnabled(): Promise<void> {
-  const action = await vscode.window.showInformationMessage(
-    `OTel is already enabled. To disable, use VS Code settings: ${OTEL_FULL_KEY}`,
-    'Open Settings',
-  );
-  if (action === 'Open Settings') {
-    await vscode.commands.executeCommand(
-      'workbench.action.openSettings',
-      OTEL_FULL_KEY,
-    );
-  }
-}
-
-async function handleOTelEnabledButUnavailable(): Promise<void> {
-  // Setting is on but DB not present. The most common cause is that Copilot
-  // Chat hasn't written it yet (no chat since enabling, or pending reload);
-  // the next most common is the remote-host mismatch documented in
-  // CLAUDE.md / the plan. Offer a reload and a settings deep-link.
-  const action = await vscode.window.showInformationMessage(
-    'Accurate cost tracking is enabled in settings, but the OTel database is not available in this window. ' +
-      'Reload the window to retry, or open Settings to verify the upstream toggle.',
-    'Reload',
-    'Open Settings',
-  );
-  if (action === 'Reload') {
-    await vscode.commands.executeCommand('workbench.action.reloadWindow');
-  } else if (action === 'Open Settings') {
-    await vscode.commands.executeCommand(
-      'workbench.action.openSettings',
-      OTEL_FULL_KEY,
-    );
-  }
-}
-
 async function handleCurrencyToggle(current: 'aic' | 'usd'): Promise<void> {
   const next = current === 'aic' ? 'usd' : 'aic';
   // Same rationale as handleOTelEnable: warn the user when the settings write
@@ -247,33 +149,22 @@ async function handleHookToggle(installed: boolean): Promise<void> {
 
 export async function showBudgetPanel(ctx: PanelContext): Promise<void> {
   // Render-pick-handle loop. Toggles (currency, hook) re-render so the user
-  // sees the new state immediately; OTel toggles and stat picks exit because
-  // the follow-up flow (reload prompt / settings page / cancellation) moves
-  // focus away from the panel.
+  // sees the new state immediately; stat picks exit because there's nothing
+  // to do with them.
   while (true) {
     const stats = ctx.tracker.getStats();
     const currency = getDisplayCurrency();
-    const otelEnabled = isOTelDbExporterEnabled();
     const hookInstalled = await isHookInstalled();
 
-    const items = buildItems(stats, currency, otelEnabled, hookInstalled);
+    const items = buildItems(stats, currency, hookInstalled);
     const picked = (await vscode.window.showQuickPick(items, {
       title: 'Copilot Budget',
-      placeHolder: 'Manage OTel mode, currency, hook, and view stats',
+      placeHolder: 'Manage currency, hook, and view stats',
     })) as PanelItem | undefined;
 
     if (!picked) return;
 
     switch (picked.__action) {
-      case ACTION.OTelEnable:
-        await handleOTelEnable();
-        return;
-      case ACTION.OTelAlreadyEnabled:
-        await handleOTelAlreadyEnabled();
-        return;
-      case ACTION.OTelEnabledButUnavailable:
-        await handleOTelEnabledButUnavailable();
-        return;
       case ACTION.CurrencyToggle:
         await handleCurrencyToggle(currency);
         continue;

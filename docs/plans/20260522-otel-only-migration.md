@@ -191,11 +191,11 @@ Decision: **keep the `mode` param on the options interface but ignore it inside 
 
 No passive footer — that would duplicate the status-bar nudge from Task 7. When the OTel rows are gone, the panel simply starts with currency + hook toggles. "Reload to start tracking" already lives on the status bar; the panel doesn't need a second copy.
 
-- [ ] delete the three OTel-row item builders (`OTelEnable`/`OTelAlreadyEnabled`/`OTelEnabledButUnavailable`) at lines 65–82 and their handler functions (`handleOTelEnable`, `handleOTelAlreadyEnabled`, `handleOTelEnabledButUnavailable`)
-- [ ] delete the corresponding `ACTION.OTel*` constants
-- [ ] confirm currency + hook rows render unchanged (they were never mode-dependent)
-- [ ] update tests in `src/budgetPanel.test.ts`: drop OTel-row tests (three states + asymmetric-write — the asymmetric-write guarantee moves to `config.test.ts` via Task 1's `autoEnableOTel` coverage); assert clicking currency/hook toggles still re-renders
-- [ ] run `npm test -- budgetPanel` — must pass before Task 9
+- [x] delete the three OTel-row item builders (`OTelEnable`/`OTelAlreadyEnabled`/`OTelEnabledButUnavailable`) at lines 65–82 and their handler functions (`handleOTelEnable`, `handleOTelAlreadyEnabled`, `handleOTelEnabledButUnavailable`)
+- [x] delete the corresponding `ACTION.OTel*` constants
+- [x] confirm currency + hook rows render unchanged (they were never mode-dependent)
+- [x] update tests in `src/budgetPanel.test.ts`: drop OTel-row tests (three states + asymmetric-write — the asymmetric-write guarantee moves to `config.test.ts` via Task 1's `autoEnableOTel` coverage); assert clicking currency/hook toggles still re-renders
+- [x] run `npm test -- budgetPanel` — must pass before Task 9
 
 ### Task 9: Wire `autoEnableOTel` into activation and remove all mode-swap dead code
 
