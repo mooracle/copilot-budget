@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { log } from './logger';
-import { resolveGitCommonDir } from './gitDir';
+import { resolveHooksDir } from './gitDir';
 import { readTextFile, writeTextFile } from './fsUtils';
 import { errorMessage } from './utils';
 
@@ -87,12 +87,12 @@ async function getHookUri(): Promise<vscode.Uri | null> {
     log('[commitHook] getHookUri: no workspace folders');
     return null;
   }
-  const gitCommonDir = await resolveGitCommonDir(folders[0].uri);
-  if (!gitCommonDir) {
-    log(`[commitHook] getHookUri: could not resolve git directory for ${folders[0].uri.path}`);
+  const hooksDir = await resolveHooksDir(folders[0].uri);
+  if (!hooksDir) {
+    log(`[commitHook] getHookUri: could not resolve hooks directory for ${folders[0].uri.path}`);
     return null;
   }
-  const hookUri = vscode.Uri.joinPath(gitCommonDir, 'hooks', 'prepare-commit-msg');
+  const hookUri = vscode.Uri.joinPath(hooksDir, 'prepare-commit-msg');
   log(`[commitHook] getHookUri: ${hookUri.path}`);
   return hookUri;
 }

@@ -11,7 +11,7 @@ jest.mock('./fsUtils');
 const _mockFs = fs as jest.Mocked<typeof fs>;
 
 const mockVscode = vscode as any;
-const mockResolveGitCommonDir = gitDir.resolveGitCommonDir as jest.MockedFunction<typeof gitDir.resolveGitCommonDir>;
+const mockResolveHooksDir = gitDir.resolveHooksDir as jest.MockedFunction<typeof gitDir.resolveHooksDir>;
 const mockReadTextFile = fsUtils.readTextFile as jest.MockedFunction<typeof fsUtils.readTextFile>;
 const mockWriteTextFile = fsUtils.writeTextFile as jest.MockedFunction<typeof fsUtils.writeTextFile>;
 const mockVscodeStat = mockVscode.workspace.fs.stat as jest.Mock;
@@ -21,18 +21,18 @@ const FILE_NOT_FOUND_ERROR = vscode.FileSystemError.FileNotFound();
 
 const MARKER = '# Copilot Budget prepare-commit-msg hook';
 
-function setupWorkspace(rootPath: string, gitCommonDirPath?: string) {
+function setupWorkspace(rootPath: string, hooksDirPath?: string) {
   mockVscode.workspace.workspaceFolders = [
     { uri: vscode.Uri.file(rootPath), name: 'test', index: 0 },
   ];
-  mockResolveGitCommonDir.mockResolvedValue(
-    vscode.Uri.file(gitCommonDirPath ?? rootPath + '/.git'),
+  mockResolveHooksDir.mockResolvedValue(
+    vscode.Uri.file(hooksDirPath ?? rootPath + '/.git/hooks'),
   );
 }
 
 function clearWorkspace() {
   mockVscode.workspace.workspaceFolders = undefined;
-  mockResolveGitCommonDir.mockResolvedValue(null);
+  mockResolveHooksDir.mockResolvedValue(null);
 }
 
 beforeEach(() => {
@@ -67,11 +67,11 @@ describe('commitHook', () => {
       expect(await isHookInstalled()).toBe(false);
     });
 
-    it('returns false when resolveGitCommonDir returns null', async () => {
+    it('returns false when resolveHooksDir returns null', async () => {
       mockVscode.workspace.workspaceFolders = [
         { uri: vscode.Uri.file('/project'), name: 'test', index: 0 },
       ];
-      mockResolveGitCommonDir.mockResolvedValue(null);
+      mockResolveHooksDir.mockResolvedValue(null);
 
       expect(await isHookInstalled()).toBe(false);
     });
@@ -152,7 +152,7 @@ describe('commitHook', () => {
     });
 
     it('installs hook in common git dir for worktrees', async () => {
-      setupWorkspace('/worktrees/feature', '/repo/.git');
+      setupWorkspace('/worktrees/feature', '/repo/.git/hooks');
       mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
       mockReadTextFile.mockResolvedValue(null);
       mockWriteTextFile.mockResolvedValue(undefined);
@@ -163,6 +163,25 @@ describe('commitHook', () => {
       expect(result).toBe(true);
       const [hookUri] = mockWriteTextFile.mock.calls[0];
       expect(hookUri.path).toMatch(/\/repo\/\.git\/hooks\/prepare-commit-msg$/);
+    });
+
+    it('installs hook into a custom core.hooksPath directory (e.g. .husky/)', async () => {
+      // When the repo (or husky/lefthook) sets core.hooksPath, resolveHooksDir
+      // returns that location instead of <gitCommonDir>/hooks. The install
+      // should land there so git actually runs our script.
+      setupWorkspace('/project', '/project/.husky');
+      mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
+      mockReadTextFile.mockResolvedValue(null);
+      mockWriteTextFile.mockResolvedValue(undefined);
+      mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
+
+      const result = await installHook();
+
+      expect(result).toBe(true);
+      const [hookUri] = mockWriteTextFile.mock.calls[0];
+      expect(hookUri.path).toBe('/project/.husky/prepare-commit-msg');
+      const dirUri = mockVscode.workspace.fs.createDirectory.mock.calls[0][0];
+      expect(dirUri.path).toBe('/project/.husky');
     });
 
     it('returns false when write fails', async () => {

@@ -1,14 +1,32 @@
-import { resolveGitDir, resolveGitCommonDir } from './gitDir';
+import { resolveGitDir, resolveGitCommonDir, resolveHooksDir } from './gitDir';
 import * as vscode from 'vscode';
 import { stat, readTextFile } from './fsUtils';
+import { execFile } from 'child_process';
 
 jest.mock('./fsUtils');
+jest.mock('child_process', () => ({ execFile: jest.fn() }));
 
 const mockStat = stat as jest.MockedFunction<typeof stat>;
 const mockReadTextFile = readTextFile as jest.MockedFunction<typeof readTextFile>;
+const mockExecFile = execFile as unknown as jest.Mock;
+
+// Stub execFile (callback-style) so each test can declare what git config
+// returns. Default: key unset (exit 1).
+function mockCoreHooksPath(value: string | null) {
+  mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null, stdout: string, stderr: string) => void) => {
+    if (value === null) {
+      const err = new Error('exit 1') as NodeJS.ErrnoException;
+      err.code = '1' as unknown as string;
+      cb(err, '', '');
+    } else {
+      cb(null, value + '\n', '');
+    }
+  });
+}
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockCoreHooksPath(null);
 });
 
 describe('resolveGitDir', () => {
@@ -103,5 +121,67 @@ describe('resolveGitCommonDir', () => {
 
     const result = await resolveGitCommonDir(vscode.Uri.file('/repo/my-sub'));
     expect(result?.path).toBe('/repo/.git/modules/my-sub');
+  });
+});
+
+describe('resolveHooksDir', () => {
+  it('falls back to <gitCommonDir>/hooks when core.hooksPath is unset', async () => {
+    mockCoreHooksPath(null);
+    mockStat.mockResolvedValue({ type: vscode.FileType.Directory } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue(null); // no commondir file
+
+    const result = await resolveHooksDir(vscode.Uri.file('/project'));
+    expect(result?.path).toBe('/project/.git/hooks');
+  });
+
+  it('uses an absolute core.hooksPath verbatim', async () => {
+    mockCoreHooksPath('/opt/global-hooks');
+
+    const result = await resolveHooksDir(vscode.Uri.file('/project'));
+    expect(result?.path).toBe('/opt/global-hooks');
+    // No need to consult the git dir when a custom path is set.
+    expect(mockStat).not.toHaveBeenCalled();
+  });
+
+  it('resolves a relative core.hooksPath against the worktree root (husky convention)', async () => {
+    mockCoreHooksPath('.husky');
+
+    const result = await resolveHooksDir(vscode.Uri.file('/project'));
+    expect(result?.path).toBe('/project/.husky');
+  });
+
+  it('treats whitespace-only core.hooksPath as unset', async () => {
+    mockCoreHooksPath('   ');
+    mockStat.mockResolvedValue({ type: vscode.FileType.Directory } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue(null);
+
+    const result = await resolveHooksDir(vscode.Uri.file('/project'));
+    expect(result?.path).toBe('/project/.git/hooks');
+  });
+
+  it('returns null when git binary is unavailable AND .git is missing', async () => {
+    // execFile fails (ENOENT) AND .git doesn't exist — no place to install.
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null, stdout: string, stderr: string) => void) => {
+      const err = new Error('not found') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      cb(err, '', '');
+    });
+    mockStat.mockResolvedValue(null);
+
+    const result = await resolveHooksDir(vscode.Uri.file('/no-such-dir'));
+    expect(result).toBeNull();
+  });
+
+  it('falls back to <gitCommonDir>/hooks when git binary is unavailable but .git exists', async () => {
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (e: Error | null, stdout: string, stderr: string) => void) => {
+      const err = new Error('not found') as NodeJS.ErrnoException;
+      err.code = 'ENOENT';
+      cb(err, '', '');
+    });
+    mockStat.mockResolvedValue({ type: vscode.FileType.Directory } as vscode.FileStat);
+    mockReadTextFile.mockResolvedValue(null);
+
+    const result = await resolveHooksDir(vscode.Uri.file('/project'));
+    expect(result?.path).toBe('/project/.git/hooks');
   });
 });
