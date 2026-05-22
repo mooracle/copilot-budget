@@ -111,13 +111,13 @@ Path change is additive at first — primary target moves to new location, legac
 
 Additive — `readSpansSince` stays in place so tracker.ts still compiles. We'll remove it in Task 5 after tracker switches over.
 
-- [ ] add `PerModelAggregate` type to `src/otelReader.ts`: `{ model: string | null; chats: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }`
-- [ ] add `aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[]` method to the `OTelReader` interface and `OTelReaderImpl`
-- [ ] SQL: `SELECT request_model, COUNT(*) AS chats, SUM(COALESCE(input_tokens,0)) AS in_tok, SUM(COALESCE(output_tokens,0)) AS out_tok, SUM(COALESCE(cached_tokens,0)) AS cache_read, SUM(CAST(COALESCE(cc.value,'0') AS INTEGER)) AS cache_creation FROM spans s LEFT JOIN span_attributes cc ON cc.span_id = s.span_id AND cc.key = 'gen_ai.usage.cache_creation.input_tokens' WHERE s.operation_name = 'chat' AND s.end_time_ms > ? AND (s.chat_session_id IN (<placeholders>) OR EXISTS (SELECT 1 FROM span_attributes pa WHERE pa.span_id = s.span_id AND pa.key = 'copilot_chat.parent_chat_session_id' AND pa.value IN (<placeholders>))) GROUP BY request_model`
-- [ ] zero-session-ids special case returns `[]` without touching the DB (matches existing `readSpansSince` semantics)
-- [ ] use the same `toFiniteInt` helper for null/bigint coercion
-- [ ] extend `src/otelReader.test.ts` synthetic-DB fixture to populate `parent_chat_session_id` rows for some spans; assert: scoped filter returns expected per-model totals; parent-session join captures title-subagent spans; cache_creation summed from `span_attributes`; orphan spans excluded; retention edge case (`sinceMs` older than oldest span) returns all matching rows; empty session list returns `[]`; **span with `request_model = NULL` produces a row with `model: null` and zero cost (downstream `getRateCard()` returns null)**
-- [ ] run `npm test -- otelReader` — must pass before Task 4
+- [x] add `PerModelAggregate` type to `src/otelReader.ts`: `{ model: string | null; chats: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }`
+- [x] add `aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[]` method to the `OTelReader` interface and `OTelReaderImpl`
+- [x] SQL: `SELECT request_model, COUNT(*) AS chats, SUM(COALESCE(input_tokens,0)) AS in_tok, SUM(COALESCE(output_tokens,0)) AS out_tok, SUM(COALESCE(cached_tokens,0)) AS cache_read, SUM(CAST(COALESCE(cc.value,'0') AS INTEGER)) AS cache_creation FROM spans s LEFT JOIN span_attributes cc ON cc.span_id = s.span_id AND cc.key = 'gen_ai.usage.cache_creation.input_tokens' WHERE s.operation_name = 'chat' AND s.end_time_ms > ? AND (s.chat_session_id IN (<placeholders>) OR EXISTS (SELECT 1 FROM span_attributes pa WHERE pa.span_id = s.span_id AND pa.key = 'copilot_chat.parent_chat_session_id' AND pa.value IN (<placeholders>))) GROUP BY request_model`
+- [x] zero-session-ids special case returns `[]` without touching the DB (matches existing `readSpansSince` semantics)
+- [x] use the same `toFiniteInt` helper for null/bigint coercion
+- [x] extend `src/otelReader.test.ts` synthetic-DB fixture to populate `parent_chat_session_id` rows for some spans; assert: scoped filter returns expected per-model totals; parent-session join captures title-subagent spans; cache_creation summed from `span_attributes`; orphan spans excluded; retention edge case (`sinceMs` older than oldest span) returns all matching rows; empty session list returns `[]`; **span with `request_model = NULL` produces a row with `model: null` and zero cost (downstream `getRateCard()` returns null)**
+- [x] run `npm test -- otelReader` — must pass before Task 4
 
 ### Task 4: Switch Tracker to OTel-only with new aggregate API
 

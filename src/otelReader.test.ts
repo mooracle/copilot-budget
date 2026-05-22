@@ -8,6 +8,7 @@ import {
   createOTelReader,
   diagnoseUnavailable,
   OTelReader,
+  PerModelAggregate,
   resolveOTelDbUri,
   SpanRow,
 } from './otelReader';
@@ -76,6 +77,7 @@ interface SeedSpan {
   startTimeMs: number;
   endTimeMs: number;
   operationName?: string; // default 'chat'
+  parentChatSessionId?: string; // optional copilot_chat.parent_chat_session_id attr
 }
 
 function createSchema(dbPath: string): DatabaseSync {
@@ -150,6 +152,13 @@ function seedSpans(dbPath: string, spans: SeedSpan[]): void {
         String(s.cacheCreationAttr),
       );
     }
+    if (s.parentChatSessionId !== undefined) {
+      insertAttr.run(
+        s.spanId,
+        'copilot_chat.parent_chat_session_id',
+        s.parentChatSessionId,
+      );
+    }
   }
   db.close();
 }
@@ -188,6 +197,12 @@ describe('createOTelReader — DB missing', () => {
   it('readSpansSince returns [] without throwing', () => {
     const reader = createOTelReader(fx.ourGlobalStorageUri);
     expect(reader.readSpansSince(0, null)).toEqual([]);
+    reader.close();
+  });
+
+  it('aggregateSince returns [] without throwing', () => {
+    const reader = createOTelReader(fx.ourGlobalStorageUri);
+    expect(reader.aggregateSince(0, ['session-A'])).toEqual([]);
     reader.close();
   });
 
@@ -393,6 +408,233 @@ describe('createOTelReader — DB with spans', () => {
     // After close, a fresh query still works (lazy re-open).
     expect(reader.readSpansSince(0, null)).toHaveLength(3);
     reader.close();
+  });
+});
+
+describe('aggregateSince', () => {
+  let fx: Fixture;
+  let reader: OTelReader;
+
+  beforeEach(() => {
+    fx = makeFixture('aggregate');
+    seedSpans(fx.dbPath, [
+      // session-A: two gpt-4o chat spans
+      {
+        spanId: 'span-A1',
+        sessionId: 'session-A',
+        model: 'gpt-4o',
+        inputTokens: 1000,
+        outputTokens: 200,
+        cachedTokens: 750,
+        cacheCreationAttr: 100,
+        startTimeMs: 1_000,
+        endTimeMs: 1_500,
+      },
+      {
+        spanId: 'span-A2',
+        sessionId: 'session-A',
+        model: 'gpt-4o',
+        inputTokens: 500,
+        outputTokens: 80,
+        cachedTokens: null,
+        cacheCreationAttr: null,
+        startTimeMs: 2_000,
+        endTimeMs: 2_400,
+      },
+      // session-B: one claude span
+      {
+        spanId: 'span-B1',
+        sessionId: 'session-B',
+        model: 'claude-sonnet-4',
+        inputTokens: 2000,
+        outputTokens: 500,
+        cachedTokens: 1500,
+        cacheCreationAttr: 200,
+        startTimeMs: 3_000,
+        endTimeMs: 3_800,
+      },
+      // Title subagent — chat_session_id is NULL, but parent points at session-A
+      {
+        spanId: 'span-A-title',
+        sessionId: null,
+        model: 'gpt-4o-mini',
+        inputTokens: 50,
+        outputTokens: 10,
+        cachedTokens: 0,
+        cacheCreationAttr: null,
+        startTimeMs: 1_100,
+        endTimeMs: 1_200,
+        parentChatSessionId: 'session-A',
+      },
+      // Orphan — no session, no parent. Must be excluded.
+      {
+        spanId: 'span-orphan',
+        sessionId: null,
+        model: 'gpt-4o',
+        inputTokens: 9999,
+        outputTokens: 9999,
+        cachedTokens: 9999,
+        cacheCreationAttr: 9999,
+        startTimeMs: 1_500,
+        endTimeMs: 1_600,
+      },
+      // execute_tool span on session-A — must NOT appear (operation_name filter)
+      {
+        spanId: 'span-tool',
+        sessionId: 'session-A',
+        model: 'gpt-4o',
+        inputTokens: 99,
+        outputTokens: 99,
+        cachedTokens: 0,
+        cacheCreationAttr: null,
+        startTimeMs: 4_000,
+        endTimeMs: 4_100,
+        operationName: 'execute_tool',
+      },
+      // Span with NULL model — must produce a row with model: null
+      {
+        spanId: 'span-nullmodel',
+        sessionId: 'session-A',
+        model: null,
+        inputTokens: 7,
+        outputTokens: 3,
+        cachedTokens: 0,
+        cacheCreationAttr: null,
+        startTimeMs: 5_000,
+        endTimeMs: 5_100,
+      },
+    ]);
+    reader = createOTelReader(fx.ourGlobalStorageUri);
+  });
+  afterEach(() => {
+    reader.close();
+    rmFixture(fx);
+  });
+
+  function findByModel(
+    rows: PerModelAggregate[],
+    model: string | null,
+  ): PerModelAggregate | undefined {
+    return rows.find((r) => r.model === model);
+  }
+
+  it('returns [] for an empty session-id list without touching the DB', () => {
+    // Even if DB is present and has matching spans, an empty list short-circuits.
+    expect(reader.aggregateSince(0, [])).toEqual([]);
+  });
+
+  it('returns scoped per-model totals filtered by session id', () => {
+    const rows = reader.aggregateSince(0, ['session-A']);
+    // Expect: gpt-4o (2 chat spans), gpt-4o-mini (title subagent via parent join),
+    // and a NULL-model row (1 chat span). orphan and execute_tool excluded.
+    expect(rows).toHaveLength(3);
+
+    const gpt = findByModel(rows, 'gpt-4o');
+    expect(gpt).toEqual({
+      model: 'gpt-4o',
+      chats: 2,
+      inputTokens: 1500,
+      outputTokens: 280,
+      cacheReadTokens: 750,
+      cacheCreationTokens: 100,
+    });
+
+    const titleAgent = findByModel(rows, 'gpt-4o-mini');
+    expect(titleAgent).toEqual({
+      model: 'gpt-4o-mini',
+      chats: 1,
+      inputTokens: 50,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+
+    const nullModel = findByModel(rows, null);
+    expect(nullModel).toEqual({
+      model: null,
+      chats: 1,
+      inputTokens: 7,
+      outputTokens: 3,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it('parent-session OR-join captures title-subagent spans', () => {
+    const rows = reader.aggregateSince(0, ['session-A']);
+    // The title span has chat_session_id = NULL but parent_chat_session_id =
+    // session-A, so the parent OR-join must surface it.
+    const titleAgent = findByModel(rows, 'gpt-4o-mini');
+    expect(titleAgent).toBeDefined();
+    expect(titleAgent!.chats).toBe(1);
+  });
+
+  it('orphan spans (no chat_session_id, no parent) are excluded', () => {
+    // session-B does not own the orphan span — only its own claude span.
+    const rows = reader.aggregateSince(0, ['session-B']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].model).toBe('claude-sonnet-4');
+    // gpt-4o would appear if the orphan leaked through; assert it doesn't.
+    expect(findByModel(rows, 'gpt-4o')).toBeUndefined();
+  });
+
+  it('merges sessions when multiple ids are passed', () => {
+    const rows = reader.aggregateSince(0, ['session-A', 'session-B']);
+    // Expect: gpt-4o, gpt-4o-mini, claude-sonnet-4, null-model = 4 rows
+    expect(rows).toHaveLength(4);
+    expect(findByModel(rows, 'claude-sonnet-4')).toEqual({
+      model: 'claude-sonnet-4',
+      chats: 1,
+      inputTokens: 2000,
+      outputTokens: 500,
+      cacheReadTokens: 1500,
+      cacheCreationTokens: 200,
+    });
+  });
+
+  it('returns [] when no session id matches any span', () => {
+    expect(reader.aggregateSince(0, ['nonexistent'])).toEqual([]);
+  });
+
+  it('respects sinceMs (end_time > sinceMs strict)', () => {
+    // Cut off everything <= 1_500. Drops span-A1 (1_500) and the title span
+    // (1_200); span-A2, the orphan (excluded anyway), null-model survive.
+    const rows = reader.aggregateSince(1_500, ['session-A']);
+    const gpt = findByModel(rows, 'gpt-4o');
+    expect(gpt).toEqual({
+      model: 'gpt-4o',
+      chats: 1,
+      inputTokens: 500,
+      outputTokens: 80,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    });
+    // The title subagent ended at 1_200, before the cutoff — excluded.
+    expect(findByModel(rows, 'gpt-4o-mini')).toBeUndefined();
+  });
+
+  it('retention edge case — sinceMs older than oldest span returns all matching rows', () => {
+    // sinceMs = -1 is older than any seeded span. Equivalent to "no time floor".
+    const rows = reader.aggregateSince(-1, ['session-A', 'session-B']);
+    expect(rows).toHaveLength(4);
+  });
+
+  it('sums cache_creation from span_attributes across rows', () => {
+    const rows = reader.aggregateSince(0, ['session-A', 'session-B']);
+    const totalCacheCreation = rows.reduce(
+      (n, r) => n + r.cacheCreationTokens,
+      0,
+    );
+    // 100 (span-A1) + 0 (span-A2 missing) + 200 (span-B1) + 0 (title) + 0 (null-model) = 300
+    expect(totalCacheCreation).toBe(300);
+  });
+
+  it('excludes spans whose end_time equals sinceMs (strict boundary)', () => {
+    // span-A1 ends at 1_500 exactly; with sinceMs=1_500 it must NOT appear.
+    const rows = reader.aggregateSince(1_500, ['session-A']);
+    const gpt = findByModel(rows, 'gpt-4o');
+    // Only span-A2 (1500 tokens dropped, 500 remain) survives.
+    expect(gpt!.inputTokens).toBe(500);
   });
 });
 

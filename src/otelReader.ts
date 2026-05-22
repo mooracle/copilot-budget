@@ -29,6 +29,7 @@ import * as vscode from 'vscode';
 // high-water mark.
 const OPERATION_NAME_CHAT = 'chat';
 const ATTR_CACHE_CREATION = 'gen_ai.usage.cache_creation.input_tokens';
+const ATTR_PARENT_CHAT_SESSION_ID = 'copilot_chat.parent_chat_session_id';
 
 export interface SpanRow {
   sessionId: string;
@@ -41,9 +42,19 @@ export interface SpanRow {
   endTimeMs: number;
 }
 
+export interface PerModelAggregate {
+  model: string | null;
+  chats: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
 export interface OTelReader {
   isAvailable(): boolean;
   readSpansSince(sinceMs: number, sessionIds: string[] | null): SpanRow[];
+  aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[];
   getLatestTimestamp(): number;
   close(): void;
 }
@@ -175,6 +186,68 @@ class OTelReaderImpl implements OTelReader {
       cacheCreationTokens: toFiniteInt(r.cacheCreationTokens),
       startTimeMs: toFiniteInt(r.startTimeMs),
       endTimeMs: toFiniteInt(r.endTimeMs),
+    }));
+  }
+
+  aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[] {
+    if (sessionIds.length === 0) {
+      // Empty window — nothing to attribute. Return without touching the DB.
+      return [];
+    }
+    const db = this.ensureDb();
+    if (!db) {
+      return [];
+    }
+
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const sql =
+      'SELECT' +
+      ' s.request_model AS model,' +
+      ' COUNT(*) AS chats,' +
+      ' COALESCE(SUM(s.input_tokens), 0) AS inputTokens,' +
+      ' COALESCE(SUM(s.output_tokens), 0) AS outputTokens,' +
+      ' COALESCE(SUM(s.cached_tokens), 0) AS cacheReadTokens,' +
+      " COALESCE(SUM(CAST(cc.value AS INTEGER)), 0) AS cacheCreationTokens" +
+      ' FROM spans s' +
+      ' LEFT JOIN span_attributes cc' +
+      '  ON cc.span_id = s.span_id AND cc.key = ?' +
+      ' WHERE s.operation_name = ?' +
+      '   AND s.end_time_ms > ?' +
+      '   AND (' +
+      `        s.chat_session_id IN (${placeholders})` +
+      '     OR EXISTS (' +
+      '          SELECT 1 FROM span_attributes pa' +
+      '          WHERE pa.span_id = s.span_id' +
+      '            AND pa.key = ?' +
+      `            AND pa.value IN (${placeholders})` +
+      '        )' +
+      '      )' +
+      ' GROUP BY s.request_model';
+    const params: Array<string | number> = [
+      ATTR_CACHE_CREATION,
+      OPERATION_NAME_CHAT,
+      sinceMs,
+      ...sessionIds,
+      ATTR_PARENT_CHAT_SESSION_ID,
+      ...sessionIds,
+    ];
+
+    const rows = db.prepare(sql).all(...params) as Array<{
+      model: string | null;
+      chats: number | bigint | null;
+      inputTokens: number | bigint | null;
+      outputTokens: number | bigint | null;
+      cacheReadTokens: number | bigint | null;
+      cacheCreationTokens: number | bigint | null;
+    }>;
+
+    return rows.map((r) => ({
+      model: r.model,
+      chats: toFiniteInt(r.chats),
+      inputTokens: toFiniteInt(r.inputTokens),
+      outputTokens: toFiniteInt(r.outputTokens),
+      cacheReadTokens: toFiniteInt(r.cacheReadTokens),
+      cacheCreationTokens: toFiniteInt(r.cacheCreationTokens),
     }));
   }
 
