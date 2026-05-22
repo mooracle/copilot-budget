@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Tracker } from './tracker';
-import { createStatusBar } from './statusBar';
+import { createStatusBar, StatusBarHandle } from './statusBar';
 import { showBudgetPanel } from './budgetPanel';
 import {
   writeTrackingFile,
@@ -11,6 +11,8 @@ import { installHook, uninstallHook } from './commitHook';
 import {
   isEnabled,
   isCommitHookEnabled,
+  isOTelDbExporterEnabled,
+  autoEnableOTel,
   onConfigChanged,
 } from './config';
 import { discoverSessionIds, getDiscoveryDiagnostics } from './sessionDiscovery';
@@ -18,8 +20,7 @@ import { createOTelReader } from './otelReader';
 import { getOutputChannel, disposeLogger, log } from './logger';
 
 let tracker: Tracker | null = null;
-let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
-  null;
+let statusBar: StatusBarHandle | null = null;
 let consumeInFlight: Promise<boolean> | null = null;
 
 // Detect commit-hook truncation and rebase the tracker so the next commit
@@ -172,6 +173,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
+  // Auto-enable the upstream OTel exporter on first run per-workspace. This is
+  // a strictly-asymmetric write: only flips unset → true, never overwrites an
+  // explicit user choice. Failures are logged inside the helper and never
+  // throw, so a transient settings-write error cannot block activation.
+  await autoEnableOTel();
+
   const sessionIdsFn = () => discoverSessionIds(context.storageUri);
   const reader = createOTelReader(context.globalStorageUri);
   tracker = new Tracker(reader, sessionIdsFn);
@@ -204,6 +211,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   statusBar = createStatusBar(tracker);
   context.subscriptions.push({ dispose: () => statusBar?.dispose() });
+
+  // Status-bar nudge: when the upstream OTel setting is on but `agent-traces.db`
+  // hasn't appeared yet (typical right after auto-enable, before reload), show
+  // a clickable "reload to start tracking" status bar item until the DB shows
+  // up. Re-check on each stats event; clear the nudge exactly once when the
+  // DB becomes available so we don't redundantly call setNudge(false) forever.
+  let nudgeCleared = false;
+  if (isOTelDbExporterEnabled() && !reader.isAvailable()) {
+    statusBar.setNudge(true);
+  } else {
+    nudgeCleared = true;
+  }
+  const nudgeSub = tracker.onStatsChanged(() => {
+    if (nudgeCleared) return;
+    if (reader.isAvailable()) {
+      statusBar?.setNudge(false);
+      nudgeCleared = true;
+    }
+  });
+  context.subscriptions.push(nudgeSub);
 
   // Write tracking file whenever stats change. Check for hook truncation
   // first: if the hook just consumed accumulated trailers, the tracker must

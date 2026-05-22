@@ -203,16 +203,16 @@ No passive footer — that would duplicate the status-bar nudge from Task 7. Whe
 - Modify: `src/extension.ts`
 - Modify: `src/extension.test.ts`
 
-- [ ] in `activate(context)`, after `storageUri` check but before `Tracker` construction, `await autoEnableOTel()` from `./config`
-- [ ] delete `pickSource(context, sessionIdsFn)`; replace with direct `const reader = createOTelReader(context.globalStorageUri); const tracker = new Tracker(reader, () => discoverSessionIds(context.storageUri));`
-- [ ] delete the `onDidChangeConfiguration` handler for the upstream OTel setting (no more mode-swap); keep only the handlers that actually do work (e.g. currency change)
-- [ ] delete the `MODE_SWAP_SHOWN_KEY` constant at `extension.ts:28` and **all** `context.workspaceState.get(...)` / `context.workspaceState.update(...)` calls referencing it (extension.ts:423–432 region); leftover state on disk for existing users is fine (VS Code workspaceState is a key/value store with no schema enforcement)
-- [ ] delete the "Switched to Telemetry mode …" `showInformationMessage` call
-- [ ] **delete the periodic `modeRefresh` `setInterval` at `extension.ts:454–459`** (its only purpose was Files→Telemetry recovery polling — obsolete with OTel-only)
-- [ ] verify any `tracker.mode` reads inside `extension.ts` (lines 412/418/421/455 region) are removed wholesale as part of the surrounding block deletions; no dangling `tracker.mode` reference may remain
-- [ ] add nudge logic: after tracker construction, if `isOTelDbExporterEnabled() === true` AND `!reader.isAvailable()`, call `statusBar.setNudge(true)`; in the tracker's `onStatsChanged` handler (or a small wrapper poll), if `reader.isAvailable()` flips true, call `statusBar.setNudge(false)` once
-- [ ] update tests in `src/extension.test.ts`: `autoEnableOTel` called on activation; nudge appears when DB missing; nudge clears when DB becomes available; no mode-swap on config change; `MODE_SWAP_SHOWN_KEY` is no longer read/written; no `modeRefresh` interval is registered
-- [ ] run `npm test -- extension` — must pass before Task 10
+- [x] in `activate(context)`, after `storageUri` check but before `Tracker` construction, `await autoEnableOTel()` from `./config`
+- [x] delete `pickSource(context, sessionIdsFn)`; replace with direct `const reader = createOTelReader(context.globalStorageUri); const tracker = new Tracker(reader, () => discoverSessionIds(context.storageUri));` (already removed in Task 5 cleanup)
+- [x] delete the `onDidChangeConfiguration` handler for the upstream OTel setting (no more mode-swap); keep only the handlers that actually do work (e.g. currency change) (already removed in Task 5 cleanup)
+- [x] delete the `MODE_SWAP_SHOWN_KEY` constant at `extension.ts:28` and **all** `context.workspaceState.get(...)` / `context.workspaceState.update(...)` calls referencing it (extension.ts:423–432 region); leftover state on disk for existing users is fine (VS Code workspaceState is a key/value store with no schema enforcement) (already removed in Task 5 cleanup)
+- [x] delete the "Switched to Telemetry mode …" `showInformationMessage` call (already removed in Task 5 cleanup)
+- [x] **delete the periodic `modeRefresh` `setInterval` at `extension.ts:454–459`** (its only purpose was Files→Telemetry recovery polling — obsolete with OTel-only) (already removed in Task 5 cleanup)
+- [x] verify any `tracker.mode` reads inside `extension.ts` (lines 412/418/421/455 region) are removed wholesale as part of the surrounding block deletions; no dangling `tracker.mode` reference may remain
+- [x] add nudge logic: after tracker construction, if `isOTelDbExporterEnabled() === true` AND `!reader.isAvailable()`, call `statusBar.setNudge(true)`; in the tracker's `onStatsChanged` handler (or a small wrapper poll), if `reader.isAvailable()` flips true, call `statusBar.setNudge(false)` once
+- [x] update tests in `src/extension.test.ts`: `autoEnableOTel` called on activation; nudge appears when DB missing; nudge clears when DB becomes available; no mode-swap on config change; `MODE_SWAP_SHOWN_KEY` is no longer read/written; no `modeRefresh` interval is registered
+- [x] run `npm test -- extension` — must pass before Task 10
 
 ### Task 10: Drop `mode` field from TrackingStats and amountFormatter end-to-end
 
