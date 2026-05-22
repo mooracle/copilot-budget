@@ -50,7 +50,6 @@ function makeMockReader(opts: {
   const aggregates = opts.aggregates ?? [];
   return {
     isAvailable: jest.fn(() => opts.isAvailable ?? true),
-    readSpansSince: jest.fn((_sinceMs: number, _sessionIds: string[] | null) => []),
     aggregateSince: jest.fn((_sinceMs: number, _sessionIds: string[]) => {
       if (aggregates.length === 0) return [];
       if (idx < aggregates.length) {

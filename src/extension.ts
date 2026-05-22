@@ -1,6 +1,5 @@
-import * as path from 'path';
 import * as vscode from 'vscode';
-import { Tracker, JsonlSource, OTelSource, Source } from './tracker';
+import { Tracker } from './tracker';
 import { createStatusBar } from './statusBar';
 import { showBudgetPanel } from './budgetPanel';
 import {
@@ -13,65 +12,10 @@ import {
   isEnabled,
   isCommitHookEnabled,
   onConfigChanged,
-  getEstimationMode,
-  isOTelDbExporterEnabled,
-  onDidChangeOTelSetting,
 } from './config';
-import { discoverSessionFiles, getDiscoveryDiagnostics } from './sessionDiscovery';
-import {
-  createOTelReader,
-  diagnoseUnavailable,
-  OTelReader,
-} from './otelReader';
+import { discoverSessionIds, getDiscoveryDiagnostics } from './sessionDiscovery';
+import { createOTelReader } from './otelReader';
 import { getOutputChannel, disposeLogger, log } from './logger';
-
-const MODE_SWAP_SHOWN_KEY = 'copilot-budget.modeSwapMessageShown';
-
-function resolveCurrentSessionIds(storageUri: vscode.Uri | undefined): string[] {
-  return discoverSessionFiles(storageUri).map((p) =>
-    path.basename(p).replace(/\.jsonl$/i, ''),
-  );
-}
-
-interface PickedSource {
-  source: Source;
-  mode: 'files' | 'telemetry';
-}
-
-function pickSource(
-  context: vscode.ExtensionContext,
-  sessionIdsFn: () => string[],
-): PickedSource {
-  // Re-create the reader each pick so the previous source (and its reader, if
-  // any) can be cleanly disposed before we evaluate availability again. The
-  // file-existence check inside `getEstimationMode` is cheap.
-  const reader: OTelReader = createOTelReader(context.globalStorageUri);
-  const upstreamEnabled = isOTelDbExporterEnabled();
-  const mode = getEstimationMode(reader, upstreamEnabled);
-  if (mode === 'telemetry') {
-    try {
-      // `new OTelSource` calls `reader.getLatestTimestamp()` which opens the
-      // SQLite DB. A corrupted or partially-written DB throws here. Without
-      // this guard, activation (and the hot-swap listener) would die outright
-      // and the reader handle would leak. Close it and fall back to Files mode
-      // so the extension stays usable.
-      return { source: new OTelSource(reader, sessionIdsFn), mode: 'telemetry' };
-    } catch (err) {
-      log(`Failed to open OTel DB, falling back to Files mode: ${String(err)}`);
-      reader.close();
-      return { source: new JsonlSource(context.storageUri), mode: 'files' };
-    }
-  }
-  // Files mode — log the remote-host mismatch diagnostic if relevant, then
-  // release the reader handle (we don't need it).
-  const diag = diagnoseUnavailable(context.globalStorageUri, upstreamEnabled);
-  if (diag) log(diag);
-  reader.close();
-  return {
-    source: new JsonlSource(context.storageUri),
-    mode: 'files',
-  };
-}
 
 let tracker: Tracker | null = null;
 let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
@@ -154,18 +98,19 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
       ch.appendLine(`Home directory: ${diag.homedir}`);
       ch.appendLine('');
       ch.appendLine(`Storage URI: ${diag.storageUri ?? '(none — empty window)'}`);
-      ch.appendLine(`Chat sessions dir: ${diag.chatSessionsDir ?? '(none — empty window)'}`);
+      ch.appendLine(`Transcripts dir: ${diag.transcriptsDir ?? '(none — empty window)'}`);
+      ch.appendLine(`Legacy chatSessions dir: ${diag.legacyChatSessionsDir ?? '(none — empty window)'}`);
       ch.appendLine('');
-      ch.appendLine(`Session files found: ${diag.filesFound.length}`);
+      ch.appendLine(`Session IDs found: ${diag.filesFound.length}`);
       for (const f of diag.filesFound) {
         ch.appendLine(`  ${f}`);
       }
 
       if (tracker) {
-        // Force a fresh scan so the per-file breakdown reflects what's on
-        // disk right now, not whatever was cached up to ~30s ago. A scan
-        // failure (e.g., transient OTel DB error) shouldn't break the
-        // diagnostics output — fall back to the last cached stats.
+        // Force a fresh scan so the breakdown reflects what's on disk right
+        // now, not whatever was cached up to ~30s ago. A scan failure (e.g.,
+        // transient OTel DB error) shouldn't break the diagnostics output —
+        // fall back to the last cached stats.
         try {
           await tracker.update();
         } catch (err) {
@@ -179,36 +124,6 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
         ch.appendLine(`  AI Credits: ${stats.totalAiCredits.toFixed(2)}`);
         ch.appendLine(`  Since: ${stats.since}`);
         ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
-
-        const perFile = tracker.getFileDiagnostics();
-        ch.appendLine('');
-        ch.appendLine(`Per-file breakdown (${perFile.length} file(s)):`);
-        for (const f of perFile) {
-          ch.appendLine(`  ${f.path}`);
-          ch.appendLine(`    mtime: ${new Date(f.mtime).toISOString()}`);
-          ch.appendLine(
-            `    in baseline: ${f.inBaseline ? 'yes (pre-session content folded into baseline)' : 'no (entire file counts toward session delta)'}`,
-          );
-          ch.appendLine(`    interactions: ${f.interactions}`);
-          const models = Object.entries(f.modelUsage);
-          if (models.length === 0) {
-            ch.appendLine('    models: (none)');
-          } else {
-            for (const [model, tokens] of models) {
-              const total =
-                tokens.inputTokens +
-                tokens.outputTokens +
-                tokens.cacheReadTokens +
-                tokens.cacheCreationTokens;
-              const turns = f.modelInteractions[model] ?? 0;
-              ch.appendLine(
-                `    ${model}: ${total} tokens across ${turns} turn(s) ` +
-                  `(in=${tokens.inputTokens}, out=${tokens.outputTokens}, ` +
-                  `cr=${tokens.cacheReadTokens}, cc=${tokens.cacheCreationTokens})`,
-              );
-            }
-          }
-        }
       }
 
       ch.show();
@@ -257,10 +172,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
-  const sessionIdsFn = () => resolveCurrentSessionIds(context.storageUri);
-  const picked = pickSource(context, sessionIdsFn);
-  tracker = new Tracker(picked.source, picked.mode);
-  log(`Estimation mode at activation: ${picked.mode}`);
+  const sessionIdsFn = () => discoverSessionIds(context.storageUri);
+  const reader = createOTelReader(context.globalStorageUri);
+  tracker = new Tracker(reader, sessionIdsFn);
 
   // Restore stats from previous session (if tracking file exists)
   const trackingFile = await readTrackingFile();
@@ -388,75 +302,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(configSub);
 
-  // Re-pick the source and swap if the effective mode changed. Used both by
-  // the upstream-setting change listener and the periodic re-eval poll
-  // (DB-materializes-later recovery). We re-evaluate `getEstimationMode`
-  // (which checks the upstream setting AND file presence) rather than
-  // blindly trusting the change event — the setting can be true while the
-  // DB is missing on remote-host setups, in which case we stay in Files mode
-  // and log the diagnostic.
-  //
-  // Serialized via swapChain: concurrent triggers (rapid setting flips, or
-  // the 30s auto-upgrade poll overlapping a manual toggle) would otherwise
-  // start parallel swapSource calls — the slower one finishing last would
-  // overwrite `tracker.mode`/`tracker.source` back to a stale value, and the
-  // auto-poll's `mode === 'files'` guard would prevent recovery. Each chained
-  // step re-evaluates pickSource against the latest settings, so a swap
-  // intent that's no longer correct silently no-ops.
-  let swapChain: Promise<void> = Promise.resolve();
-  const maybeSwapMode = () => {
-    if (!tracker) return;
-    swapChain = swapChain.then(async () => {
-      if (!tracker) return;
-      const next = pickSource(context, sessionIdsFn);
-      if (next.mode === tracker.mode) {
-        // No effective mode change — release the freshly created reader/source
-        // without disturbing the running tracker.
-        next.source.dispose();
-        return;
-      }
-      const prevMode = tracker.mode;
-      try {
-        await tracker.swapSource(next.source, next.mode);
-        log(`Estimation mode swapped: ${prevMode} → ${next.mode}`);
-        if (prevMode === 'files' && next.mode === 'telemetry') {
-          const shown = context.workspaceState.get<boolean>(
-            MODE_SWAP_SHOWN_KEY,
-            false,
-          );
-          if (!shown) {
-            await context.workspaceState.update(MODE_SWAP_SHOWN_KEY, true);
-            vscode.window.showInformationMessage(
-              'Switched to Telemetry mode — historical totals stay as-is; new activity uses measured tokens.',
-            );
-          }
-        }
-      } catch (err) {
-        log(`swapSource failed: ${String(err)}`);
-      }
-    });
-  };
-
-  const otelSub = onDidChangeOTelSetting(maybeSwapMode);
-  context.subscriptions.push(otelSub);
-
-  // Periodic re-eval to recover from the "DB materializes after activation"
-  // case: upstream setting is on, but `agent-traces.db` didn't exist yet at
-  // activation (or wasn't visible from this window). Without this poll, the
-  // tracker would stay in Files mode for the rest of the session — even
-  // after the user used Copilot Chat and the DB appeared — because no config
-  // event would fire to trigger the existing swap path.
-  //
-  // Only check when we'd actually transition Files → Telemetry: if we're
-  // already in Telemetry, there's nothing to upgrade; if the upstream
-  // setting is off, the asymmetric invariant means we shouldn't auto-swap
-  // anyway.
-  const modeRefresh = setInterval(() => {
-    if (!tracker || tracker.mode === 'telemetry') return;
-    if (!isOTelDbExporterEnabled()) return;
-    maybeSwapMode();
-  }, 30_000);
-  context.subscriptions.push({ dispose: () => clearInterval(modeRefresh) });
 }
 
 export async function deactivate(): Promise<void> {

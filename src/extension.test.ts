@@ -11,7 +11,7 @@ jest.mock('./otelReader');
 import * as vscode from 'vscode';
 import { __commandCallbacks, __workspaceUpdate, createMockExtensionContext } from './__mocks__/vscode';
 import { activate, deactivate } from './extension';
-import { Tracker, JsonlSource, OTelSource } from './tracker';
+import { Tracker } from './tracker';
 import { createStatusBar } from './statusBar';
 import { showBudgetPanel } from './budgetPanel';
 import {
@@ -24,12 +24,9 @@ import {
   isEnabled,
   isCommitHookEnabled,
   onConfigChanged,
-  getEstimationMode,
-  isOTelDbExporterEnabled,
-  onDidChangeOTelSetting,
 } from './config';
-import { getDiscoveryDiagnostics, discoverSessionFiles } from './sessionDiscovery';
-import { createOTelReader, diagnoseUnavailable } from './otelReader';
+import { getDiscoveryDiagnostics, discoverSessionIds } from './sessionDiscovery';
+import { createOTelReader } from './otelReader';
 import { getOutputChannel, disposeLogger } from './logger';
 
 const MockTracker = Tracker as jest.MockedClass<typeof Tracker>;
@@ -62,26 +59,14 @@ const mockIsCommitHookEnabled = isCommitHookEnabled as jest.MockedFunction<
 const mockOnConfigChanged = onConfigChanged as jest.MockedFunction<
   typeof onConfigChanged
 >;
-const mockGetEstimationMode = getEstimationMode as jest.MockedFunction<
-  typeof getEstimationMode
->;
-const mockIsOTelDbExporterEnabled = isOTelDbExporterEnabled as jest.MockedFunction<
-  typeof isOTelDbExporterEnabled
->;
-const mockOnDidChangeOTelSetting = onDidChangeOTelSetting as jest.MockedFunction<
-  typeof onDidChangeOTelSetting
->;
 const mockGetDiscoveryDiagnostics = getDiscoveryDiagnostics as jest.MockedFunction<
   typeof getDiscoveryDiagnostics
 >;
-const mockDiscoverSessionFiles = discoverSessionFiles as jest.MockedFunction<
-  typeof discoverSessionFiles
+const mockDiscoverSessionIds = discoverSessionIds as jest.MockedFunction<
+  typeof discoverSessionIds
 >;
 const mockCreateOTelReader = createOTelReader as jest.MockedFunction<
   typeof createOTelReader
->;
-const mockDiagnoseUnavailable = diagnoseUnavailable as jest.MockedFunction<
-  typeof diagnoseUnavailable
 >;
 const mockGetOutputChannel = getOutputChannel as jest.MockedFunction<
   typeof getOutputChannel
@@ -105,7 +90,6 @@ function makeEmptyWindowContext(): vscode.ExtensionContext {
 let trackerInstance: any;
 let statsChangedListeners: Array<(stats: any) => void>;
 let configChangedCallback: ((e: any) => void) | null;
-let otelSettingChangedCallback: (() => void) | null;
 let mockOTelReader: any;
 
 const SAMPLE_STATS = {
@@ -123,7 +107,7 @@ const SAMPLE_STATS = {
   totalTokens: 300,
   interactions: 5,
   totalAiCredits: 1.0,
-  mode: 'files' as const,
+  mode: 'telemetry' as const,
 };
 
 beforeEach(async () => {
@@ -133,7 +117,6 @@ beforeEach(async () => {
 
   statsChangedListeners = [];
   configChangedCallback = null;
-  otelSettingChangedCallback = null;
 
   trackerInstance = {
     start: jest.fn().mockResolvedValue(undefined),
@@ -143,10 +126,7 @@ beforeEach(async () => {
     update: jest.fn().mockResolvedValue(undefined),
     dispose: jest.fn(),
     setPreviousStats: jest.fn(),
-    swapSource: jest.fn().mockResolvedValue(undefined),
     getStats: jest.fn().mockReturnValue(SAMPLE_STATS),
-    getFileDiagnostics: jest.fn().mockReturnValue([]),
-    mode: 'files' as 'files' | 'telemetry',
     onStatsChanged: jest.fn((listener: any) => {
       statsChangedListeners.push(listener);
       return {
@@ -179,28 +159,21 @@ beforeEach(async () => {
     configChangedCallback = cb;
     return { dispose: jest.fn() };
   });
-  mockOnDidChangeOTelSetting.mockImplementation((cb: any) => {
-    otelSettingChangedCallback = cb;
-    return { dispose: jest.fn() };
-  });
-  // Default to Files mode (upstream off, no DB). Individual tests flip these.
-  mockGetEstimationMode.mockReturnValue('files');
-  mockIsOTelDbExporterEnabled.mockReturnValue(false);
-  mockDiagnoseUnavailable.mockReturnValue(null);
   mockOTelReader = {
     isAvailable: jest.fn(() => false),
-    readSpansSince: jest.fn(() => []),
+    aggregateSince: jest.fn(() => []),
     getLatestTimestamp: jest.fn(() => 0),
     close: jest.fn(),
   };
   mockCreateOTelReader.mockReturnValue(mockOTelReader);
-  mockDiscoverSessionFiles.mockReturnValue([]);
+  mockDiscoverSessionIds.mockReturnValue([]);
   mockGetDiscoveryDiagnostics.mockReturnValue({
     platform: 'darwin',
     homedir: '/home/test',
     storageUri: '/home/test/.config/Code/User/workspaceStorage/abc123/mooracle.copilot-budget',
-    chatSessionsDir: '/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions',
-    filesFound: ['/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions/test.jsonl'],
+    transcriptsDir: '/home/test/.config/Code/User/workspaceStorage/abc123/GitHub.copilot-chat/transcripts',
+    legacyChatSessionsDir: '/home/test/.config/Code/User/workspaceStorage/abc123/chatSessions',
+    filesFound: ['session-id-1'],
   });
   mockGetOutputChannel.mockReturnValue({
     appendLine: jest.fn(),
@@ -228,15 +201,8 @@ beforeEach(async () => {
     configChangedCallback = cb;
     return { dispose: jest.fn() };
   });
-  mockOnDidChangeOTelSetting.mockImplementation((cb: any) => {
-    otelSettingChangedCallback = cb;
-    return { dispose: jest.fn() };
-  });
-  mockGetEstimationMode.mockReturnValue('files');
-  mockIsOTelDbExporterEnabled.mockReturnValue(false);
-  mockDiagnoseUnavailable.mockReturnValue(null);
   mockCreateOTelReader.mockReturnValue(mockOTelReader);
-  mockDiscoverSessionFiles.mockReturnValue([]);
+  mockDiscoverSessionIds.mockReturnValue([]);
   mockWriteTrackingFile.mockResolvedValue(true);
   mockReadTrackingFile.mockResolvedValue({ kind: 'absent' });
   mockIsTrackingFileTruncated.mockResolvedValue(false);
@@ -611,226 +577,18 @@ describe('extension', () => {
       expect(readOrder).toBeLessThan(startOrder);
     });
 
-    it('passes context.storageUri via JsonlSource to the Tracker constructor', async () => {
+    it('constructs Tracker with the OTel reader and session-ids resolver', async () => {
       const ctx = makeContext();
       await activate(ctx);
-      const MockJsonlSource = JsonlSource as jest.MockedClass<typeof JsonlSource>;
-      expect(MockJsonlSource).toHaveBeenCalledWith(ctx.storageUri);
-      // Tracker receives the JsonlSource instance + the initial 'files' mode.
-      // Auto-mocked instance identity comes from JsonlSource.mock.instances[0].
-      expect(MockTracker).toHaveBeenCalledWith(
-        MockJsonlSource.mock.instances[0],
-        'files',
-      );
-    });
-
-    it('constructs Tracker with OTelSource when getEstimationMode returns "telemetry"', async () => {
-      mockGetEstimationMode.mockReturnValue('telemetry');
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-
-      const ctx = makeContext();
-      await activate(ctx);
-
-      const MockOTelSource = OTelSource as jest.MockedClass<typeof OTelSource>;
-      expect(MockOTelSource).toHaveBeenCalled();
-      expect(MockTracker).toHaveBeenCalledWith(
-        MockOTelSource.mock.instances[0],
-        'telemetry',
-      );
-    });
-
-    it('logs the remote-host diagnostic and closes the reader when DB missing but upstream enabled', async () => {
-      mockGetEstimationMode.mockReturnValue('files');
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      mockDiagnoseUnavailable.mockReturnValue(
-        'OTel exporter enabled upstream but agent-traces.db not found at /tmp/x — possible remote-host mismatch',
-      );
-
-      const ctx = makeContext();
-      await activate(ctx);
-
-      expect(mockDiagnoseUnavailable).toHaveBeenCalledWith(
-        ctx.globalStorageUri,
-        true,
-      );
-      // The reader created during pickSource is closed when we fall back to
-      // Files mode — we don't hold onto a handle we won't use.
-      expect(mockOTelReader.close).toHaveBeenCalled();
-    });
-
-    it('registers an onDidChangeOTelSetting listener', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      expect(mockOnDidChangeOTelSetting).toHaveBeenCalledTimes(1);
-      expect(otelSettingChangedCallback).not.toBeNull();
+      expect(mockCreateOTelReader).toHaveBeenCalledWith(ctx.globalStorageUri);
+      // Tracker receives the reader + a session-ids function.
+      const [readerArg, sessionIdsFn] = MockTracker.mock.calls[0];
+      expect(readerArg).toBe(mockOTelReader);
+      expect(typeof sessionIdsFn).toBe('function');
     });
   });
 
-  describe('OTel hot-swap on config change', () => {
-    it('swaps Tracker to telemetry source when upstream setting enables OTel', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-      // Initial mode = files.
-      const MockOTelSource = OTelSource as jest.MockedClass<typeof OTelSource>;
-      MockOTelSource.mockClear();
-
-      // Simulate upstream enabling OTel: getEstimationMode now returns telemetry.
-      mockGetEstimationMode.mockReturnValue('telemetry');
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      trackerInstance.mode = 'files';
-
-      otelSettingChangedCallback!();
-      // swapSource is awaited internally; flush microtasks so we can assert.
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(MockOTelSource).toHaveBeenCalledTimes(1);
-      expect(trackerInstance.swapSource).toHaveBeenCalledWith(
-        MockOTelSource.mock.instances[0],
-        'telemetry',
-      );
-    });
-
-    it('does not call swapSource when the effective mode is unchanged', async () => {
-      const ctx = makeContext();
-      await activate(ctx);
-
-      // OTel setting changed (e.g., user toggled DB on then off rapidly) but
-      // effective mode resolves to the same value — no swap should occur.
-      mockGetEstimationMode.mockReturnValue('files');
-      trackerInstance.mode = 'files';
-
-      otelSettingChangedCallback!();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(trackerInstance.swapSource).not.toHaveBeenCalled();
-    });
-
-    it('shows the one-time mode-swap info message on first Files→Telemetry swap', async () => {
-      const ctx = makeContext();
-      const wsUpdate = ctx.workspaceState.update as jest.Mock;
-      (ctx.workspaceState.get as any) = jest.fn().mockReturnValue(false);
-      (ctx.workspaceState.update as any) = jest.fn().mockResolvedValue(undefined);
-
-      await activate(ctx);
-
-      mockGetEstimationMode.mockReturnValue('telemetry');
-      trackerInstance.mode = 'files';
-      // swapSource resolves successfully — trigger the then-handler.
-      trackerInstance.swapSource.mockImplementation(async () => {
-        trackerInstance.mode = 'telemetry';
-      });
-
-      otelSettingChangedCallback!();
-      // Drain the chained promises inside the hot-swap handler.
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(ctx.workspaceState.update).toHaveBeenCalledWith(
-        'copilot-budget.modeSwapMessageShown',
-        true,
-      );
-      const showInfo = vscode.window.showInformationMessage as jest.Mock;
-      expect(showInfo).toHaveBeenCalledWith(
-        expect.stringMatching(/Switched to Telemetry mode/i),
-      );
-      // Sanity: the flag default-overwrite via fresh assignment didn't lose wsUpdate type
-      void wsUpdate;
-    });
-
-    it('does NOT show the swap message a second time once workspaceState flag is set', async () => {
-      const ctx = makeContext();
-      (ctx.workspaceState.get as any) = jest.fn().mockReturnValue(true);
-      (ctx.workspaceState.update as any) = jest.fn().mockResolvedValue(undefined);
-
-      await activate(ctx);
-
-      mockGetEstimationMode.mockReturnValue('telemetry');
-      trackerInstance.mode = 'files';
-      trackerInstance.swapSource.mockImplementation(async () => {
-        trackerInstance.mode = 'telemetry';
-      });
-
-      otelSettingChangedCallback!();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      const showInfo = vscode.window.showInformationMessage as jest.Mock;
-      expect(showInfo).not.toHaveBeenCalledWith(
-        expect.stringMatching(/Switched to Telemetry mode/i),
-      );
-      expect(ctx.workspaceState.update).not.toHaveBeenCalled();
-    });
-
-    it('serializes overlapping swap triggers and re-evaluates mode after each completes', async () => {
-      // Race scenario: a Files→Telemetry swap is mid-flight when the user
-      // disables OTel upstream. Without serialization, the disable event sees
-      // tracker.mode === 'files' (not yet updated), getEstimationMode returns
-      // 'files', so the disable is a no-op. The in-flight enable then
-      // completes, locking us into Telemetry mode. The auto-poll only runs
-      // while mode === 'files', so there's no recovery path.
-      //
-      // With serialization, the disable trigger queues behind the in-flight
-      // enable. When it runs, it re-picks pickSource against the now-current
-      // upstream=off state and correctly swaps back to Files.
-      const ctx = makeContext();
-      // Pre-set the one-time mode-swap flag so the showInformationMessage
-      // path is skipped — it adds awaits that obscure the chain timing.
-      (ctx.workspaceState.get as any) = jest.fn().mockReturnValue(true);
-      await activate(ctx);
-
-      let resolveFirstSwap: () => void = () => {};
-      const swapCalls: Array<'telemetry' | 'files'> = [];
-      trackerInstance.swapSource.mockImplementation(
-        async (_src: any, mode: 'files' | 'telemetry') => {
-          swapCalls.push(mode);
-          if (swapCalls.length === 1) {
-            await new Promise<void>((resolve) => {
-              resolveFirstSwap = resolve;
-            });
-          }
-          trackerInstance.mode = mode;
-        },
-      );
-
-      // First trigger: user enables OTel.
-      mockGetEstimationMode.mockReturnValue('telemetry');
-      mockIsOTelDbExporterEnabled.mockReturnValue(true);
-      otelSettingChangedCallback!();
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(trackerInstance.swapSource).toHaveBeenCalledTimes(1);
-      expect(swapCalls[0]).toBe('telemetry');
-
-      // Second trigger arrives while the first is still in flight: user
-      // disables OTel. tracker.mode is still 'files' at this instant.
-      mockGetEstimationMode.mockReturnValue('files');
-      mockIsOTelDbExporterEnabled.mockReturnValue(false);
-      otelSettingChangedCallback!();
-      await Promise.resolve();
-      await Promise.resolve();
-      // No second swapSource call yet — it's queued behind the in-flight one.
-      expect(trackerInstance.swapSource).toHaveBeenCalledTimes(1);
-
-      // Let the first swap complete. Tracker mode is now 'telemetry'.
-      resolveFirstSwap();
-      // Flush enough microtasks for the chained handler to run pickSource,
-      // dispatch the second swap, and have it resolve.
-      for (let i = 0; i < 10; i++) await Promise.resolve();
-
-      // The queued trigger re-evaluates pickSource. getEstimationMode now
-      // returns 'files', tracker.mode is 'telemetry' — they differ, so a
-      // second swap fires to restore Files mode.
-      expect(trackerInstance.swapSource).toHaveBeenCalledTimes(2);
-      expect(swapCalls).toEqual(['telemetry', 'files']);
-      expect(trackerInstance.mode).toBe('files');
-    });
-
+  describe('truncation re-probe', () => {
     it('re-probes truncation per caller instead of memoizing a stale negative', async () => {
       // Race scenario: caller A starts checkCommitReset and its
       // isTrackingFileTruncated probe runs against the pre-truncation file
@@ -970,7 +728,8 @@ describe('extension', () => {
         platform: 'darwin',
         homedir: '/home/test',
         storageUri: null,
-        chatSessionsDir: null,
+        transcriptsDir: null,
+        legacyChatSessionsDir: null,
         filesFound: [],
       });
 
@@ -985,7 +744,8 @@ describe('extension', () => {
         (c: any[]) => c[0],
       );
       expect(appendCalls).toContain('Storage URI: (none — empty window)');
-      expect(appendCalls).toContain('Chat sessions dir: (none — empty window)');
+      expect(appendCalls).toContain('Transcripts dir: (none — empty window)');
+      expect(appendCalls).toContain('Legacy chatSessions dir: (none — empty window)');
       expect(mockChannel.show).toHaveBeenCalled();
     });
 

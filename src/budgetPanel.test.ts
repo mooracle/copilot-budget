@@ -7,7 +7,6 @@ import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
-jest.mock('./sessionParser');
 jest.mock('./config', () => ({
   getDisplayCurrency: jest.fn().mockReturnValue('aic'),
   isOTelDbExporterEnabled: jest.fn().mockReturnValue(false),
@@ -307,7 +306,7 @@ describe('budgetPanel', () => {
         'github.copilot.chat.otel',
         'dbSpanExporter.enabled',
         true,
-        vscode.ConfigurationTarget.Global,
+        vscode.ConfigurationTarget.Workspace,
       );
     });
 

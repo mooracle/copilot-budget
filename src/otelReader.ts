@@ -31,17 +31,6 @@ const OPERATION_NAME_CHAT = 'chat';
 const ATTR_CACHE_CREATION = 'gen_ai.usage.cache_creation.input_tokens';
 const ATTR_PARENT_CHAT_SESSION_ID = 'copilot_chat.parent_chat_session_id';
 
-export interface SpanRow {
-  sessionId: string;
-  model: string | null;
-  inputTokens: number;
-  outputTokens: number;
-  cachedTokens: number;
-  cacheCreationTokens: number;
-  startTimeMs: number;
-  endTimeMs: number;
-}
-
 export interface PerModelAggregate {
   model: string | null;
   chats: number;
@@ -53,7 +42,6 @@ export interface PerModelAggregate {
 
 export interface OTelReader {
   isAvailable(): boolean;
-  readSpansSince(sinceMs: number, sessionIds: string[] | null): SpanRow[];
   aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[];
   getLatestTimestamp(): number;
   close(): void;
@@ -124,69 +112,6 @@ class OTelReaderImpl implements OTelReader {
     }
     this.db = db;
     return this.db;
-  }
-
-  readSpansSince(sinceMs: number, sessionIds: string[] | null): SpanRow[] {
-    if (sessionIds !== null && sessionIds.length === 0) {
-      // Caller asked for a specific empty set — return no rows without touching
-      // the DB. (Distinct from `null`, which means "no session filter".)
-      return [];
-    }
-    const db = this.ensureDb();
-    if (!db) {
-      return [];
-    }
-
-    let sql =
-      'SELECT' +
-      ' s.chat_session_id AS sessionId,' +
-      ' s.request_model AS model,' +
-      ' COALESCE(s.input_tokens, 0) AS inputTokens,' +
-      ' COALESCE(s.output_tokens, 0) AS outputTokens,' +
-      ' COALESCE(s.cached_tokens, 0) AS cachedTokens,' +
-      " CAST(COALESCE(a.value, '0') AS INTEGER) AS cacheCreationTokens," +
-      ' s.start_time_ms AS startTimeMs,' +
-      ' s.end_time_ms AS endTimeMs' +
-      ' FROM spans s' +
-      ' LEFT JOIN span_attributes a' +
-      ' ON a.span_id = s.span_id AND a.key = ?' +
-      ' WHERE s.operation_name = ?' +
-      ' AND s.end_time_ms > ?';
-    const params: Array<string | number> = [
-      ATTR_CACHE_CREATION,
-      OPERATION_NAME_CHAT,
-      sinceMs,
-    ];
-
-    if (sessionIds !== null) {
-      const placeholders = sessionIds.map(() => '?').join(',');
-      sql += ` AND s.chat_session_id IN (${placeholders})`;
-      params.push(...sessionIds);
-    }
-
-    sql += ' ORDER BY s.end_time_ms';
-
-    const rows = db.prepare(sql).all(...params) as Array<{
-      sessionId: string | null;
-      model: string | null;
-      inputTokens: number | bigint | null;
-      outputTokens: number | bigint | null;
-      cachedTokens: number | bigint | null;
-      cacheCreationTokens: number | bigint | null;
-      startTimeMs: number | bigint | null;
-      endTimeMs: number | bigint | null;
-    }>;
-
-    return rows.map((r) => ({
-      sessionId: r.sessionId ?? '',
-      model: r.model,
-      inputTokens: toFiniteInt(r.inputTokens),
-      outputTokens: toFiniteInt(r.outputTokens),
-      cachedTokens: toFiniteInt(r.cachedTokens),
-      cacheCreationTokens: toFiniteInt(r.cacheCreationTokens),
-      startTimeMs: toFiniteInt(r.startTimeMs),
-      endTimeMs: toFiniteInt(r.endTimeMs),
-    }));
   }
 
   aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[] {
@@ -288,7 +213,7 @@ function toFiniteInt(value: number | bigint | null | undefined): number {
 /**
  * Construct an OTelReader rooted at the upstream agent-traces.db that lives
  * next to our extension's globalStorage folder. The reader is lazy — it does
- * not open the DB until `readSpansSince` / `getLatestTimestamp` is first
+ * not open the DB until `aggregateSince` / `getLatestTimestamp` is first
  * called, so wiring it at activation has no cost when OTel is off.
  */
 export function createOTelReader(ourGlobalStorageUri: vscode.Uri): OTelReader {

@@ -6,7 +6,6 @@ import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
-jest.mock('./sessionParser');
 jest.mock('./config', () => {
   const listeners: Array<(e: { affectsConfiguration: (key: string) => boolean }) => void> = [];
   return {

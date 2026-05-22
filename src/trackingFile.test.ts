@@ -5,23 +5,18 @@ import {
   isTrackingFileTruncated,
   formatTrackingFile,
 } from './trackingFile';
-import { Tracker, TrackingStats, JsonlSource } from './tracker';
-import * as fs from 'fs';
+import { Tracker, TrackingStats } from './tracker';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
 import * as fsUtils from './fsUtils';
 import * as config from './config';
 import * as tokenRates from './tokenRates';
-import * as sessionDiscovery from './sessionDiscovery';
-import * as sessionParser from './sessionParser';
+import type { OTelReader, PerModelAggregate } from './otelReader';
 
-jest.mock('fs');
 jest.mock('./gitDir');
 jest.mock('./fsUtils');
 jest.mock('./config');
 jest.mock('./tokenRates');
-jest.mock('./sessionDiscovery');
-jest.mock('./sessionParser');
 jest.mock('./logger');
 
 const mockVscode = vscode as any;
@@ -861,36 +856,28 @@ describe('trackingFile', () => {
       (tokenRates.computeCost as jest.Mock).mockReturnValue(FRESH_COST_AIC);
       // initialize() snapshots an empty baseline so subsequent fresh activity
       // shows up as a positive delta on update().
-      (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([]);
+      let aggregateBatch: PerModelAggregate[] = [];
+      const reader: OTelReader = {
+        isAvailable: () => true,
+        aggregateSince: () => aggregateBatch,
+        getLatestTimestamp: () => 0,
+        close: () => {},
+      };
 
-      const tracker = new Tracker(new JsonlSource(undefined), 'files');
+      const tracker = new Tracker(reader, () => ['session-1']);
       tracker.setPreviousStats(restored!);
       await tracker.initialize();
 
-      const FILE_PATH = '/tmp/session.json';
-      (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([FILE_PATH]);
-      (fs.statSync as jest.Mock).mockImplementation(
-        () => ({ mtimeMs: 1 }) as fs.Stats,
-      );
-      (fs.readFileSync as jest.Mock).mockReturnValue('{}');
-      (sessionParser.createParserState as jest.Mock).mockReturnValue({
-        sessionState: {},
-      });
-      (sessionParser.applyDeltaLines as jest.Mock).mockImplementation(
-        (_lines, state) => state,
-      );
-      (sessionParser.aggregateFromState as jest.Mock).mockReturnValue({
-        interactions: 5,
-        modelUsage: {
-          'gpt-4.1': {
-            inputTokens: 2000,
-            outputTokens: 1000,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-          },
+      aggregateBatch = [
+        {
+          model: 'gpt-4.1',
+          chats: 5,
+          inputTokens: 2000,
+          outputTokens: 1000,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
         },
-        modelInteractions: { 'gpt-4.1': 5 },
-      });
+      ];
 
       await tracker.update();
       const stats = tracker.getStats();

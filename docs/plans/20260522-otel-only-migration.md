@@ -152,12 +152,12 @@ Core surgery. After this task `JsonlSource`, `Source` interface, `swapSource`, p
 
 Cleanup task — only safe after Task 4 removes the only importer.
 
-- [ ] `rm src/sessionParser.ts src/sessionParser.test.ts`
-- [ ] confirm no remaining imports: `grep -r 'sessionParser' src/` returns nothing
-- [ ] remove `readSpansSince` method from `OTelReader` interface and `OTelReaderImpl`; remove the corresponding `SpanRow` export if it's no longer used externally
-- [ ] remove `readSpansSince` tests from `src/otelReader.test.ts`
-- [ ] check for and remove any JSONL session fixture files under `src/__fixtures__/`
-- [ ] run `npm test` (full suite) and `npm run compile` — both must pass before Task 6
+- [x] `rm src/sessionParser.ts src/sessionParser.test.ts`
+- [x] confirm no remaining imports: `grep -r 'sessionParser' src/` returns nothing
+- [x] remove `readSpansSince` method from `OTelReader` interface and `OTelReaderImpl`; remove the corresponding `SpanRow` export if it's no longer used externally
+- [x] remove `readSpansSince` tests from `src/otelReader.test.ts`
+- [x] check for and remove any JSONL session fixture files under `src/__fixtures__/` (none found — only rate-card fixtures)
+- [x] run `npm test` (full suite) and `npm run compile` — both must pass before Task 6 (also did full compile resync per Task 2 note: extension.ts dead-code cleanup, plus extension.test.ts / trackingFile.test.ts realignment to the new Tracker API; Task 9 still owns `autoEnableOTel` wiring + nudge logic)
 
 ### Task 6: Drop tilde-decoration from amountFormatter
 

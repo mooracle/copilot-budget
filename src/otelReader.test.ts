@@ -10,7 +10,6 @@ import {
   OTelReader,
   PerModelAggregate,
   resolveOTelDbUri,
-  SpanRow,
 } from './otelReader';
 
 // Suppress the experimental warning that Node prints once when first using
@@ -163,11 +162,6 @@ function seedSpans(dbPath: string, spans: SeedSpan[]): void {
   db.close();
 }
 
-function bySpanId(rows: SpanRow[], _: never = undefined as never): SpanRow[] {
-  // Stable order for assertions: rely on startTimeMs (the SQL ORDER BY).
-  return rows;
-}
-
 describe('resolveOTelDbUri', () => {
   it('navigates from our globalStorage to upstream agent-traces.db', () => {
     const ours = vscode.Uri.file(
@@ -191,12 +185,6 @@ describe('createOTelReader — DB missing', () => {
   it('isAvailable() returns false', () => {
     const reader = createOTelReader(fx.ourGlobalStorageUri);
     expect(reader.isAvailable()).toBe(false);
-    reader.close();
-  });
-
-  it('readSpansSince returns [] without throwing', () => {
-    const reader = createOTelReader(fx.ourGlobalStorageUri);
-    expect(reader.readSpansSince(0, null)).toEqual([]);
     reader.close();
   });
 
@@ -230,8 +218,8 @@ describe('createOTelReader — DB present but empty', () => {
     expect(reader.isAvailable()).toBe(true);
   });
 
-  it('readSpansSince returns []', () => {
-    expect(reader.readSpansSince(0, null)).toEqual([]);
+  it('aggregateSince returns []', () => {
+    expect(reader.aggregateSince(0, ['session-A'])).toEqual([]);
   });
 
   it('getLatestTimestamp returns 0', () => {
@@ -239,7 +227,7 @@ describe('createOTelReader — DB present but empty', () => {
   });
 });
 
-describe('createOTelReader — DB with spans', () => {
+describe('createOTelReader — DB with spans (close + getLatestTimestamp)', () => {
   let fx: Fixture;
   let reader: OTelReader;
 
@@ -304,99 +292,6 @@ describe('createOTelReader — DB with spans', () => {
     expect(reader.isAvailable()).toBe(true);
   });
 
-  it('readSpansSince(0, null) returns only chat spans', () => {
-    const rows = bySpanId(reader.readSpansSince(0, null));
-    expect(rows).toHaveLength(3);
-    expect(rows.map((r) => r.sessionId)).toEqual([
-      'session-A',
-      'session-A',
-      'session-B',
-    ]);
-  });
-
-  it('coerces NULL cached_tokens to 0 (not NaN, not null)', () => {
-    const rows = reader.readSpansSince(0, null);
-    const span2 = rows.find((r) => r.endTimeMs === 2_400)!;
-    expect(span2.cachedTokens).toBe(0);
-    expect(Number.isNaN(span2.cachedTokens)).toBe(false);
-  });
-
-  it('coerces missing cache_creation attribute row to 0', () => {
-    const rows = reader.readSpansSince(0, null);
-    const span2 = rows.find((r) => r.endTimeMs === 2_400)!;
-    expect(span2.cacheCreationTokens).toBe(0);
-  });
-
-  it('honors cache_creation attribute when present', () => {
-    const rows = reader.readSpansSince(0, null);
-    const span1 = rows.find((r) => r.endTimeMs === 1_500)!;
-    expect(span1.cacheCreationTokens).toBe(100);
-    const span3 = rows.find((r) => r.endTimeMs === 3_800)!;
-    expect(span3.cacheCreationTokens).toBe(200);
-  });
-
-  it('returns the full token shape for a populated span', () => {
-    const rows = reader.readSpansSince(0, null);
-    const span1 = rows.find((r) => r.endTimeMs === 1_500)!;
-    expect(span1).toEqual({
-      sessionId: 'session-A',
-      model: 'gpt-4o',
-      inputTokens: 1000,
-      outputTokens: 200,
-      cachedTokens: 750,
-      cacheCreationTokens: 100,
-      startTimeMs: 1_000,
-      endTimeMs: 1_500,
-    });
-  });
-
-  it('respects sinceMs filter (end_time > sinceMs)', () => {
-    // Filter is on end_time_ms with strict inequality. Spans 1 and 2 ended
-    // before 2_500 and must be excluded; span 3 ended at 3_800 and is the
-    // only chat row that survives.
-    const rows = reader.readSpansSince(2_500, null);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].sessionId).toBe('session-B');
-  });
-
-  it('includes spans that started before sinceMs but ended after (boundary-spanning case)', () => {
-    // Regression for the start_time vs end_time mismatch: a request in flight
-    // at construction time materializes later with a start_time that pre-dates
-    // the baseline. Filtering on end_time correctly surfaces it.
-    // Span 3 starts at 3_000 — pre-dates the threshold below — but ends at
-    // 3_800, well after it, so it must appear in the result.
-    const rows = reader.readSpansSince(3_500, null);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].startTimeMs).toBe(3_000);
-    expect(rows[0].endTimeMs).toBe(3_800);
-  });
-
-  it('excludes the span whose end_time equals sinceMs (strict inequality)', () => {
-    // The high-water mark is "already counted" in the baseline; including the
-    // boundary row would double-count it on the next scan.
-    const rows = reader.readSpansSince(3_800, null);
-    expect(rows).toEqual([]);
-  });
-
-  it('respects sessionIds filter', () => {
-    const rowsA = reader.readSpansSince(0, ['session-A']);
-    expect(rowsA.map((r) => r.sessionId)).toEqual(['session-A', 'session-A']);
-
-    const rowsB = reader.readSpansSince(0, ['session-B']);
-    expect(rowsB.map((r) => r.sessionId)).toEqual(['session-B']);
-
-    const rowsBoth = reader.readSpansSince(0, ['session-A', 'session-B']);
-    expect(rowsBoth).toHaveLength(3);
-  });
-
-  it('returns [] for an empty session-id array (distinct from null)', () => {
-    expect(reader.readSpansSince(0, [])).toEqual([]);
-  });
-
-  it('returns [] for a session id that does not match any span', () => {
-    expect(reader.readSpansSince(0, ['nonexistent'])).toEqual([]);
-  });
-
   it('getLatestTimestamp returns max(end_time_ms) over chat spans', () => {
     // The execute_tool span has the largest end_time_ms but must be excluded.
     expect(reader.getLatestTimestamp()).toBe(3_800);
@@ -406,7 +301,7 @@ describe('createOTelReader — DB with spans', () => {
     expect(() => reader.close()).not.toThrow();
     expect(() => reader.close()).not.toThrow();
     // After close, a fresh query still works (lazy re-open).
-    expect(reader.readSpansSince(0, null)).toHaveLength(3);
+    expect(reader.aggregateSince(0, ['session-A', 'session-B'])).toHaveLength(2);
     reader.close();
   });
 });
