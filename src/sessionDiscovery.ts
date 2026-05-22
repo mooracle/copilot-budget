@@ -24,40 +24,89 @@ export interface DiscoveryDiagnostics {
   platform: string;
   homedir: string;
   storageUri: string | null;
-  chatSessionsDir: string | null;
+  transcriptsDir: string | null;
+  legacyChatSessionsDir: string | null;
   filesFound: string[];
 }
 
 /**
- * Resolve the chatSessions directory for the current window from the extension's
- * per-workspace storageUri. `storageUri` points at the extension's subfolder
- * inside `<workspaceStorage>/<hash>/`; the sibling `chatSessions/` directory is
- * one `..` away.
+ * Resolve the primary transcripts directory for the current window from the
+ * extension's per-workspace storageUri. `storageUri` points at the extension's
+ * subfolder inside `<workspaceStorage>/<hash>/`; the sibling
+ * `GitHub.copilot-chat/transcripts/` directory is one `..` away.
  */
-function resolveChatSessionsDir(storageUri: vscode.Uri): string {
-  return vscode.Uri.joinPath(storageUri, '..', 'chatSessions').fsPath;
+function resolveTranscriptsDir(storageUri: vscode.Uri): string {
+  return vscode.Uri.joinPath(
+    storageUri,
+    '..',
+    'GitHub.copilot-chat',
+    'transcripts',
+  ).fsPath;
 }
 
 /**
- * Discover Copilot session files for the current window only.
- * When `storageUri` is undefined (empty window) returns `[]`.
+ * Resolve the legacy chatSessions directory used by older Copilot Chat
+ * versions. Same parent as the transcripts dir.
  */
-export function discoverSessionFiles(storageUri: vscode.Uri | undefined): string[] {
+function resolveLegacyChatSessionsDir(storageUri: vscode.Uri): string {
+  return vscode.Uri.joinPath(storageUri, '..', 'chatSessions').fsPath;
+}
+
+interface ScanResult {
+  ids: string[];
+  skippedOld: number;
+}
+
+function scanDirectoryForSessionIds(dir: string, cutoffMs: number): ScanResult {
+  log(`Session discovery scanning: ${dir}`);
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    log(`  MISSING or unreadable: ${dir}`);
+    return { ids: [], skippedOld: 0 };
+  }
+
+  const ids: string[] = [];
+  let skippedOld = 0;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.endsWith('.jsonl')) continue;
+    if (isNonSessionFile(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    try {
+      const s = fs.statSync(full);
+      if (s.size === 0) continue;
+      if (cutoffMs > 0 && s.mtimeMs < cutoffMs) {
+        skippedOld += 1;
+        continue;
+      }
+      ids.push(entry.name.replace(/\.jsonl$/i, ''));
+    } catch {
+      // skip inaccessible files
+    }
+  }
+  return { ids, skippedOld };
+}
+
+/**
+ * Discover Copilot chat session IDs (UUID stems) for the current window only.
+ *
+ * Scans the primary `GitHub.copilot-chat/transcripts/` directory first, then
+ * merges in any IDs from the legacy `chatSessions/` directory (deduped by
+ * stem). When `storageUri` is undefined (empty window) returns `[]`.
+ */
+export function discoverSessionIds(
+  storageUri: vscode.Uri | undefined,
+): string[] {
   if (!storageUri) {
     log('Session discovery skipped: no storageUri (empty window)');
     return [];
   }
 
-  const chatSessionsDir = resolveChatSessionsDir(storageUri);
-  log(`Session discovery scanning: ${chatSessionsDir}`);
-
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(chatSessionsDir, { withFileTypes: true });
-  } catch {
-    log(`  MISSING or unreadable: ${chatSessionsDir}`);
-    return [];
-  }
+  const transcriptsDir = resolveTranscriptsDir(storageUri);
+  const legacyDir = resolveLegacyChatSessionsDir(storageUri);
 
   // Mtime filter — old sessions are stable; their tokens are already folded
   // into the tracker's baseline on first scan, so re-reading them every poll
@@ -66,34 +115,29 @@ export function discoverSessionFiles(storageUri: vscode.Uri | undefined): string
   const maxAgeDays = getSessionMaxAgeDays();
   const cutoffMs = maxAgeDays > 0 ? Date.now() - maxAgeDays * 86_400_000 : 0;
 
-  const files: string[] = [];
-  let skippedOld = 0;
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.endsWith('.jsonl')) continue;
-    if (isNonSessionFile(entry.name)) continue;
-    const full = path.join(chatSessionsDir, entry.name);
-    try {
-      const s = fs.statSync(full);
-      if (s.size === 0) continue;
-      if (cutoffMs > 0 && s.mtimeMs < cutoffMs) {
-        skippedOld += 1;
-        continue;
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  let totalSkippedOld = 0;
+
+  for (const dir of [transcriptsDir, legacyDir]) {
+    const result = scanDirectoryForSessionIds(dir, cutoffMs);
+    totalSkippedOld += result.skippedOld;
+    for (const id of result.ids) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
       }
-      files.push(full);
-    } catch {
-      // skip inaccessible files
     }
   }
 
-  if (skippedOld > 0) {
+  if (totalSkippedOld > 0) {
     log(
-      `Discovery complete: ${files.length} files (${skippedOld} skipped — older than ${maxAgeDays}d)`,
+      `Discovery complete: ${ids.length} sessions (${totalSkippedOld} skipped — older than ${maxAgeDays}d)`,
     );
   } else {
-    log(`Discovery complete: ${files.length} files`);
+    log(`Discovery complete: ${ids.length} sessions`);
   }
-  return files;
+  return ids;
 }
 
 /**
@@ -109,16 +153,17 @@ export function getDiscoveryDiagnostics(
       platform,
       homedir,
       storageUri: null,
-      chatSessionsDir: null,
+      transcriptsDir: null,
+      legacyChatSessionsDir: null,
       filesFound: [],
     };
   }
-  const chatSessionsDir = resolveChatSessionsDir(storageUri);
   return {
     platform,
     homedir,
     storageUri: storageUri.fsPath,
-    chatSessionsDir,
-    filesFound: discoverSessionFiles(storageUri),
+    transcriptsDir: resolveTranscriptsDir(storageUri),
+    legacyChatSessionsDir: resolveLegacyChatSessionsDir(storageUri),
+    filesFound: discoverSessionIds(storageUri),
   };
 }

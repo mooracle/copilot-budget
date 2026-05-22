@@ -94,12 +94,14 @@ Self-contained start — no consumers yet, can be wired in Task 9.
 
 Path change is additive at first — primary target moves to new location, legacy `chatSessions/` is fallback.
 
-- [ ] in `src/sessionDiscovery.ts` change primary discovery directory from `chatSessions/` to `GitHub.copilot-chat/transcripts/`; add legacy `chatSessions/` as a secondary scan whose result is merged in (deduped by stem)
-- [ ] rename `discoverSessionFiles` → `discoverSessionIds`; change return type from session-file URIs to `string[]` (just the UUID stems, stripping `.jsonl`)
-- [ ] update `getDiscoveryDiagnostics` to reflect the new primary path; keep returning `{platform, homedir, storageUri, chatSessionsDir | transcriptsDir, filesFound}` shape, but rename the path field to `transcriptsDir` and add a `legacyChatSessionsDir` field
-- [ ] empty-window (no `storageUri`) still returns `[]`; both paths null in diagnostics
-- [ ] update tests in `src/sessionDiscovery.test.ts`: new path discovered; legacy path discovered when primary absent; both paths merged with dedup; empty window returns empty; non-`.jsonl` files filtered via `NON_SESSION_PATTERNS`
-- [ ] run `npm test -- sessionDiscovery` — must pass before Task 3
+- [x] in `src/sessionDiscovery.ts` change primary discovery directory from `chatSessions/` to `GitHub.copilot-chat/transcripts/`; add legacy `chatSessions/` as a secondary scan whose result is merged in (deduped by stem)
+- [x] rename `discoverSessionFiles` → `discoverSessionIds`; change return type from session-file URIs to `string[]` (just the UUID stems, stripping `.jsonl`)
+- [x] update `getDiscoveryDiagnostics` to reflect the new primary path; keep returning `{platform, homedir, storageUri, chatSessionsDir | transcriptsDir, filesFound}` shape, but rename the path field to `transcriptsDir` and add a `legacyChatSessionsDir` field
+- [x] empty-window (no `storageUri`) still returns `[]`; both paths null in diagnostics
+- [x] update tests in `src/sessionDiscovery.test.ts`: new path discovered; legacy path discovered when primary absent; both paths merged with dedup; empty window returns empty; non-`.jsonl` files filtered via `NON_SESSION_PATTERNS`
+- [x] run `npm test -- sessionDiscovery` — must pass before Task 3
+
+> Note: This rename leaves `src/tracker.ts` (line 3 import and line 249 call) and `src/extension.ts` (line 20 import, line 31 `resolveCurrentSessionIds`, line 157 `diag.chatSessionsDir`) referencing the now-removed `discoverSessionFiles`/`chatSessionsDir`. Per the task's `npm test -- sessionDiscovery` validation, only sessionDiscovery tests must pass at this step. These dangling references are deleted wholesale by Tasks 4 (tracker rewrite) and 9 (extension wiring); the full compile resync happens at Task 5.
 
 ### Task 3: Add `aggregateSince` to OTelReader (alongside existing methods)
 
