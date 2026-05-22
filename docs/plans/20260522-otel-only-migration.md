@@ -127,16 +127,16 @@ Additive — `readSpansSince` stays in place so tracker.ts still compiles. We'll
 
 Core surgery. After this task `JsonlSource`, `Source` interface, `swapSource`, parser-state machinery, and `FileCache`/`MAX_PARSER_STATES` are gone. The public `tracker.mode` field is removed; `TrackingStats.mode` is temporarily pinned to `'telemetry'` literal to keep statusBar/amountFormatter/budgetPanel compiling — fully removed in Task 10.
 
-- [ ] delete the `Source` interface (line 64 region), `JsonlSource` class (line 150 region), `FileCache`, `MAX_PARSER_STATES`, all parser-state imports from `./sessionParser`
-- [ ] simplify `OTelSource` to a non-class function `scanOTel(reader, baseline, sessionIdsFn): Promise<RawAggregateBatch>` or keep as a class without the Source-interface ceremony — pick the simpler shape
-- [ ] `Tracker` constructor signature becomes `Tracker(reader: OTelReader, sessionIdsFn: () => Promise<string[]>)` — drop the `Source` injection and `mode` parameter
-- [ ] **remove the public `mode` field from the `Tracker` class** (currently at `tracker.ts:513`); update any in-class reads to use the literal `'telemetry'`
-- [ ] in the 30s scan loop: `const sessionIds = await sessionIdsFn(); const rows = reader.aggregateSince(baseline, sessionIds);` — convert `rows` directly to `TrackingStats.models` using `getRateCard()` for cost; sum across models for `totalAiCredits` and `totalTokens`
-- [ ] keep `TrackingStats.mode` field but always set it to `'telemetry'` (transitional, removed in Task 10)
-- [ ] remove `swapSource` method entirely; baseline persistence via `setPreviousStats(restored)` stays unchanged
-- [ ] `dispose()` calls `reader.close()` directly (no Source indirection)
-- [ ] update `src/tracker.test.ts`: drop tests for `swapSource`, `JsonlSource`, mode-swap, parser-state caching, file-cache LRU, and `tracker.mode` field access; add tests asserting `aggregateSince` is called with current sessionIds + baseline; per-model cost computed from `getRateCard()`; `totalTokens` and `totalAiCredits` aggregated correctly; `setPreviousStats` merges across restarts
-- [ ] run `npm test -- tracker` — must pass before Task 5
+- [x] delete the `Source` interface (line 64 region), `JsonlSource` class (line 150 region), `FileCache`, `MAX_PARSER_STATES`, all parser-state imports from `./sessionParser`
+- [x] simplify `OTelSource` to a non-class function `scanOTel(reader, baseline, sessionIdsFn): Promise<RawAggregateBatch>` or keep as a class without the Source-interface ceremony — pick the simpler shape
+- [x] `Tracker` constructor signature becomes `Tracker(reader: OTelReader, sessionIdsFn: () => Promise<string[]>)` — drop the `Source` injection and `mode` parameter
+- [x] **remove the public `mode` field from the `Tracker` class** (currently at `tracker.ts:513`); update any in-class reads to use the literal `'telemetry'`
+- [x] in the 30s scan loop: `const sessionIds = await sessionIdsFn(); const rows = reader.aggregateSince(baseline, sessionIds);` — convert `rows` directly to `TrackingStats.models` using `getRateCard()` for cost; sum across models for `totalAiCredits` and `totalTokens`
+- [x] keep `TrackingStats.mode` field but always set it to `'telemetry'` (transitional, removed in Task 10)
+- [x] remove `swapSource` method entirely; baseline persistence via `setPreviousStats(restored)` stays unchanged
+- [x] `dispose()` calls `reader.close()` directly (no Source indirection)
+- [x] update `src/tracker.test.ts`: drop tests for `swapSource`, `JsonlSource`, mode-swap, parser-state caching, file-cache LRU, and `tracker.mode` field access; add tests asserting `aggregateSince` is called with current sessionIds + baseline; per-model cost computed from `getRateCard()`; `totalTokens` and `totalAiCredits` aggregated correctly; `setPreviousStats` merges across restarts
+- [x] run `npm test -- tracker` — must pass before Task 5
 
 > Note: after this task, `extension.ts` still references `tracker.mode` at lines 412/418/421/455. Those lines (and their surrounding mode-swap message-gate block) are deleted wholesale in Task 9 — they only survive this task because Task 9 deletes the *whole containing block*, never reading the now-missing field in isolation. If Task 4 leaves any dangling read of `tracker.mode` outside that block, fix it here.
 
