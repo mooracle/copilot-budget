@@ -7,10 +7,21 @@ import { formatTrackingFile } from './trackingFile';
 import { TrackingStats, ModelStats } from './tracker';
 import { __configStore } from './__mocks__/vscode';
 
+// Require git >= 2.28: `git init -b <branch>` (used in setupRepo) landed in
+// 2.28 (Jul 2020). Older versions parse `git --version` fine but fail at
+// `init -b main`, so gating only on `git --version` would let the suite
+// hard-fail during setup instead of skipping per its contract.
 function gitAvailable(): boolean {
   try {
-    execFileSync('git', ['--version'], { stdio: 'pipe' });
-    return true;
+    const out = execFileSync('git', ['--version'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf8',
+    });
+    const m = out.match(/git version (\d+)\.(\d+)/);
+    if (!m) return false;
+    const major = Number(m[1]);
+    const minor = Number(m[2]);
+    return major > 2 || (major === 2 && minor >= 28);
   } catch {
     return false;
   }
@@ -29,7 +40,9 @@ interface Repo {
 // operation (alias, `rebase --exec`, hook) cannot redirect our `-C <tmpdir>`
 // commands to its own repo. GIT_TEMPLATE_DIR is scrubbed because it would
 // inject a `prepare-commit-msg` template at `git init` time, running before
-// our hook is installed.
+// our hook is installed. LC_ALL=C forces English git messages — assertions
+// like /^Revert / depend on git's untranslated subject template, which
+// gettext otherwise localizes from the parent locale.
 function gitEnv(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -41,6 +54,8 @@ function gitEnv(home: string): NodeJS.ProcessEnv {
     GIT_COMMITTER_NAME: 'Test',
     GIT_COMMITTER_EMAIL: 'test@example.com',
     GIT_EDITOR: 'true',
+    LC_ALL: 'C',
+    LANG: 'C',
   };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
