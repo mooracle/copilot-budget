@@ -177,11 +177,11 @@ Decision: **keep the `mode` param on the options interface but ignore it inside 
 - Modify: `src/statusBar.ts`
 - Modify: `src/statusBar.test.ts`
 
-- [ ] in `src/statusBar.ts` drop the `FILES_NOTE` and `TELEMETRY_NOTE` constants (lines 7–8 region) and the mode-aware disclosure line in the tooltip; the tooltip carries no disclosure (the panel will reflect availability state instead)
-- [ ] tooltip still calls `formatAmount(...)` — `mode` param is now ignored (Task 6 made it a no-op); call sites can keep passing `stats.mode` until Task 10
-- [ ] add a **separate `setNudge(visible: boolean): void` method** on the status bar exports (not a param on existing methods) — when `visible` is true, the status bar renders `$(refresh) Copilot Budget — reload to start tracking` with command `workbench.action.reloadWindow`; when false, render normal cost
-- [ ] update tests in `src/statusBar.test.ts`: assert nudge rendering after `setNudge(true)`; assert standard rendering after `setNudge(false)`; assert default state (no nudge call) renders cost; drop mode-aware disclosure tests
-- [ ] run `npm test -- statusBar` — must pass before Task 8
+- [x] in `src/statusBar.ts` drop the `FILES_NOTE` and `TELEMETRY_NOTE` constants (lines 7–8 region) and the mode-aware disclosure line in the tooltip; the tooltip carries no disclosure (the panel will reflect availability state instead)
+- [x] tooltip still calls `formatAmount(...)` — `mode` param is now ignored (Task 6 made it a no-op); call sites can keep passing `stats.mode` until Task 10
+- [x] add a **separate `setNudge(visible: boolean): void` method** on the status bar exports (not a param on existing methods) — when `visible` is true, the status bar renders `$(refresh) Copilot Budget — reload to start tracking` with command `workbench.action.reloadWindow`; when false, render normal cost
+- [x] update tests in `src/statusBar.test.ts`: assert nudge rendering after `setNudge(true)`; assert standard rendering after `setNudge(false)`; assert default state (no nudge call) renders cost; drop mode-aware disclosure tests
+- [x] run `npm test -- statusBar` — must pass before Task 8
 
 ### Task 8: Slim down budgetPanel — drop OTel rows entirely
 
