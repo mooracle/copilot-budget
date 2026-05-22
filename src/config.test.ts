@@ -1,4 +1,9 @@
-import { __configStore, __configChangeListeners } from './__mocks__/vscode';
+import {
+  __configStore,
+  __configChangeListeners,
+  __inspectStore,
+  __workspaceUpdate,
+} from './__mocks__/vscode';
 
 // Must import after mock is set up (jest resolves vscode → __mocks__/vscode)
 import {
@@ -10,12 +15,16 @@ import {
   isOTelDbExporterEnabled,
   getEstimationMode,
   onDidChangeOTelSetting,
+  autoEnableOTel,
 } from './config';
 
 beforeEach(() => {
   // Clear overrides between tests
   for (const key of Object.keys(__configStore)) delete __configStore[key];
+  for (const key of Object.keys(__inspectStore)) delete __inspectStore[key];
   __configChangeListeners.length = 0;
+  __workspaceUpdate.mockClear();
+  __workspaceUpdate.mockImplementation(async () => {});
 });
 
 describe('config', () => {
@@ -232,6 +241,98 @@ describe('config', () => {
       expect(__configChangeListeners.length).toBe(1);
       disposable.dispose();
       expect(__configChangeListeners.length).toBe(0);
+    });
+  });
+
+  describe('autoEnableOTel', () => {
+    const OTEL_FULL = 'github.copilot.chat.otel.dbSpanExporter.enabled';
+
+    it('writes true at Workspace scope when setting is undefined everywhere', async () => {
+      // inspect returns undefined globalValue/workspaceValue (default empty entry)
+      __inspectStore[OTEL_FULL] = {
+        key: OTEL_FULL,
+        defaultValue: false,
+        globalValue: undefined,
+        workspaceValue: undefined,
+      };
+      await autoEnableOTel();
+      expect(__workspaceUpdate).toHaveBeenCalledTimes(1);
+      expect(__workspaceUpdate).toHaveBeenCalledWith(
+        'github.copilot.chat.otel',
+        'dbSpanExporter.enabled',
+        true,
+        2, // ConfigurationTarget.Workspace
+      );
+    });
+
+    it('writes true when inspect() itself returns undefined (no scope info at all)', async () => {
+      // Default mock returns undefined for inspect — should still write
+      await autoEnableOTel();
+      expect(__workspaceUpdate).toHaveBeenCalledTimes(1);
+      expect(__workspaceUpdate).toHaveBeenCalledWith(
+        'github.copilot.chat.otel',
+        'dbSpanExporter.enabled',
+        true,
+        2,
+      );
+    });
+
+    it('is a no-op when explicitly set to false at Workspace scope', async () => {
+      __inspectStore[OTEL_FULL] = {
+        key: OTEL_FULL,
+        defaultValue: false,
+        globalValue: undefined,
+        workspaceValue: false,
+      };
+      await autoEnableOTel();
+      expect(__workspaceUpdate).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when explicitly set to false at Global scope', async () => {
+      __inspectStore[OTEL_FULL] = {
+        key: OTEL_FULL,
+        defaultValue: false,
+        globalValue: false,
+        workspaceValue: undefined,
+      };
+      await autoEnableOTel();
+      expect(__workspaceUpdate).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when already true at Workspace scope', async () => {
+      __inspectStore[OTEL_FULL] = {
+        key: OTEL_FULL,
+        defaultValue: false,
+        globalValue: undefined,
+        workspaceValue: true,
+      };
+      await autoEnableOTel();
+      expect(__workspaceUpdate).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when already true at Global scope', async () => {
+      __inspectStore[OTEL_FULL] = {
+        key: OTEL_FULL,
+        defaultValue: false,
+        globalValue: true,
+        workspaceValue: undefined,
+      };
+      await autoEnableOTel();
+      expect(__workspaceUpdate).not.toHaveBeenCalled();
+    });
+
+    it('logs and does not throw when update() rejects', async () => {
+      __workspaceUpdate.mockImplementationOnce(async () => {
+        throw new Error('boom');
+      });
+      __inspectStore[OTEL_FULL] = {
+        key: OTEL_FULL,
+        defaultValue: false,
+        globalValue: undefined,
+        workspaceValue: undefined,
+      };
+      await expect(autoEnableOTel()).resolves.toBeUndefined();
+      expect(__workspaceUpdate).toHaveBeenCalledTimes(1);
     });
   });
 });

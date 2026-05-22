@@ -80,10 +80,10 @@ Current poll interval `POLL_INTERVAL_MS` is wired via `setInterval` at tracker.t
 
 Self-contained start — no consumers yet, can be wired in Task 9.
 
-- [ ] add `autoEnableOTel(): Promise<void>` to `src/config.ts` — uses `vscode.workspace.getConfiguration(OTEL_SECTION).inspect(OTEL_KEY)`. If `globalValue === undefined && workspaceValue === undefined`, call `update(OTEL_KEY, true, ConfigurationTarget.Workspace)`. Catch + log errors (do not throw); a failed auto-enable must not block activation.
-- [ ] export the helper from `src/config.ts`
-- [ ] write tests in `src/config.test.ts`: setting undefined everywhere → writes `true` at Workspace; explicit `false` (workspace) → no-op; explicit `false` (global) → no-op; already `true` (any scope) → no-op; `update()` rejection → logs, does not throw
-- [ ] run `npm test -- config` — must pass before Task 2
+- [x] add `autoEnableOTel(): Promise<void>` to `src/config.ts` — uses `vscode.workspace.getConfiguration(OTEL_SECTION).inspect(OTEL_KEY)`. If `globalValue === undefined && workspaceValue === undefined`, call `update(OTEL_KEY, true, ConfigurationTarget.Workspace)`. Catch + log errors (do not throw); a failed auto-enable must not block activation.
+- [x] export the helper from `src/config.ts`
+- [x] write tests in `src/config.test.ts`: setting undefined everywhere → writes `true` at Workspace; explicit `false` (workspace) → no-op; explicit `false` (global) → no-op; already `true` (any scope) → no-op; `update()` rejection → logs, does not throw
+- [x] run `npm test -- config` — must pass before Task 2
 
 ### Task 2: Migrate session discovery to transcripts path
 

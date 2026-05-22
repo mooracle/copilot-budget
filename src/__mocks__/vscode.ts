@@ -1,6 +1,9 @@
 // Minimal VS Code API mock for unit tests
 // Store for overriding config values in tests
 export const __configStore: Record<string, any> = {};
+// Per-key inspect() shape: tests populate with {globalValue, workspaceValue, ...}
+// to control config.inspect(key) return value. Keyed by full section.key string.
+export const __inspectStore: Record<string, any> = {};
 export const __configChangeListeners: Array<(e: any) => void> = [];
 // Spy capturing every `getConfiguration(section).update(key, value, target)` call so
 // tests can assert configuration writes (panel currency/OTel toggles, etc).
@@ -17,7 +20,10 @@ export const workspace = {
       return fullKey in __configStore ? __configStore[fullKey] : (defaultValue as T);
     },
     has: () => false,
-    inspect: () => undefined,
+    inspect: (key: string) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      return fullKey in __inspectStore ? __inspectStore[fullKey] : undefined;
+    },
     update: (key: string, value: any, target?: any) =>
       __workspaceUpdate(section, key, value, target),
   }),

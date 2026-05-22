@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { log } from './logger';
+import { errorMessage } from './utils';
 
 const SECTION = 'copilot-budget';
 
@@ -93,4 +95,23 @@ export function onDidChangeOTelSetting(
       callback();
     }
   });
+}
+
+// On first activation in a workspace where the upstream OTel setting is unset
+// at both Global and Workspace scope, flip it to true at Workspace scope so
+// Copilot Chat starts emitting spans. Explicit user choice (either scope) is
+// respected — we never overwrite. Failures are logged but never thrown so a
+// transient setting-write error does not block activation.
+export async function autoEnableOTel(): Promise<void> {
+  try {
+    const cfg = vscode.workspace.getConfiguration(OTEL_SECTION);
+    const inspected = cfg.inspect(OTEL_KEY);
+    const explicitlySet =
+      inspected?.globalValue !== undefined ||
+      inspected?.workspaceValue !== undefined;
+    if (explicitlySet) return;
+    await cfg.update(OTEL_KEY, true, vscode.ConfigurationTarget.Workspace);
+  } catch (err) {
+    log(`autoEnableOTel: failed to write setting — ${errorMessage(err)}`);
+  }
 }
