@@ -243,14 +243,14 @@ This is the coordinated cut: `TrackingStats.mode`, the `'telemetry'` literal pin
 - Modify: `package-lock.json` (lock-step with package.json)
 - Modify: `README.md` (if grep finds matches — see below)
 
-- [ ] in `CLAUDE.md`: rewrite the Project Overview, Architecture, and Key Design Details sections to reflect OTel-only model; remove the "Two-mode design with auto-detection" framing; document the new `transcripts/` path with legacy `chatSessions/` fallback; document `autoEnableOTel` and the asymmetric-write invariant in its new home (`config.ts`); update file-by-file module summaries for tracker/sessionDiscovery/otelReader/budgetPanel/statusBar/amountFormatter
-- [ ] in `CHANGELOG.md`: add `## [3.0.0] - 2026-05-22` entry leading with "Drop Files mode; always use Copilot Chat's OTel database. Auto-enable on first run per-workspace." Follow with deletions, breaking changes (config keys removed, behavior changes), and "Why" rationale
-- [ ] in `package.json`: bump `"version"` from `2.0.2` to `3.0.0`
-- [ ] **verify `package.json` `contributes.configuration`** — grep for any setting key that explicitly referenced Files mode; based on a pre-plan inspection of `src/config.ts` no such key exists, so this step is likely a no-op. If a key surfaces, remove its declaration and the value-handling code together.
-- [ ] `npm install` to refresh `package-lock.json` version stamp
-- [ ] **positive grep step**: `grep -inE 'files mode|telemetry mode|two-mode|tilde estimate' README.md CHANGELOG.md docs/` — any match must be reviewed and rewritten or deleted
-- [ ] no tests needed for this task (documentation only) — but verify `npm run compile` still works after settings edits
-- [ ] run `npm test` and `npm run compile` — must pass before Task 12
+- [x] in `CLAUDE.md`: rewrite the Project Overview, Architecture, and Key Design Details sections to reflect OTel-only model; remove the "Two-mode design with auto-detection" framing; document the new `transcripts/` path with legacy `chatSessions/` fallback; document `autoEnableOTel` and the asymmetric-write invariant in its new home (`config.ts`); update file-by-file module summaries for tracker/sessionDiscovery/otelReader/budgetPanel/statusBar/amountFormatter
+- [x] in `CHANGELOG.md`: add `## [3.0.0] - 2026-05-22` entry leading with "Drop Files mode; always use Copilot Chat's OTel database. Auto-enable on first run per-workspace." Follow with deletions, breaking changes (config keys removed, behavior changes), and "Why" rationale
+- [x] in `package.json`: bump `"version"` from `2.0.2` to `3.0.0`
+- [x] **verify `package.json` `contributes.configuration`** — grep for any setting key that explicitly referenced Files mode; based on a pre-plan inspection of `src/config.ts` no such key exists, so this step is likely a no-op. If a key surfaces, remove its declaration and the value-handling code together. (Verified: no Files-mode-specific keys.)
+- [x] `npm install` to refresh `package-lock.json` version stamp
+- [x] **positive grep step**: `grep -inE 'files mode|telemetry mode|two-mode|tilde estimate' README.md CHANGELOG.md docs/` — any match must be reviewed and rewritten or deleted (README rewritten; CHANGELOG/CLAUDE matches are historical entries or past-tense references in the 3.0.0 description; plan/completed docs are historical records left alone)
+- [x] no tests needed for this task (documentation only) — but verify `npm run compile` still works after settings edits
+- [x] run `npm test` and `npm run compile` — must pass before Task 12 (375/375 tests passing, build green)
 
 ### Task 12: Verify acceptance criteria
 - [ ] verify all items from Overview are implemented: auto-enable works on first run; status-bar nudge appears+clears correctly; budget panel has no OTel toggle row; cost figures are tilde-free; cache_creation_tokens is populated for Claude models

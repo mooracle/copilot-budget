@@ -5,6 +5,49 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-05-22
+
+Drop Files mode; always use Copilot Chat's OTel database. On first activation in a workspace where `github.copilot.chat.otel.dbSpanExporter.enabled` is unset at both Global and Workspace scope, the extension writes `true` at Workspace scope so Copilot Chat starts emitting spans. An explicit user choice in either scope is respected — the write is strictly asymmetric (only unset → `true`, never any other transition). After auto-enable Copilot Chat typically needs a reload before spans start landing; the status bar renders a clickable `$(refresh) Copilot Budget — reload to start tracking` nudge until the database appears. Cost is now always measured: per-span `input_tokens` / `output_tokens` / `cached_tokens` come from the OTel SQLite store and `cache_creation_tokens` from the `gen_ai.usage.cache_creation.input_tokens` attribute. No more tilde decoration, no more upper-bound caveat, no mode-swap plumbing.
+
+### Removed
+
+- **Files mode and the entire JSONL parsing path.** `sessionParser.ts` (delta parser, parser state, prototype-pollution guards) and `JsonlSource` are gone. ~1500 lines of mode-switch and incremental-parse plumbing deleted. There is no fallback when the OTel DB is unavailable — the status bar surfaces a reload nudge instead.
+- **Tilde decoration.** The `mode` parameter on `formatAmount` and the `mode` field on `TrackingStats` are removed. Status bar, tooltip, panel, and tracking file no longer have a Files-vs-Telemetry distinction.
+- **"Enable accurate cost tracking (OTel)" panel row** and the three handlers behind it. Tracking is automatic.
+- **`MODE=` line in the tracking file.** The parser still tolerates legacy `MODE=files` / `MODE=telemetry` lines (silently ignored), so v2.0.x tracking files restore cleanly on upgrade.
+- **`Tracker.swapSource`, `pickSource`, the `Source` interface, the `onDidChangeOTelSetting` mode-swap handler, the `modeRefresh` 30s recovery interval, the `MODE_SWAP_SHOWN_KEY` workspaceState gate, and the "Switched to Telemetry mode …" info message.** All obsolete with a single happy path.
+- **`getEstimationMode()` in `config.ts`.** Replaced by `autoEnableOTel()`.
+
+### Added
+
+- **`autoEnableOTel()` in `config.ts`** — runs once per activation; writes `github.copilot.chat.otel.dbSpanExporter.enabled = true` at Workspace scope only when both Global and Workspace are `undefined`. Failures are caught and logged so a settings-write error cannot block activation.
+- **`OTelReader.aggregateSince(sinceMs, sessionIds)`** — single grouped SQL query that returns per-model token sums. Filter is `operation_name = 'chat' AND end_time_ms > ? AND (chat_session_id IN (?, ...) OR EXISTS (SELECT 1 FROM span_attributes WHERE key = 'copilot_chat.parent_chat_session_id' AND value IN (?, ...)))`. The OR-on-parent join captures background "title" subagent spans (gpt-4o-mini) that carry only a parent session id — slight increase in attribution vs Files mode. Zero session ids returns `[]` without touching the DB.
+- **Session discovery now scans the modern transcripts path first** (`<workspaceStorage>/<hash>/GitHub.copilot-chat/transcripts/`) and merges in legacy `chatSessions/` results (deduped by stem). Function renamed `discoverSessionFiles` → `discoverSessionIds`; returns `string[]` of UUID stems instead of file URIs. Diagnostics surface both directories under `transcriptsDir` / `legacyChatSessionsDir`.
+- **`statusBar.setNudge(visible: boolean)`** — separate method on the status bar exports. When visible, renders the reload-to-start-tracking item bound to `workbench.action.reloadWindow`; when not, the normal cost. Activation wires the nudge initially based on `isOTelDbExporterEnabled() && !reader.isAvailable()` and clears it exactly once via the `onStatsChanged` handler when the DB appears.
+
+### Changed
+
+- **Cost is measured, not estimated.** `cache_creation_tokens` is now always populated for Claude models. The "upper bound" caveat is gone.
+- **`Tracker` constructor signature simplified to `Tracker(reader: OTelReader, sessionIdsFn: () => string[])`.** No more `Source` injection, no `mode` parameter, no `swapSource`. `setPreviousStats(restored)` and `consume()` behavior is unchanged.
+- **Baseline filter** uses `end_time_ms > ?` (strict, not `>=`). OTel writers materialize spans on `onEnd`, so a request in flight at construction time appears later with a start time that pre-dates the baseline — filtering by end time matches arrival order and pairs cleanly with `MAX(end_time_ms)` as the high-water mark.
+- **`amountFormatter.formatAmount`** options drop the `mode` field. Output is identical to what Telemetry mode produced in 2.0.x.
+- **Status bar tooltip** no longer carries the mode-aware disclosure line ("Estimate assumes no caching (upper bound)." / "Measured via Copilot's OTel database."). The breakdown speaks for itself.
+
+### Breaking
+
+- **No way to disable OTel from inside the extension.** The panel never wrote `false` before either, but in 2.x users could let the upstream setting stay `false` and run in Files mode. In 3.0.0 there is no Files mode — explicitly setting the upstream key to `false` (Global or Workspace scope) means Copilot Budget will not have any data to report until you flip it back. The auto-enable does not override explicit `false`.
+- **`TrackingStats.mode` field removed**, along with the `MODE=` line in `<gitdir>/copilot-budget`. Tools that read the tracking file should ignore unknown keys (the parser does); tools that read `TrackingStats` from the extension's API surface no longer see a `mode` field. Commit trailers remain bare-number values, unchanged from 2.0.x.
+
+### Why
+
+The two-mode design was a transitional bet from 2.0.0: Telemetry mode (OTel) was the right long-term answer, but Files mode bridged the gap while `dbSpanExporter.enabled` was still experimental. With OTel now stable upstream and `agent-traces.db` reliably present once auto-enable runs, the JSONL fallback contributed only maintenance cost and an "upper bound" footnote that users had to learn. Auto-enabling the upstream setting on first activation removes the configuration step entirely; the reload nudge handles the one-time DB-not-yet-present transition cleanly.
+
+## [2.0.2] - 2026-05-22
+
+### Changed
+
+- **OTel enable is now scoped to the current workspace.** When you accept the OTel row in the Copilot Budget panel, the upstream `github.copilot.chat.otel.dbSpanExporter.enabled` setting is written to `ConfigurationTarget.Workspace` instead of `Global`. The toggle now applies to the environment you turned it on in (host, devcontainer, or remote workspace) rather than every VS Code window. To disable Telemetry mode, flip the upstream setting in VS Code Settings — the panel is still strictly asymmetric and never writes `false`.
+
 ## [2.0.1] - 2026-05-22
 
 ### Fixed
