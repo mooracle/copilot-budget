@@ -50,17 +50,14 @@ function checkCommitReset(): Promise<boolean> {
     consumeInFlight = (async () => {
       try {
         if (!tracker) return false;
-        // consume() can bail without rebasing if a source swap lands during
-        // its awaits. In that case lastStats still holds the pre-truncation
-        // cumulative totals (swapSource carried them into previousStats), so
-        // writing them back would re-introduce the trailers the hook just
-        // consumed and double count on the next commit. We still return
-        // `true` so overlapping/periodic callers skip writing their own
-        // pre-consume snapshots; the tracking file stays truncated and the
-        // next 5s poll retries.
+        // consume() may bail (returning false) if the tracker is disposed
+        // mid-rebase — e.g., the extension deactivates while the truncation
+        // probe is in flight. In that case there's no fresh snapshot to
+        // write back, so we skip the post-rebase tracking-file write but
+        // still return `true` so overlapping callers don't re-enter.
         const rebased = await tracker.consume();
         if (!rebased) {
-          log('Tracking file truncated but consume() bailed (source swap); next poll will retry');
+          log('Tracking file truncated but consume() bailed (tracker disposed); skipping write');
           return true;
         }
         log('Tracking file truncated by commit hook — stats rebased to last snapshot');

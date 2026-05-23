@@ -62,28 +62,6 @@ export function resolveOTelDbUri(ourGlobalStorageUri: vscode.Uri): vscode.Uri {
   );
 }
 
-/**
- * When the upstream `dbSpanExporter.enabled` setting reports true but the DB
- * file is missing locally, returns a diagnostic string for logging. The most
- * common cause is a remote-development mismatch: Copilot Chat is writing the
- * DB on the workspace host while our extension is running UI-side and so sees
- * a different filesystem. Returns null when the setting is off, or when both
- * the setting and the DB agree (true+present or false+absent are both fine).
- */
-export function diagnoseUnavailable(
-  ourGlobalStorageUri: vscode.Uri,
-  upstreamSettingEnabled: boolean,
-): string | null {
-  if (!upstreamSettingEnabled) {
-    return null;
-  }
-  const dbPath = resolveOTelDbUri(ourGlobalStorageUri).fsPath;
-  if (fs.existsSync(dbPath)) {
-    return null;
-  }
-  return `OTel exporter enabled upstream but agent-traces.db not found at ${dbPath} — possible remote-host mismatch; Telemetry mode will not activate.`;
-}
-
 class OTelReaderImpl implements OTelReader {
   private readonly dbPath: string;
   private db: DatabaseSync | null = null;

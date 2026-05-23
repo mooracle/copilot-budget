@@ -13,7 +13,6 @@ import {
   onConfigChanged,
   getDisplayCurrency,
   isOTelDbExporterEnabled,
-  onDidChangeOTelSetting,
   autoEnableOTel,
 } from './config';
 
@@ -178,38 +177,6 @@ describe('config', () => {
     it('returns true when the upstream setting is enabled', () => {
       __configStore['github.copilot.chat.otel.dbSpanExporter.enabled'] = true;
       expect(isOTelDbExporterEnabled()).toBe(true);
-    });
-  });
-
-  describe('onDidChangeOTelSetting', () => {
-    it('fires the callback when the upstream key changes', () => {
-      const callback = jest.fn();
-      onDidChangeOTelSetting(callback);
-      expect(__configChangeListeners.length).toBe(1);
-
-      const event = {
-        affectsConfiguration: (section: string) =>
-          section === 'github.copilot.chat.otel.dbSpanExporter.enabled',
-      };
-      __configChangeListeners[0](event);
-      expect(callback).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not fire for unrelated config changes', () => {
-      const callback = jest.fn();
-      onDidChangeOTelSetting(callback);
-      const event = {
-        affectsConfiguration: (section: string) => section === 'copilot-budget',
-      };
-      __configChangeListeners[0](event);
-      expect(callback).not.toHaveBeenCalled();
-    });
-
-    it('returns a disposable that removes the listener', () => {
-      const disposable = onDidChangeOTelSetting(() => {});
-      expect(__configChangeListeners.length).toBe(1);
-      disposable.dispose();
-      expect(__configChangeListeners.length).toBe(0);
     });
   });
 

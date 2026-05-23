@@ -38,6 +38,7 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | `copilot-budget.enabled` | boolean | `true` | Enable or disable Copilot Budget token usage tracking |
+| `copilot-budget.sessionMaxAgeDays` | number | `7` | Only scan transcript / chatSessions files modified within this many days. Older session ids are skipped — their spans are already folded into the OTel baseline on first scan, so re-listing them gains nothing and is slow when the chat history is large. Set to `0` to scan everything. |
 | `copilot-budget.commitHook.enabled` | boolean | `false` | Automatically install the `prepare-commit-msg` hook when the extension activates |
 | `copilot-budget.commitHook.trailers.estimatedCost` | string \| false | `false` | Opt-in git trailer key for estimated USD cost in commit history. Disabled by default. Set to a string (e.g. `"Copilot-Est-Cost"`) to enable. |
 | `copilot-budget.commitHook.trailers.aiCredits` | string \| false | `"Copilot-AI-Credits"` | Git trailer key for total AI Credits (1 AIC = $0.01). Set to `false` to disable this trailer. |

@@ -10,7 +10,6 @@ const SECTION = 'copilot-budget';
 // to true via our budget panel — never to false (see CLAUDE.md / plan §246).
 export const OTEL_SECTION = 'github.copilot.chat.otel';
 export const OTEL_KEY = 'dbSpanExporter.enabled';
-export const OTEL_FULL_KEY = `${OTEL_SECTION}.${OTEL_KEY}`;
 
 function cfg(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration(SECTION);
@@ -71,16 +70,6 @@ export function isOTelDbExporterEnabled(): boolean {
   return vscode.workspace
     .getConfiguration(OTEL_SECTION)
     .get<boolean>(OTEL_KEY, false);
-}
-
-export function onDidChangeOTelSetting(
-  callback: () => void,
-): vscode.Disposable {
-  return vscode.workspace.onDidChangeConfiguration((e) => {
-    if (e.affectsConfiguration(OTEL_FULL_KEY)) {
-      callback();
-    }
-  });
 }
 
 // On first activation in a workspace where the upstream OTel setting is unset

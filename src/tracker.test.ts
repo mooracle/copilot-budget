@@ -536,8 +536,8 @@ describe('Tracker — restored stats merge', () => {
             outputTokens: 500,
           }),
         ],
-        // consume() #1 (baselineSnapshot would be lastSnapshot, no fresh scan)
-        // consume() #2 (current): 3 chats, 1300 input, 600 output
+        // consume() scan (current): 3 chats, 1300 input, 600 output
+        // (baselineSnapshot reuses the prior lastSnapshot, only one scan happens)
         [
           row({
             model: 'gpt-4.1',

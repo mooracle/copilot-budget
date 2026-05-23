@@ -6,7 +6,6 @@ import * as vscode from 'vscode';
 
 import {
   createOTelReader,
-  diagnoseUnavailable,
   OTelReader,
   PerModelAggregate,
   resolveOTelDbUri,
@@ -533,28 +532,3 @@ describe('aggregateSince', () => {
   });
 });
 
-describe('diagnoseUnavailable', () => {
-  let fx: Fixture;
-  beforeEach(() => {
-    fx = makeFixture('diagnose');
-  });
-  afterEach(() => rmFixture(fx));
-
-  it('returns null when upstream setting is off (DB presence irrelevant)', () => {
-    expect(diagnoseUnavailable(fx.ourGlobalStorageUri, false)).toBeNull();
-    seedSpans(fx.dbPath, []);
-    expect(diagnoseUnavailable(fx.ourGlobalStorageUri, false)).toBeNull();
-  });
-
-  it('returns null when upstream enabled AND DB present', () => {
-    seedSpans(fx.dbPath, []);
-    expect(diagnoseUnavailable(fx.ourGlobalStorageUri, true)).toBeNull();
-  });
-
-  it('returns a diagnostic string when upstream enabled but DB missing', () => {
-    const msg = diagnoseUnavailable(fx.ourGlobalStorageUri, true);
-    expect(msg).not.toBeNull();
-    expect(msg).toMatch(/agent-traces\.db/);
-    expect(msg).toMatch(/remote-host/);
-  });
-});
