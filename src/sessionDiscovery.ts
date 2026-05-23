@@ -58,13 +58,10 @@ interface ScanResult {
 }
 
 function scanDirectoryForSessionIds(dir: string, cutoffMs: number): ScanResult {
-  log(`Session discovery scanning: ${dir}`);
-
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    log(`  MISSING or unreadable: ${dir}`);
     return { ids: [], skippedOld: 0 };
   }
 

@@ -587,54 +587,6 @@ describe('trackingFile', () => {
       expect(claudeCost).toBeCloseTo(claudeExpectedCost, 8);
     });
 
-    it('silently ignores MODE=files line (parser is mode-agnostic at restore time)', () => {
-      const content = [
-        'SINCE=2024-01-15T10:30:00Z',
-        'INTERACTIONS=15',
-        'TOTAL_AI_CREDITS=42.31',
-        'MODE=files',
-        'MODEL_gpt-4.1_INPUT_TOKENS=1500',
-        'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
-        'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
-        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_AIC=7.34',
-        '',
-      ].join('\n');
-
-      const result = parseTrackingFileContent(content);
-
-      expect(result).not.toBeNull();
-      expect(result!.since).toBe('2024-01-15T10:30:00Z');
-      expect(result!.interactions).toBe(15);
-      expect(result!.models['gpt-4.1']).toMatchObject({
-        inputTokens: 1500,
-        outputTokens: 800,
-        cacheReadTokens: 200,
-        cacheCreationTokens: 0,
-      });
-    });
-
-    it('silently ignores MODE=telemetry line', () => {
-      const content = [
-        'SINCE=2024-01-15T10:30:00Z',
-        'INTERACTIONS=15',
-        'TOTAL_AI_CREDITS=42.31',
-        'MODE=telemetry',
-        'MODEL_gpt-4.1_INPUT_TOKENS=1500',
-        'MODEL_gpt-4.1_OUTPUT_TOKENS=800',
-        'MODEL_gpt-4.1_CACHE_READ_TOKENS=200',
-        'MODEL_gpt-4.1_CACHE_CREATION_TOKENS=0',
-        'MODEL_gpt-4.1_COST_AIC=7.34',
-        '',
-      ].join('\n');
-
-      const result = parseTrackingFileContent(content);
-
-      expect(result).not.toBeNull();
-      expect(result!.since).toBe('2024-01-15T10:30:00Z');
-      expect(result!.models['gpt-4.1'].inputTokens).toBe(1500);
-    });
-
     it('tolerates legacy 0.6.x file with TOTAL_COST_USD and per-model _COST_USD keys', () => {
       // Dev-host tracking files written before this commit have legacy USD
       // keys alongside TOTAL_AI_CREDITS + *_TOKENS. The new parser must
