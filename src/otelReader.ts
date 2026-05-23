@@ -1,0 +1,221 @@
+import * as fs from 'fs';
+import { DatabaseSync } from 'node:sqlite';
+import * as vscode from 'vscode';
+
+// Upstream schema reference: see
+// vscode-copilot-chat/src/platform/otel/node/sqlite/otelSqliteStore.ts
+// The `spans` table denormalizes these OTel GenAI attributes into columns:
+//   chat_session_id  (copilot_chat.chat_session_id)
+//   request_model    (gen_ai.request.model)
+//   input_tokens     (gen_ai.usage.input_tokens)
+//   output_tokens    (gen_ai.usage.output_tokens)
+//   cached_tokens    (gen_ai.usage.cache_read.input_tokens)
+//   start_time_ms / end_time_ms / operation_name
+// Cache-creation tokens are not denormalized — they live in `span_attributes`
+// under key 'gen_ai.usage.cache_creation.input_tokens'. We LEFT JOIN so older
+// spans that lack the attribute still appear (with cacheCreationTokens = 0).
+// Filter `operation_name = 'chat'` matches upstream's GenAiOperationName.CHAT
+// constant — the value used for billable LLM inferences. The `sessions` view
+// in upstream sums tokens under the same filter, confirming this is the right
+// row set for cost attribution (not 'execute_tool', 'invoke_agent', etc.).
+//
+// Time-boundary filter uses `end_time_ms > sinceMs` (strict) rather than
+// `start_time_ms >= sinceMs`. OTel writers materialize a span row when the
+// span ends (onEnd), so a request in flight at construction time isn't in the
+// DB yet; its row appears later with a start_time that pre-dates our baseline.
+// Filtering by start_time would silently drop those spans from both the
+// baseline snapshot AND every subsequent scan. Filtering by end_time matches
+// the natural arrival order and pairs cleanly with `MAX(end_time_ms)` as the
+// high-water mark.
+const OPERATION_NAME_CHAT = 'chat';
+const ATTR_CACHE_CREATION = 'gen_ai.usage.cache_creation.input_tokens';
+const ATTR_PARENT_CHAT_SESSION_ID = 'copilot_chat.parent_chat_session_id';
+
+export interface PerModelAggregate {
+  model: string | null;
+  chats: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
+export interface OTelReader {
+  isAvailable(): boolean;
+  aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[];
+  getLatestTimestamp(): number;
+  close(): void;
+}
+
+/**
+ * Resolve the upstream Copilot Chat OTel DB URI from our extension's
+ * globalStorage URI. Both extensions live as siblings under the user's
+ * globalStorage directory: `<base>/mooracle.copilot-budget/` (ours) and
+ * `<base>/github.copilot-chat/` (upstream). Go up one and across.
+ */
+export function resolveOTelDbUri(ourGlobalStorageUri: vscode.Uri): vscode.Uri {
+  return vscode.Uri.joinPath(
+    ourGlobalStorageUri,
+    '..',
+    'github.copilot-chat',
+    'agent-traces.db',
+  );
+}
+
+class OTelReaderImpl implements OTelReader {
+  private readonly dbPath: string;
+  private db: DatabaseSync | null = null;
+
+  constructor(dbPath: string) {
+    this.dbPath = dbPath;
+  }
+
+  isAvailable(): boolean {
+    if (!fs.existsSync(this.dbPath)) {
+      return false;
+    }
+    // File existence alone is not proof of usability: Copilot Chat can leave
+    // the file in a half-initialized state (zero-byte placeholder before any
+    // schema is written, or schema present but indexed tables not yet
+    // created). Probe BOTH tables that aggregateSince() depends on (`spans`
+    // and `span_attributes`) so isAvailable() reflects full queryability —
+    // probing only `spans` would let a half-built schema pass the readiness
+    // check while the actual scan throws on the missing `span_attributes`.
+    // On failure, drop the cached handle so the next call retries with a
+    // fresh open once Copilot Chat finishes initializing the DB.
+    try {
+      const db = this.ensureDb();
+      if (!db) return false;
+      db.prepare('SELECT 1 FROM spans LIMIT 1').get();
+      db.prepare('SELECT 1 FROM span_attributes LIMIT 1').get();
+      return true;
+    } catch {
+      this.close();
+      return false;
+    }
+  }
+
+  private ensureDb(): DatabaseSync | null {
+    if (this.db) {
+      return this.db;
+    }
+    if (!fs.existsSync(this.dbPath)) {
+      return null;
+    }
+    const db = new DatabaseSync(this.dbPath, { readOnly: true });
+    try {
+      db.exec('PRAGMA busy_timeout = 3000');
+    } catch {
+      // busy_timeout failure is non-fatal: the connection still works, we just
+      // forgo the 3-second wait when the writer holds a brief lock.
+    }
+    this.db = db;
+    return this.db;
+  }
+
+  aggregateSince(sinceMs: number, sessionIds: string[]): PerModelAggregate[] {
+    if (sessionIds.length === 0) {
+      // Empty window — nothing to attribute. Return without touching the DB.
+      return [];
+    }
+    const db = this.ensureDb();
+    if (!db) {
+      return [];
+    }
+
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const sql =
+      'SELECT' +
+      ' s.request_model AS model,' +
+      ' COUNT(*) AS chats,' +
+      ' COALESCE(SUM(s.input_tokens), 0) AS inputTokens,' +
+      ' COALESCE(SUM(s.output_tokens), 0) AS outputTokens,' +
+      ' COALESCE(SUM(s.cached_tokens), 0) AS cacheReadTokens,' +
+      " COALESCE(SUM(CAST(cc.value AS INTEGER)), 0) AS cacheCreationTokens" +
+      ' FROM spans s' +
+      ' LEFT JOIN span_attributes cc' +
+      '  ON cc.span_id = s.span_id AND cc.key = ?' +
+      ' WHERE s.operation_name = ?' +
+      '   AND s.end_time_ms > ?' +
+      '   AND (' +
+      `        s.chat_session_id IN (${placeholders})` +
+      '     OR EXISTS (' +
+      '          SELECT 1 FROM span_attributes pa' +
+      '          WHERE pa.span_id = s.span_id' +
+      '            AND pa.key = ?' +
+      `            AND pa.value IN (${placeholders})` +
+      '        )' +
+      '      )' +
+      ' GROUP BY s.request_model';
+    const params: Array<string | number> = [
+      ATTR_CACHE_CREATION,
+      OPERATION_NAME_CHAT,
+      sinceMs,
+      ...sessionIds,
+      ATTR_PARENT_CHAT_SESSION_ID,
+      ...sessionIds,
+    ];
+
+    const rows = db.prepare(sql).all(...params) as Array<{
+      model: string | null;
+      chats: number | bigint | null;
+      inputTokens: number | bigint | null;
+      outputTokens: number | bigint | null;
+      cacheReadTokens: number | bigint | null;
+      cacheCreationTokens: number | bigint | null;
+    }>;
+
+    return rows.map((r) => ({
+      model: r.model,
+      chats: toFiniteInt(r.chats),
+      inputTokens: toFiniteInt(r.inputTokens),
+      outputTokens: toFiniteInt(r.outputTokens),
+      cacheReadTokens: toFiniteInt(r.cacheReadTokens),
+      cacheCreationTokens: toFiniteInt(r.cacheCreationTokens),
+    }));
+  }
+
+  getLatestTimestamp(): number {
+    const db = this.ensureDb();
+    if (!db) {
+      return 0;
+    }
+    const row = db
+      .prepare(
+        'SELECT MAX(end_time_ms) AS maxTs FROM spans WHERE operation_name = ?',
+      )
+      .get(OPERATION_NAME_CHAT) as { maxTs: number | bigint | null } | undefined;
+    return toFiniteInt(row?.maxTs);
+  }
+
+  close(): void {
+    if (!this.db) {
+      return;
+    }
+    try {
+      this.db.close();
+    } catch {
+      // idempotent — swallow double-close races
+    }
+    this.db = null;
+  }
+}
+
+function toFiniteInt(value: number | bigint | null | undefined): number {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  const n = typeof value === 'bigint' ? Number(value) : value;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Construct an OTelReader rooted at the upstream agent-traces.db that lives
+ * next to our extension's globalStorage folder. The reader is lazy — it does
+ * not open the DB until `aggregateSince` / `getLatestTimestamp` is first
+ * called, so wiring it at activation has no cost when OTel is off.
+ */
+export function createOTelReader(ourGlobalStorageUri: vscode.Uri): OTelReader {
+  const dbPath = resolveOTelDbUri(ourGlobalStorageUri).fsPath;
+  return new OTelReaderImpl(dbPath);
+}

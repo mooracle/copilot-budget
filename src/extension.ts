@@ -1,20 +1,27 @@
 import * as vscode from 'vscode';
 import { Tracker } from './tracker';
-import { createStatusBar, showStatsQuickPick } from './statusBar';
+import { createStatusBar, StatusBarHandle } from './statusBar';
+import { showBudgetPanel } from './budgetPanel';
 import {
   writeTrackingFile,
   readTrackingFile,
   isTrackingFileTruncated,
 } from './trackingFile';
 import { installHook, uninstallHook } from './commitHook';
-import { isEnabled, isCommitHookEnabled, onConfigChanged } from './config';
-import { getDiscoveryDiagnostics } from './sessionDiscovery';
+import {
+  isEnabled,
+  isCommitHookEnabled,
+  isOTelDbExporterEnabled,
+  autoEnableOTel,
+  onConfigChanged,
+} from './config';
+import { discoverSessionIds, getDiscoveryDiagnostics } from './sessionDiscovery';
+import { createOTelReader } from './otelReader';
 import { getOutputChannel, disposeLogger, log } from './logger';
 
 let tracker: Tracker | null = null;
-let statusBar: { item: vscode.StatusBarItem; dispose: () => void } | null =
-  null;
-let commitResetCheck: Promise<boolean> | null = null;
+let statusBar: StatusBarHandle | null = null;
+let consumeInFlight: Promise<boolean> | null = null;
 
 // Detect commit-hook truncation and rebase the tracker so the next commit
 // only reports activity that wasn't already in the consumed trailer.
@@ -24,28 +31,46 @@ let commitResetCheck: Promise<boolean> | null = null;
 // callers can skip writing stale cumulative stats over the freshly written
 // post-rebase file.
 //
-// Concurrency: overlapping callers share the in-flight promise rather than
-// getting `false` immediately. Without this, a 5s-poll call entering while
-// a stats-change call was mid-await would resolve to `false` and proceed to
-// write a pre-consume snapshot that could race the post-consume write and
-// reintroduce already-consumed trailers.
+// Concurrency: only the consume-and-write step is memoized. The truncation
+// probe is run fresh per caller so a slow-filesystem race can't latch a
+// stale `false`: if caller A's stat ran pre-truncation and resolved to false,
+// memoizing that result would cause a caller B arriving post-truncation to
+// reuse A's stale answer and write pre-consume stats over the truncated
+// signal. Memoizing only the consume step keeps overlapping positive callers
+// from running two parallel rebases against the same source.
 function checkCommitReset(): Promise<boolean> {
   if (!tracker) return Promise.resolve(false);
-  if (commitResetCheck) return commitResetCheck;
-  commitResetCheck = (async () => {
-    try {
-      if (!tracker || !(await isTrackingFileTruncated())) return false;
-      await tracker.consume();
-      log('Tracking file truncated by commit hook — stats rebased to last snapshot');
-      if (tracker) {
-        await writeTrackingFile(tracker.getStats()).catch(() => {});
+  return (async () => {
+    if (!tracker) return false;
+    // Always re-probe truncation; never share a negative result across
+    // callers. See concurrency note above.
+    if (!(await isTrackingFileTruncated())) return false;
+    if (!tracker) return false;
+    if (consumeInFlight) return consumeInFlight;
+    consumeInFlight = (async () => {
+      try {
+        if (!tracker) return false;
+        // consume() may bail (returning false) if the tracker is disposed
+        // mid-rebase — e.g., the extension deactivates while the truncation
+        // probe is in flight. In that case there's no fresh snapshot to
+        // write back, so we skip the post-rebase tracking-file write but
+        // still return `true` so overlapping callers don't re-enter.
+        const rebased = await tracker.consume();
+        if (!rebased) {
+          log('Tracking file truncated but consume() bailed (tracker disposed); skipping write');
+          return true;
+        }
+        log('Tracking file truncated by commit hook — stats rebased to last snapshot');
+        if (tracker) {
+          await writeTrackingFile(tracker.getStats()).catch(() => {});
+        }
+        return true;
+      } finally {
+        consumeInFlight = null;
       }
-      return true;
-    } finally {
-      commitResetCheck = null;
-    }
+    })();
+    return consumeInFlight;
   })();
-  return commitResetCheck;
 }
 
 const ALL_COMMANDS = [
@@ -71,17 +96,24 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
       ch.appendLine(`Home directory: ${diag.homedir}`);
       ch.appendLine('');
       ch.appendLine(`Storage URI: ${diag.storageUri ?? '(none — empty window)'}`);
-      ch.appendLine(`Chat sessions dir: ${diag.chatSessionsDir ?? '(none — empty window)'}`);
+      ch.appendLine(`Transcripts dir: ${diag.transcriptsDir ?? '(none — empty window)'}`);
+      ch.appendLine(`Legacy chatSessions dir: ${diag.legacyChatSessionsDir ?? '(none — empty window)'}`);
       ch.appendLine('');
-      ch.appendLine(`Session files found: ${diag.filesFound.length}`);
+      ch.appendLine(`Session IDs found: ${diag.filesFound.length}`);
       for (const f of diag.filesFound) {
         ch.appendLine(`  ${f}`);
       }
 
       if (tracker) {
-        // Force a fresh scan so the per-file breakdown reflects what's on
-        // disk right now, not whatever was cached up to ~30s ago.
-        await tracker.update();
+        // Force a fresh scan so the breakdown reflects what's on disk right
+        // now, not whatever was cached up to ~30s ago. A scan failure (e.g.,
+        // transient OTel DB error) shouldn't break the diagnostics output —
+        // fall back to the last cached stats.
+        try {
+          await tracker.update();
+        } catch (err) {
+          log(`showDiagnostics: tracker.update failed: ${String(err)}`);
+        }
         const stats = tracker.getStats();
         ch.appendLine('');
         ch.appendLine('Current stats:');
@@ -90,36 +122,6 @@ function registerShowDiagnostics(context: vscode.ExtensionContext): void {
         ch.appendLine(`  AI Credits: ${stats.totalAiCredits.toFixed(2)}`);
         ch.appendLine(`  Since: ${stats.since}`);
         ch.appendLine(`  Last updated: ${stats.lastUpdated}`);
-
-        const perFile = tracker.getFileDiagnostics();
-        ch.appendLine('');
-        ch.appendLine(`Per-file breakdown (${perFile.length} file(s)):`);
-        for (const f of perFile) {
-          ch.appendLine(`  ${f.path}`);
-          ch.appendLine(`    mtime: ${new Date(f.mtime).toISOString()}`);
-          ch.appendLine(
-            `    in baseline: ${f.inBaseline ? 'yes (pre-session content folded into baseline)' : 'no (entire file counts toward session delta)'}`,
-          );
-          ch.appendLine(`    interactions: ${f.interactions}`);
-          const models = Object.entries(f.modelUsage);
-          if (models.length === 0) {
-            ch.appendLine('    models: (none)');
-          } else {
-            for (const [model, tokens] of models) {
-              const total =
-                tokens.inputTokens +
-                tokens.outputTokens +
-                tokens.cacheReadTokens +
-                tokens.cacheCreationTokens;
-              const turns = f.modelInteractions[model] ?? 0;
-              ch.appendLine(
-                `    ${model}: ${total} tokens across ${turns} turn(s) ` +
-                  `(in=${tokens.inputTokens}, out=${tokens.outputTokens}, ` +
-                  `cr=${tokens.cacheReadTokens}, cc=${tokens.cacheCreationTokens})`,
-              );
-            }
-          }
-        }
       }
 
       ch.show();
@@ -168,7 +170,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
-  tracker = new Tracker(context.storageUri);
+  // Auto-enable the upstream OTel exporter on first run per-workspace. This is
+  // a strictly-asymmetric write: only flips unset → true, never overwrites an
+  // explicit user choice. Failures are logged inside the helper and never
+  // throw, so a transient settings-write error cannot block activation.
+  await autoEnableOTel();
+
+  const sessionIdsFn = () => discoverSessionIds(context.storageUri);
+  const reader = createOTelReader(context.globalStorageUri);
+  tracker = new Tracker(reader, sessionIdsFn);
 
   // Restore stats from previous session (if tracking file exists)
   const trackingFile = await readTrackingFile();
@@ -199,6 +209,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   statusBar = createStatusBar(tracker);
   context.subscriptions.push({ dispose: () => statusBar?.dispose() });
 
+  // Status-bar nudge: when the upstream OTel setting is on but `agent-traces.db`
+  // hasn't appeared yet (typical right after auto-enable, before reload), show
+  // a clickable "reload to start tracking" status bar item until the DB shows
+  // up. Clearing is driven by the 5s poll below rather than by onStatsChanged:
+  // the DB can appear without producing any spans for our session ids (no chat
+  // yet, or spans belong to other windows), which would mean no stats event
+  // ever fires and the nudge would persist indefinitely.
+  let nudgeCleared = false;
+  if (isOTelDbExporterEnabled() && !reader.isAvailable()) {
+    statusBar.setNudge(true);
+  } else {
+    nudgeCleared = true;
+  }
+
   // Write tracking file whenever stats change. Check for hook truncation
   // first: if the hook just consumed accumulated trailers, the tracker must
   // be reset so the next write doesn't re-emit stale TR_ lines. Re-read
@@ -217,8 +241,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // session-file change, leaving the in-memory tracker out of sync with the
   // on-disk "consumed" signal. When no truncation is detected we still re-
   // write current stats so external readers (status bar consumers, manual
-  // file inspection) see a fresh snapshot.
+  // file inspection) see a fresh snapshot. The same tick also checks for the
+  // OTel DB appearing so the nudge clears even when no stats event fires.
   const trackingFileRefresh = setInterval(() => {
+    if (!nudgeCleared && reader.isAvailable()) {
+      statusBar?.setNudge(false);
+      nudgeCleared = true;
+    }
     if (!tracker) return;
     checkCommitReset().then((wasReset) => {
       if (tracker && !wasReset) writeTrackingFile(tracker.getStats()).catch(() => {});
@@ -229,7 +258,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.showStats', () => {
-      if (tracker) showStatsQuickPick(tracker);
+      if (tracker) {
+        showBudgetPanel({ tracker }).catch((err) =>
+          log(`showBudgetPanel failed: ${String(err)}`),
+        );
+      }
     }),
   );
 
@@ -256,14 +289,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-budget.toggleCommitHook', async () => {
+      // Hook action first; persist setting only on success. See
+      // budgetPanel.handleHookToggle for the rationale — the setting and
+      // disk state must stay in sync or we re-attempt failing installs on
+      // every later config change. The settings write can also fail (locked
+      // settings.json, Sync provider error); warn the user when it does so
+      // they know disk and config have drifted.
       const newState = !isCommitHookEnabled();
-      await vscode.workspace
-        .getConfiguration('copilot-budget')
-        .update('commitHook.enabled', newState, vscode.ConfigurationTarget.Global);
-      if (newState) {
-        await installHook();
-      } else {
-        await uninstallHook();
+      const succeeded = newState ? await installHook() : await uninstallHook();
+      if (!succeeded) return;
+      try {
+        await vscode.workspace
+          .getConfiguration('copilot-budget')
+          .update('commitHook.enabled', newState, vscode.ConfigurationTarget.Global);
+      } catch {
+        vscode.window.showWarningMessage(
+          `Copilot Budget: Hook ${newState ? 'installed' : 'removed'}, but failed to save the commitHook.enabled setting — disk state and setting may now disagree.`,
+        );
       }
     }),
   );
@@ -282,6 +324,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
   context.subscriptions.push(configSub);
+
 }
 
 export async function deactivate(): Promise<void> {
@@ -300,6 +343,6 @@ export async function deactivate(): Promise<void> {
     statusBar.dispose();
     statusBar = null;
   }
-  commitResetCheck = null;
+  consumeInFlight = null;
   disposeLogger();
 }

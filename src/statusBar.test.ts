@@ -1,8 +1,4 @@
-import {
-  createStatusBar,
-  formatAicShort,
-  showStatsQuickPick,
-} from './statusBar';
+import { createStatusBar } from './statusBar';
 import { Tracker, TrackingStats } from './tracker';
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -10,15 +6,33 @@ import { loadRateCard, resetRateCardForTesting } from './tokenRates';
 
 jest.mock('./tracker');
 jest.mock('./sessionDiscovery');
-jest.mock('./sessionParser');
-jest.mock('./config', () => ({
-  isCommitHookEnabled: jest.fn().mockReturnValue(true),
-}));
+jest.mock('./config', () => {
+  const listeners: Array<(e: { affectsConfiguration: (key: string) => boolean }) => void> = [];
+  return {
+    getDisplayCurrency: jest.fn().mockReturnValue('aic'),
+    onConfigChanged: jest.fn((cb: (e: { affectsConfiguration: (key: string) => boolean }) => void) => {
+      listeners.push(cb);
+      return { dispose: jest.fn(() => {
+        const idx = listeners.indexOf(cb);
+        if (idx >= 0) listeners.splice(idx, 1);
+      }) };
+    }),
+    __fireConfigChange: (key: string) => {
+      const e = { affectsConfiguration: (k: string) => k === key };
+      for (const cb of [...listeners]) cb(e);
+    },
+    __getConfigListenerCount: () => listeners.length,
+  };
+});
 
-import { isCommitHookEnabled } from './config';
-const mockIsCommitHookEnabled = isCommitHookEnabled as jest.MockedFunction<
-  typeof isCommitHookEnabled
+import { getDisplayCurrency } from './config';
+const mockGetDisplayCurrency = getDisplayCurrency as jest.MockedFunction<
+  typeof getDisplayCurrency
 >;
+const configModule = jest.requireMock('./config') as {
+  __fireConfigChange: (key: string) => void;
+  __getConfigListenerCount: () => number;
+};
 
 const mockWindow = vscode.window as any;
 
@@ -85,7 +99,7 @@ describe('statusBar', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockIsCommitHookEnabled.mockReturnValue(true);
+    mockGetDisplayCurrency.mockReturnValue('aic');
     createdItem = {
       text: '',
       tooltip: '' as any,
@@ -111,7 +125,7 @@ describe('statusBar', () => {
       expect(createdItem.name).toBe('Copilot Budget');
     });
 
-    it('sets initial text with AIC integer (no commit-hook suffix)', () => {
+    it('sets initial text as AIC integer (no tilde)', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -127,8 +141,16 @@ describe('statusBar', () => {
       expect(createdItem.text).toBe('$(credit-card) 0 AIC');
     });
 
+    it('renders USD when displayCurrency is usd', () => {
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      // 1.726 AIC → Math.ceil → 2 AIC → $0.02
+      expect(createdItem.text).toBe('$(credit-card) $0.02');
+    });
+
     it('does not include commit-hook indicator in status bar text', () => {
-      mockIsCommitHookEnabled.mockReturnValue(false);
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -143,7 +165,7 @@ describe('statusBar', () => {
       expect(value).not.toContain('Commit hook');
     });
 
-    it('sets tooltip as a MarkdownString with total AIC', () => {
+    it('sets tooltip as a MarkdownString with total AIC (no tilde)', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -151,10 +173,11 @@ describe('statusBar', () => {
       const value = (createdItem.tooltip as vscode.MarkdownString).value;
       expect(value).toContain('Total:');
       expect(value).toContain('1.73 AIC');
+      expect(value).not.toContain('~');
       expect(value).not.toContain('$');
     });
 
-    it('tooltip lists per-model rows with AIC only', () => {
+    it('tooltip lists per-model rows without tilde', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -163,10 +186,20 @@ describe('statusBar', () => {
       expect(value).toContain('0.94 AIC');
       expect(value).toContain('Claude Sonnet 4.6');
       expect(value).toContain('0.79 AIC');
+      expect(value).not.toContain('~');
       expect(value).not.toContain('$');
     });
 
-    it('tooltip does not include the heuristic disclosure note', () => {
+    it('tooltip carries no mode disclosure note', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      const value = (createdItem.tooltip as vscode.MarkdownString).value;
+      expect(value).not.toContain('Estimate assumes no caching');
+      expect(value).not.toContain("Measured via Copilot's OTel database");
+    });
+
+    it('tooltip does not include the old 75% heuristic note', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
 
@@ -212,6 +245,42 @@ describe('statusBar', () => {
       expect(subDispose).toHaveBeenCalled();
     });
 
+    it('refreshes text immediately when displayCurrency changes', () => {
+      // Without the config subscription, the status bar would stay in the old
+      // unit until the next stats change — on an idle workspace, that could be
+      // arbitrarily far away.
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+
+      expect(createdItem.text).toBe('$(credit-card) 2 AIC');
+
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      configModule.__fireConfigChange('copilot-budget.displayCurrency');
+
+      expect(createdItem.text).toBe('$(credit-card) $0.02');
+    });
+
+    it('ignores config changes that do not affect displayCurrency', () => {
+      const { tracker } = createMockTracker(makeStats());
+      createStatusBar(tracker);
+      const initialText = createdItem.text;
+
+      mockGetDisplayCurrency.mockReturnValue('usd');
+      configModule.__fireConfigChange('copilot-budget.commitHook.enabled');
+
+      expect(createdItem.text).toBe(initialText);
+    });
+
+    it('disposes the config subscription on dispose', () => {
+      const { tracker } = createMockTracker(makeStats());
+      const { dispose } = createStatusBar(tracker);
+      const before = configModule.__getConfigListenerCount();
+
+      dispose();
+
+      expect(configModule.__getConfigListenerCount()).toBe(before - 1);
+    });
+
     it('wires showStats command', () => {
       const { tracker } = createMockTracker(makeStats());
       createStatusBar(tracker);
@@ -220,182 +289,49 @@ describe('statusBar', () => {
     });
   });
 
-  describe('showStatsQuickPick', () => {
-    it('shows total AIC in header', async () => {
+  describe('setNudge', () => {
+    it('default state (no setNudge call) renders normal cost', () => {
       const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
+      createStatusBar(tracker);
 
-      expect(mockWindow.showQuickPick).toHaveBeenCalledTimes(1);
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const totalItem = items.find((i: any) => i.label?.includes('Total'));
-      expect(totalItem).toBeDefined();
-      expect(totalItem.label).toContain('1.73 AIC');
-      expect(totalItem.label).not.toMatch(/\$\d/);
-      expect(totalItem.description).toBeUndefined();
+      expect(createdItem.text).toBe('$(credit-card) 2 AIC');
+      expect(createdItem.command).toBe('copilot-budget.showStats');
     });
 
-    it('shows tracking since timestamp', async () => {
+    it('setNudge(true) renders reload-to-track text with reloadWindow command', () => {
       const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
+      const handle = createStatusBar(tracker);
 
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const sinceItem = items.find((i: any) =>
-        i.label?.includes('Tracking since'),
-      );
-      expect(sinceItem).toBeDefined();
+      handle.setNudge(true);
+
+      expect(createdItem.text).toContain('reload to start tracking');
+      expect(createdItem.text).toContain('$(refresh)');
+      expect(createdItem.command).toBe('workbench.action.reloadWindow');
     });
 
-    it('shows per-model AIC, with all four token buckets in detail', async () => {
+    it('setNudge(false) restores normal cost rendering and showStats command', () => {
       const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
+      const handle = createStatusBar(tracker);
 
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const claudeItem = items.find((i: any) =>
-        i.label?.includes('Claude Sonnet 4.6'),
-      );
-      expect(claudeItem).toBeDefined();
-      expect(claudeItem.description).toBe('0.79 AIC');
-      expect(claudeItem.description).not.toContain('$');
-      expect(claudeItem.detail).toContain('in:');
-      expect(claudeItem.detail).toContain('cache_read:');
-      expect(claudeItem.detail).toContain('cache_creation:');
-      expect(claudeItem.detail).toContain('out:');
-      expect(claudeItem.detail).toContain('500');
-      expect(claudeItem.detail).toContain('1,200');
-      expect(claudeItem.detail).toContain('300');
-      expect(claudeItem.detail).toContain('2,000');
+      handle.setNudge(true);
+      expect(createdItem.text).toContain('reload to start tracking');
+
+      handle.setNudge(false);
+
+      expect(createdItem.text).toBe('$(credit-card) 2 AIC');
+      expect(createdItem.command).toBe('copilot-budget.showStats');
     });
 
-    it('does not include premium-request column anywhere', async () => {
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
+    it('nudge text persists across stats updates while visible', () => {
+      const { tracker, fireStatsChanged } = createMockTracker(makeStats());
+      const handle = createStatusBar(tracker);
 
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const serialized = JSON.stringify(items);
-      expect(serialized).not.toMatch(/\bPR\b/);
-      expect(serialized.toLowerCase()).not.toContain('premium request');
-    });
+      handle.setNudge(true);
+      fireStatsChanged(makeStats({ totalAiCredits: 999 }));
 
-    it('includes a separator before models', async () => {
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const separators = items.filter(
-        (i: any) => i.kind === vscode.QuickPickItemKind.Separator,
-      );
-      expect(separators.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('handles empty models gracefully', async () => {
-      const { tracker } = createMockTracker(
-        makeStats({
-          models: {},
-          totalTokens: 0,
-          interactions: 0,
-          totalAiCredits: 0,
-        }),
-      );
-      await showStatsQuickPick(tracker);
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const modelItems = items.filter((i: any) => i.label?.includes('$(hubot)'));
-      expect(modelItems).toHaveLength(0);
-      const totalItem = items.find((i: any) => i.label?.includes('Total'));
-      expect(totalItem.label).toContain('0.00 AIC');
-      expect(totalItem.label).not.toMatch(/\$\d/);
-    });
-
-    it('does not include the heuristic disclosure note', async () => {
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const noteItem = items.find((i: any) =>
-        i.label?.includes('Estimate note'),
-      );
-      expect(noteItem).toBeUndefined();
-      const serialized = JSON.stringify(items);
-      expect(serialized).not.toContain('75%');
-    });
-
-    it('includes a Commit-Hook toggle showing ON when enabled', async () => {
-      mockIsCommitHookEnabled.mockReturnValue(true);
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const toggle = items.find((i: any) => i.label?.startsWith('Commit-Hook:'));
-      expect(toggle).toBeDefined();
-      expect(toggle.label).toContain('$(check) ON');
-      expect(toggle.label).not.toContain('OFF');
-    });
-
-    it('shows Commit-Hook toggle as OFF when disabled', async () => {
-      mockIsCommitHookEnabled.mockReturnValue(false);
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const items = mockWindow.showQuickPick.mock.calls[0][0] as any[];
-      const toggle = items.find((i: any) => i.label?.startsWith('Commit-Hook:'));
-      expect(toggle.label).toContain('$(circle-slash) OFF');
-      expect(toggle.label).not.toContain(' ON');
-    });
-
-    it('dispatches toggle command when user picks the Commit-Hook item', async () => {
-      mockIsCommitHookEnabled.mockReturnValue(false);
-      const { tracker } = createMockTracker(makeStats());
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.startsWith('Commit-Hook:')),
-      );
-
-      await showStatsQuickPick(tracker);
-
-      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
-        'copilot-budget.toggleCommitHook',
-      );
-    });
-
-    it('does not dispatch toggle when user picks a non-toggle item', async () => {
-      mockIsCommitHookEnabled.mockReturnValue(true);
-      const { tracker } = createMockTracker(makeStats());
-      mockWindow.showQuickPick.mockImplementationOnce(async (items: any[]) =>
-        items.find((i) => i.label?.includes('Total')),
-      );
-
-      await showStatsQuickPick(tracker);
-
-      expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
-    });
-
-    it('passes title and placeHolder to quick pick', async () => {
-      const { tracker } = createMockTracker(makeStats());
-      await showStatsQuickPick(tracker);
-
-      const options = mockWindow.showQuickPick.mock.calls[0][1];
-      expect(options.title).toBe('Copilot Budget');
-      expect(options.placeHolder).toBeTruthy();
+      expect(createdItem.text).toContain('reload to start tracking');
+      expect(createdItem.command).toBe('workbench.action.reloadWindow');
     });
   });
 
-  describe('formatAicShort', () => {
-    const cases: Array<[number, string]> = [
-      [0, '0 AIC'],
-      [1e-6, '1 AIC'],
-      [0.0001, '1 AIC'],
-      [0.4, '1 AIC'],
-      [0.5, '1 AIC'],
-      [1.0, '1 AIC'],
-      [14.5, '15 AIC'],
-      [15.0, '15 AIC'],
-      [-1, '0 AIC'],
-      [-0.0001, '0 AIC'],
-    ];
-
-    for (const [input, expected] of cases) {
-      it(`formats ${input} as ${expected}`, () => {
-        expect(formatAicShort(input)).toBe(expected);
-      });
-    }
-  });
 });

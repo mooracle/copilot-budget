@@ -37,7 +37,6 @@ interface RawRateEntry {
 }
 
 const KNOWN_PREFIXES = ['copilot/', 'copilotcli/', 'claude-code/'];
-const ALIASES: Record<string, string> = {};
 
 let rateMap: Map<string, RateCard> | null = null;
 let loadedFromPath: string | null = null;
@@ -140,7 +139,7 @@ function ensureLoaded(): Map<string, RateCard> {
   return rateMap;
 }
 
-function stripPrefix(modelId: string): string {
+export function stripModelPrefix(modelId: string): string {
   for (const prefix of KNOWN_PREFIXES) {
     if (modelId.startsWith(prefix)) {
       return modelId.slice(prefix.length);
@@ -152,8 +151,8 @@ function stripPrefix(modelId: string): string {
 /**
  * Look up a rate card by model id. Strips known prefixes (`copilot/`,
  * `copilotcli/`, `claude-code/`), lowercases, then checks the rate-card map
- * directly and falls back to an explicit alias table. Returns null when no
- * match is found — callers should record tokens but skip costing.
+ * directly. Returns null when no match is found — callers should record
+ * tokens but skip costing.
  *
  * No family/prefix fallback: future variants must appear in the rate card
  * before they get a price, to prevent silent misprice.
@@ -163,19 +162,8 @@ export function getRateCard(modelId: string): RateCard | null {
     return null;
   }
   const map = ensureLoaded();
-  const stripped = normalizeModelId(stripPrefix(modelId));
-  const direct = map.get(stripped);
-  if (direct) {
-    return direct;
-  }
-  const aliasTarget = ALIASES[stripped];
-  if (aliasTarget) {
-    const aliased = map.get(aliasTarget);
-    if (aliased) {
-      return aliased;
-    }
-  }
-  return null;
+  const stripped = normalizeModelId(stripModelPrefix(modelId));
+  return map.get(stripped) ?? null;
 }
 
 /**
@@ -208,11 +196,7 @@ export function getDisplayName(modelId: string): string {
   if (card) {
     return card.displayName;
   }
-  return normalizeModelId(stripPrefix(modelId));
-}
-
-export function getAllRates(): ReadonlyMap<string, RateCard> {
-  return ensureLoaded();
+  return normalizeModelId(stripModelPrefix(modelId));
 }
 
 /**

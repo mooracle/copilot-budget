@@ -26,10 +26,7 @@ export async function isTrackingFileTruncated(): Promise<boolean> {
   return fileStat !== null && fileStat.size === 0;
 }
 
-export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> {
-  const uri = await getTrackingFileUri();
-  if (!uri) return false;
-
+export function formatTrackingFile(stats: TrackingStats): string {
   const lines: string[] = [
     `SINCE=${stats.since}`,
     `INTERACTIONS=${stats.interactions}`,
@@ -51,11 +48,12 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
 
   // Only emit TR_ lines when there is real cost to report. The hook is
   // presence-gated on TR_ lines, so writing zero-valued trailers would
-  // append "Copilot-Est-Cost: $0.00" to every commit on idle sessions.
+  // append "Copilot-Est-Cost: 0.00" to every commit on idle sessions.
   if (stats.totalAiCredits > 0) {
     const trailers = getTrailerConfig();
+    // Trailer values are bare numbers; decoration is editor-surface-only (see amountFormatter.ts).
     if (trailers.estimatedCost) {
-      lines.push(`TR_${trailers.estimatedCost}=$${(stats.totalAiCredits / 100).toFixed(2)}`);
+      lines.push(`TR_${trailers.estimatedCost}=${(stats.totalAiCredits / 100).toFixed(2)}`);
     }
     if (trailers.aiCredits) {
       lines.push(`TR_${trailers.aiCredits}=${stats.totalAiCredits.toFixed(2)}`);
@@ -71,8 +69,14 @@ export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> 
     }
   }
 
+  return lines.join('\n') + '\n';
+}
+
+export async function writeTrackingFile(stats: TrackingStats): Promise<boolean> {
+  const uri = await getTrackingFileUri();
+  if (!uri) return false;
   try {
-    await writeTextFile(uri, lines.join('\n') + '\n');
+    await writeTextFile(uri, formatTrackingFile(stats));
     return true;
   } catch {
     return false;

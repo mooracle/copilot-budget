@@ -5,6 +5,34 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] - 2026-05-22
+
+Accurate cost tracking via Copilot Chat's OTel database. On first activation in a workspace where `github.copilot.chat.otel.dbSpanExporter.enabled` is unset at both Global and Workspace scope, the extension writes `true` at Workspace scope so Copilot Chat starts emitting spans. An explicit user choice in either scope is respected — the write is strictly asymmetric (only unset → `true`, never any other transition). After auto-enable Copilot Chat typically needs a reload before spans start landing; the status bar renders a clickable `$(refresh) Copilot Budget — reload to start tracking` nudge until the database appears. Per-span `input_tokens` / `output_tokens` / `cached_tokens` / `cache_creation_tokens` are read from the OTel SQLite store at `<globalStorage>/github.copilot-chat/agent-traces.db` via `node:sqlite`.
+
+### Added
+
+- **`autoEnableOTel()` in `config.ts`** — runs once per activation; writes `github.copilot.chat.otel.dbSpanExporter.enabled = true` at Workspace scope only when both Global and Workspace are `undefined`. Failures are caught and logged so a settings-write error cannot block activation.
+- **`OTelReader` (`src/otelReader.ts`)** — opens Copilot Chat's `agent-traces.db` readonly via `node:sqlite`. `aggregateSince(sinceMs, sessionIds)` is a single grouped SQL query that returns per-model token sums. Filter is `operation_name = 'chat' AND end_time_ms > ? AND (chat_session_id IN (?, ...) OR EXISTS (SELECT 1 FROM span_attributes WHERE key = 'copilot_chat.parent_chat_session_id' AND value IN (?, ...)))`. The OR-on-parent join captures background "title" subagent spans (gpt-4o-mini) that carry only a parent session id. Zero session ids returns `[]` without touching the DB.
+- **Session discovery scans the modern transcripts path first** (`<workspaceStorage>/<hash>/GitHub.copilot-chat/transcripts/`) and merges in legacy `chatSessions/` results (deduped by stem). `discoverSessionIds` returns `string[]` of UUID stems for the OTel session-id SQL filter. Diagnostics surface both directories under `transcriptsDir` / `legacyChatSessionsDir`.
+- **`statusBar.setNudge(visible: boolean)`** — renders `$(refresh) Copilot Budget — reload to start tracking` bound to `workbench.action.reloadWindow` when visible; otherwise the normal cost. Activation wires the nudge based on `isOTelDbExporterEnabled() && !reader.isAvailable()`; cleared exactly once via the `onStatsChanged` handler when the DB appears.
+- **Squash sums trailers** — `git rebase -i` with `squash` lines now leaves a single summed `Copilot-AI-Credits:` trailer instead of N duplicates. The hook detects interactive rebase via `$GIT_DIR/rebase-merge` (and am-style rebase via `$GIT_DIR/rebase-apply`). `git merge --squash` + `git commit` follows the same sum path via `$2 == squash`. The tracking file is left untouched during a rebase so accumulated usage flushes on the next normal commit. The opt-in aggregate per-model trailer (`Copilot-AI-Credits-Models: A=N,B=M`), the `Copilot-Est-Cost` USD trailer, and renamed trailer keys are left as-is — only the default `Copilot-AI-Credits` total is summed. Plain `git commit --fixup=X` followed by `git rebase --autosquash` loses the fixup's tracked usage; use `--fixup=amend:X` or `--fixup=reword:X` for trailers that survive.
+- **Copilot Budget panel** — single QuickPick with codicon-checkbox toggles (currency, commit hook), per-model breakdown, and Refresh. Replaces the old stats quick pick body; reuses the `copilot-budget.showStats` command id so existing keybindings continue to work. Command title is now *"Copilot Budget: Open Panel"*.
+- **Currency toggle** — new `copilot-budget.displayCurrency` setting (`"aic"` | `"usd"`, default `"aic"`, application-scoped). All user-facing surfaces route through `formatAmount(amount, { currency, precision })`. USD short rounds up to the next whole cent (`Math.ceil(amountAic) / 100`).
+
+### Changed
+
+- **Cost is measured per-span via OTel.** Token counts come from Copilot Chat's `agent-traces.db`, scoped to the current window via session-id filters. `cache_creation_tokens` is always populated for Claude models.
+- **Baseline filter** uses `end_time_ms > ?` (strict, not `>=`). OTel writers materialize spans on `onEnd`, so a request in flight at construction time appears later with a start time that pre-dates the baseline — filtering by end time matches arrival order and pairs cleanly with `MAX(end_time_ms)` as the high-water mark.
+- **Commit hook respects `core.hooksPath`.** `resolveHooksDir` reads `core.hooksPath` (resolving relative paths against the worktree root, matching git's own behavior) and falls back to `<gitCommonDir>/hooks` when unset. Install, uninstall, and `isHookInstalled` all stay aligned with where git actually looks (husky, lefthook, custom shared hook dirs).
+- **`extensionKind` reordered to `["workspace", "ui"]`** so VS Code prefers the workspace install in remote contexts (SSH, WSL, devcontainers, Codespaces), where both transcripts and the OTel DB live workspace-side. Empty-window activation still falls back to the UI host.
+- **esbuild target bumped to Node 22** so `node:sqlite` isn't downcompiled away.
+
+### Breaking
+
+- **Minimum VS Code version is now 1.103** (was 1.85). VS Code 1.103 is the first release bundling Electron 37 / Node 22.17.0, where `node:sqlite` is stable. Pre-1.103 VS Code installs cannot load this extension.
+- The old `copilot-budget.showStats` quick pick body is replaced by the Copilot Budget panel. The command id is preserved.
+- Explicitly setting `github.copilot.chat.otel.dbSpanExporter.enabled` to `false` (Global or Workspace scope) means Copilot Budget will not have any data to report until you flip it back. The auto-enable does not override explicit `false`.
+
 ## [1.0.1] - 2026-05-19
 
 ### Fixed

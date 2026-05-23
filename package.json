@@ -2,7 +2,7 @@
   "name": "copilot-budget",
   "displayName": "Copilot Budget",
   "description": "Track GitHub Copilot token usage and optionally append AI budget info to git commit messages",
-  "version": "1.0.1",
+  "version": "2.0.3",
   "publisher": "mooracle",
   "license": "MIT",
   "repository": {
@@ -13,8 +13,9 @@
     "url": "https://github.com/mooracle/copilot-budget/issues"
   },
   "homepage": "https://github.com/mooracle/copilot-budget#readme",
+  "_engines_note": "vscode ^1.103.0 is the earliest VS Code that bundles Node.js >= 22.16, the version that promoted node:sqlite from experimental to stable (Electron 37, Node 22.17.0). Required by src/otelReader.ts.",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.103.0"
   },
   "categories": [
     "Other"
@@ -37,15 +38,15 @@
     "onStartupFinished"
   ],
   "extensionKind": [
-    "ui",
-    "workspace"
+    "workspace",
+    "ui"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "copilot-budget.showStats",
-        "title": "Copilot Budget: Show Token Stats"
+        "title": "Copilot Budget: Open Panel"
       },
       {
         "command": "copilot-budget.resetTracking",
@@ -110,6 +111,16 @@
           ],
           "default": false,
           "markdownDescription": "Git trailer key for per-model AI Credits breakdown. Set to a string (e.g. `\"Copilot-AI-Credits-Models\"`) to enable."
+        },
+        "copilot-budget.displayCurrency": {
+          "type": "string",
+          "enum": [
+            "aic",
+            "usd"
+          ],
+          "default": "aic",
+          "scope": "application",
+          "markdownDescription": "Unit used for status bar, tooltip, and panel. `aic` shows AI Credits (1 AIC = $0.01, plan-invariant). `usd` converts to dollars at the same rate. Commit trailer values are always bare numbers (AIC for `Copilot-AI-Credits`, USD for the opt-in `Copilot-Est-Cost`) regardless of this setting. Stored at user (application) scope so the choice persists across windows."
         }
       }
     }
@@ -129,7 +140,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.8.0",
     "js-yaml": "^4.1.1",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.103.0",
     "esbuild": "^0.28.0",
     "eslint": "^10.4.0",
     "jest": "^30.4.2",

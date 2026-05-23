@@ -3,24 +3,20 @@ import {
   parseTrackingFileContent,
   readTrackingFile,
   isTrackingFileTruncated,
+  formatTrackingFile,
 } from './trackingFile';
 import { Tracker, TrackingStats } from './tracker';
-import * as fs from 'fs';
 import * as vscode from 'vscode';
 import * as gitDir from './gitDir';
 import * as fsUtils from './fsUtils';
 import * as config from './config';
 import * as tokenRates from './tokenRates';
-import * as sessionDiscovery from './sessionDiscovery';
-import * as sessionParser from './sessionParser';
+import type { OTelReader, PerModelAggregate } from './otelReader';
 
-jest.mock('fs');
 jest.mock('./gitDir');
 jest.mock('./fsUtils');
 jest.mock('./config');
 jest.mock('./tokenRates');
-jest.mock('./sessionDiscovery');
-jest.mock('./sessionParser');
 jest.mock('./logger');
 
 const mockVscode = vscode as any;
@@ -85,6 +81,46 @@ beforeEach(() => {
 });
 
 describe('trackingFile', () => {
+  describe('formatTrackingFile', () => {
+    it('emits TR_Copilot-AI-Credits line when totalAiCredits > 0', () => {
+      const content = formatTrackingFile(sampleStats);
+      expect(content).toContain('TR_Copilot-AI-Credits=42.31');
+      // Format is newline-terminated key=value pairs.
+      expect(content.endsWith('\n')).toBe(true);
+      expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
+      expect(content).not.toContain('MODE=');
+    });
+
+    it('omits all TR_ lines when totalAiCredits is zero', () => {
+      const zeroStats: TrackingStats = {
+        since: '2024-01-15T10:30:00Z',
+        lastUpdated: '2024-01-15T10:30:00Z',
+        models: {},
+        totalTokens: 0,
+        interactions: 0,
+        totalAiCredits: 0,
+      };
+
+      const content = formatTrackingFile(zeroStats);
+      expect(content).not.toContain('TR_');
+      expect(content).toContain('TOTAL_AI_CREDITS=0.00');
+    });
+
+    it('emits aiCreditsPerModel TR_ line when enabled, sorted descending', () => {
+      mockGetTrailerConfig.mockReturnValue({
+        estimatedCost: false,
+        aiCredits: 'Copilot-AI-Credits',
+        aiCreditsPerModel: 'Copilot-AI-Credits-Models',
+      });
+
+      const content = formatTrackingFile(sampleStats);
+      expect(content).toContain(
+        'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
+      );
+      expect(content).toContain('TR_Copilot-AI-Credits=42.31');
+    });
+  });
+
   describe('writeTrackingFile', () => {
     it('writes stats in new v0.6 key=value schema', async () => {
       setupWorkspace('/project');
@@ -99,6 +135,7 @@ describe('trackingFile', () => {
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
       expect(content).toContain('INTERACTIONS=15');
       expect(content).toContain('TOTAL_AI_CREDITS=42.31');
+      expect(content).not.toContain('MODE=');
       expect(content).not.toContain('TOTAL_COST_USD');
 
       expect(content).toContain('MODEL_gpt-4.1_INPUT_TOKENS=1500');
@@ -196,7 +233,7 @@ describe('trackingFile', () => {
       expect(content).not.toContain('TR_Copilot-AI-Credits-Models');
     });
 
-    it('emits Copilot-Est-Cost TR_ line with $ prefix only when estimatedCost is explicitly enabled', async () => {
+    it('emits Copilot-Est-Cost TR_ line as a bare USD number when estimatedCost is enabled', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -208,11 +245,11 @@ describe('trackingFile', () => {
       const content = mockWriteTextFile.mock.calls[0][1];
 
       const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-Est-Cost='));
-      // USD is derived inline as totalAiCredits / 100 at trailer-write time (42.31 → $0.42).
-      expect(line).toBe('TR_Copilot-Est-Cost=$0.42');
+      // USD is derived inline as totalAiCredits / 100 at trailer-write time (42.31 → 0.42).
+      expect(line).toBe('TR_Copilot-Est-Cost=0.42');
     });
 
-    it('aiCredits TR_ value has no $ prefix and 2 decimals', async () => {
+    it('aiCredits TR_ value is a bare 2-decimal number', async () => {
       setupWorkspace('/project');
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
@@ -221,7 +258,7 @@ describe('trackingFile', () => {
       expect(line).toBe('TR_Copilot-AI-Credits=42.31');
     });
 
-    it('writes aiCreditsPerModel TR_ line using display names, sorted descending', async () => {
+    it('writes aiCreditsPerModel TR_ line using display names, sorted descending, bare numbers', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -232,11 +269,12 @@ describe('trackingFile', () => {
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      // Claude Sonnet 4.6 has 0.3497 cost = 34.97 credits, GPT-4.1 has 0.0734 = 7.34 credits.
-      // Sorted descending by credits.
+      // Claude Sonnet 4.6 has 34.97 credits, GPT-4.1 has 7.34. Sorted descending.
+      // Bare numeric values, no ~ on either side of =.
       expect(content).toContain(
         'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
       );
+      expect(content).not.toContain('=~');
     });
 
     it('omits aiCreditsPerModel TR_ line when no models tracked', async () => {
@@ -287,10 +325,23 @@ describe('trackingFile', () => {
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      expect(content).toContain('TR_AI-Cost=$0.42');
+      // All trailer values are bare numbers — no $ on estimated-cost, no ~
+      // on AI-Credits — regardless of mode.
+      expect(content).toContain('TR_AI-Cost=0.42');
       expect(content).toContain('TR_AI-Credits=42.31');
       expect(content).toMatch(/TR_AI-Credits-Per-Model=/);
       expect(content).not.toContain('Copilot-');
+      expect(content).not.toContain('$0.42');
+      expect(content).not.toContain('=~');
+    });
+
+    it('does not write a MODE= line (field removed in 3.0)', async () => {
+      setupWorkspace('/project');
+      await writeTrackingFile(sampleStats);
+      const content = mockWriteTextFile.mock.calls[0][1];
+
+      expect(content).not.toContain('MODE=');
+      expect(content).not.toMatch(/^MODE=/m);
     });
 
     it('handles stats with no models', async () => {
@@ -724,36 +775,28 @@ describe('trackingFile', () => {
       (tokenRates.computeCost as jest.Mock).mockReturnValue(FRESH_COST_AIC);
       // initialize() snapshots an empty baseline so subsequent fresh activity
       // shows up as a positive delta on update().
-      (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([]);
+      let aggregateBatch: PerModelAggregate[] = [];
+      const reader: OTelReader = {
+        isAvailable: () => true,
+        aggregateSince: () => aggregateBatch,
+        getLatestTimestamp: () => 0,
+        close: () => {},
+      };
 
-      const tracker = new Tracker(undefined);
+      const tracker = new Tracker(reader, () => ['session-1']);
       tracker.setPreviousStats(restored!);
       await tracker.initialize();
 
-      const FILE_PATH = '/tmp/session.json';
-      (sessionDiscovery.discoverSessionFiles as jest.Mock).mockReturnValue([FILE_PATH]);
-      (fs.statSync as jest.Mock).mockImplementation(
-        () => ({ mtimeMs: 1 }) as fs.Stats,
-      );
-      (fs.readFileSync as jest.Mock).mockReturnValue('{}');
-      (sessionParser.createParserState as jest.Mock).mockReturnValue({
-        sessionState: {},
-      });
-      (sessionParser.applyDeltaLines as jest.Mock).mockImplementation(
-        (_lines, state) => state,
-      );
-      (sessionParser.aggregateFromState as jest.Mock).mockReturnValue({
-        interactions: 5,
-        modelUsage: {
-          'gpt-4.1': {
-            inputTokens: 2000,
-            outputTokens: 1000,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-          },
+      aggregateBatch = [
+        {
+          model: 'gpt-4.1',
+          chats: 5,
+          inputTokens: 2000,
+          outputTokens: 1000,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
         },
-        modelInteractions: { 'gpt-4.1': 5 },
-      });
+      ];
 
       await tracker.update();
       const stats = tracker.getStats();

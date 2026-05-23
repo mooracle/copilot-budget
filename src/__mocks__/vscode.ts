@@ -1,7 +1,17 @@
 // Minimal VS Code API mock for unit tests
 // Store for overriding config values in tests
 export const __configStore: Record<string, any> = {};
+// Per-key inspect() shape: tests populate with {globalValue, workspaceValue, ...}
+// to control config.inspect(key) return value. Keyed by full section.key string.
+export const __inspectStore: Record<string, any> = {};
 export const __configChangeListeners: Array<(e: any) => void> = [];
+// Spy capturing every `getConfiguration(section).update(key, value, target)` call so
+// tests can assert configuration writes (panel currency/OTel toggles, etc).
+// Tests using this should call `__workspaceUpdate.mockClear()` in beforeEach
+// since it persists across tests within the module.
+export const __workspaceUpdate = jest.fn(
+  async (_section: string | undefined, _key: string, _value: any, _target?: any) => {},
+);
 
 export const workspace = {
   getConfiguration: (section?: string) => ({
@@ -10,8 +20,12 @@ export const workspace = {
       return fullKey in __configStore ? __configStore[fullKey] : (defaultValue as T);
     },
     has: () => false,
-    inspect: () => undefined,
-    update: async () => {},
+    inspect: (key: string) => {
+      const fullKey = section ? `${section}.${key}` : key;
+      return fullKey in __inspectStore ? __inspectStore[fullKey] : undefined;
+    },
+    update: (key: string, value: any, target?: any) =>
+      __workspaceUpdate(section, key, value, target),
   }),
   workspaceFolders: undefined as any,
   onDidChangeConfiguration: (listener: (e: any) => void) => {
@@ -87,6 +101,12 @@ export enum FileType {
   SymbolicLink = 64,
 }
 
+export enum ConfigurationTarget {
+  Global = 1,
+  Workspace = 2,
+  WorkspaceFolder = 3,
+}
+
 export class Uri {
   readonly scheme: string;
   readonly path: string;
@@ -126,6 +146,33 @@ export class Uri {
 
   toString(): string {
     return `${this.scheme}://${this.path}`;
+  }
+}
+
+export class FileSystemError extends Error {
+  readonly code: string;
+  constructor(messageOrUri?: string | Uri, code: string = 'Unknown') {
+    super(typeof messageOrUri === 'string' ? messageOrUri : messageOrUri?.toString());
+    this.code = code;
+    this.name = 'FileSystemError';
+  }
+  static FileNotFound(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileNotFound');
+  }
+  static FileExists(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileExists');
+  }
+  static FileNotADirectory(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileNotADirectory');
+  }
+  static FileIsADirectory(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'FileIsADirectory');
+  }
+  static NoPermissions(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'NoPermissions');
+  }
+  static Unavailable(messageOrUri?: string | Uri): FileSystemError {
+    return new FileSystemError(messageOrUri, 'Unavailable');
   }
 }
 

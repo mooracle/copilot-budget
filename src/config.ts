@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
+import { log } from './logger';
+import { errorMessage } from './utils';
 
 const SECTION = 'copilot-budget';
+
+// Upstream Copilot Chat setting that turns the OTel SQLite exporter on. When
+// true, Copilot Chat writes per-request spans (with measured cache splits) to
+// `agent-traces.db` next to its globalStorage folder. We only ever flip this
+// to true via our budget panel — never to false (see CLAUDE.md / plan §246).
+export const OTEL_SECTION = 'github.copilot.chat.otel';
+export const OTEL_KEY = 'dbSpanExporter.enabled';
 
 function cfg(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration(SECTION);
@@ -8,6 +17,11 @@ function cfg(): vscode.WorkspaceConfiguration {
 
 export function isEnabled(): boolean {
   return cfg().get<boolean>('enabled', true);
+}
+
+export function getDisplayCurrency(): 'aic' | 'usd' {
+  const v = cfg().get<string>('displayCurrency', 'aic');
+  return v === 'usd' ? 'usd' : 'aic';
 }
 
 export function isCommitHookEnabled(): boolean {
@@ -50,4 +64,29 @@ export function onConfigChanged(
       callback(e);
     }
   });
+}
+
+export function isOTelDbExporterEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration(OTEL_SECTION)
+    .get<boolean>(OTEL_KEY, false);
+}
+
+// On first activation in a workspace where the upstream OTel setting is unset
+// at both Global and Workspace scope, flip it to true at Workspace scope so
+// Copilot Chat starts emitting spans. Explicit user choice (either scope) is
+// respected — we never overwrite. Failures are logged but never thrown so a
+// transient setting-write error does not block activation.
+export async function autoEnableOTel(): Promise<void> {
+  try {
+    const cfg = vscode.workspace.getConfiguration(OTEL_SECTION);
+    const inspected = cfg.inspect(OTEL_KEY);
+    const explicitlySet =
+      inspected?.globalValue !== undefined ||
+      inspected?.workspaceValue !== undefined;
+    if (explicitlySet) return;
+    await cfg.update(OTEL_KEY, true, vscode.ConfigurationTarget.Workspace);
+  } catch (err) {
+    log(`autoEnableOTel: failed to write setting — ${errorMessage(err)}`);
+  }
 }

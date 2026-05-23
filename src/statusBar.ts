@@ -1,42 +1,22 @@
 import * as vscode from 'vscode';
-import { Tracker, TrackingStats, ModelStats } from './tracker';
+import { Tracker, TrackingStats } from './tracker';
 import { getDisplayName } from './tokenRates';
-import { isCommitHookEnabled } from './config';
-
-function formatNumber(n: number): string {
-  return n.toLocaleString('en-US');
-}
-
-function formatAic(n: number): string {
-  return `${n.toFixed(2)} AIC`;
-}
-
-export function formatAicShort(n: number): string {
-  if (!(n > 0)) {
-    return '0 AIC';
-  }
-  return `${Math.ceil(n)} AIC`;
-}
-
-function totalModelTokens(usage: ModelStats): number {
-  return (
-    usage.inputTokens +
-    usage.outputTokens +
-    usage.cacheReadTokens +
-    usage.cacheCreationTokens
-  );
-}
+import { getDisplayCurrency, onConfigChanged } from './config';
+import { formatAmount } from './amountFormatter';
 
 function buildTooltip(stats: TrackingStats): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
-  md.appendMarkdown(`**Total:** ${formatAic(stats.totalAiCredits)}\n\n`);
+  const currency = getDisplayCurrency();
+  md.appendMarkdown(
+    `**Total:** ${formatAmount(stats.totalAiCredits, { currency, precision: 'full' })}\n\n`,
+  );
 
   const entries = Object.entries(stats.models);
   if (entries.length > 0) {
     for (const [model, usage] of entries) {
       md.appendMarkdown(
-        `- ${getDisplayName(model)}: ${formatAic(usage.costAic)}\n`,
+        `- ${getDisplayName(model)}: ${formatAmount(usage.costAic, { currency, precision: 'full' })}\n`,
       );
     }
   }
@@ -44,9 +24,13 @@ function buildTooltip(stats: TrackingStats): vscode.MarkdownString {
   return md;
 }
 
-export function createStatusBar(
-  tracker: Tracker,
-): { item: vscode.StatusBarItem; dispose: () => void } {
+export interface StatusBarHandle {
+  item: vscode.StatusBarItem;
+  setNudge(visible: boolean): void;
+  dispose(): void;
+}
+
+export function createStatusBar(tracker: Tracker): StatusBarHandle {
   const item = vscode.window.createStatusBarItem(
     'copilot-budget.statusBar',
     vscode.StatusBarAlignment.Right,
@@ -55,72 +39,44 @@ export function createStatusBar(
   item.name = 'Copilot Budget';
   item.command = 'copilot-budget.showStats';
 
-  function updateText(stats: TrackingStats): void {
-    item.text = `$(credit-card) ${formatAicShort(stats.totalAiCredits)}`;
+  let nudgeVisible = false;
+
+  function render(stats: TrackingStats): void {
+    if (nudgeVisible) {
+      item.text = '$(refresh) Copilot Budget — reload to start tracking';
+      item.command = 'workbench.action.reloadWindow';
+      item.tooltip = 'Reload to start tracking';
+      return;
+    }
+    const currency = getDisplayCurrency();
+    item.text = `$(credit-card) ${formatAmount(stats.totalAiCredits, { currency, precision: 'short' })}`;
+    item.command = 'copilot-budget.showStats';
     item.tooltip = buildTooltip(stats);
   }
 
-  updateText(tracker.getStats());
+  render(tracker.getStats());
   item.show();
 
-  const subscription = tracker.onStatsChanged(updateText);
+  const subscription = tracker.onStatsChanged(render);
+  // Currency lives in settings, not in TrackingStats — without this hook the
+  // status bar would keep rendering in the old unit until the next scan-driven
+  // stats event, which on an idle workspace may be many minutes away.
+  const configSub = onConfigChanged((e) => {
+    if (e.affectsConfiguration('copilot-budget.displayCurrency')) {
+      render(tracker.getStats());
+    }
+  });
 
   return {
     item,
+    setNudge(visible: boolean): void {
+      nudgeVisible = visible;
+      render(tracker.getStats());
+    },
     dispose: () => {
       subscription.dispose();
+      configSub.dispose();
       item.dispose();
     },
   };
-}
-
-export async function showStatsQuickPick(tracker: Tracker): Promise<void> {
-  const stats = tracker.getStats();
-  const items: vscode.QuickPickItem[] = [];
-
-  items.push({
-    label: `$(credit-card) Total: ${formatAic(stats.totalAiCredits)}`,
-  });
-
-  items.push({
-    label: `$(clock) Tracking since`,
-    description: new Date(stats.since).toLocaleString(),
-  });
-
-  const models = Object.entries(stats.models);
-  if (models.length > 0) {
-    items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
-    for (const [model, usage] of models) {
-      const totalTokens = totalModelTokens(usage);
-      items.push({
-        label: `$(hubot) ${getDisplayName(model)}`,
-        description: formatAic(usage.costAic),
-        detail:
-          `Tokens: ${formatNumber(totalTokens)} ` +
-          `(in: ${formatNumber(usage.inputTokens)} / ` +
-          `cache_read: ${formatNumber(usage.cacheReadTokens)} / ` +
-          `cache_creation: ${formatNumber(usage.cacheCreationTokens)} / ` +
-          `out: ${formatNumber(usage.outputTokens)})`,
-      });
-    }
-  }
-
-  items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
-  const hookEnabled = isCommitHookEnabled();
-  const toggleLabel = `Commit-Hook: ${hookEnabled ? '$(check) ON' : '$(circle-slash) OFF'}`;
-  items.push({
-    label: toggleLabel,
-    description: hookEnabled
-      ? 'Click to disable — stop appending AI Credits trailer to commits'
-      : 'Click to enable — append AI Credits trailer to commits',
-  });
-
-  const picked = await vscode.window.showQuickPick(items, {
-    title: 'Copilot Budget',
-    placeHolder: 'Per-model cost breakdown',
-  });
-
-  if (picked?.label === toggleLabel) {
-    await vscode.commands.executeCommand('copilot-budget.toggleCommitHook');
-  }
 }

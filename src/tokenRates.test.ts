@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import {
   computeCost,
-  getAllRates,
   getDisplayName,
   getRateCard,
   loadRateCard,
@@ -223,10 +222,3 @@ describe('getDisplayName', () => {
   });
 });
 
-describe('getAllRates', () => {
-  it('exposes the loaded rate map', () => {
-    const map = getAllRates();
-    expect(map.size).toBeGreaterThan(0);
-    expect(map.has('claude-sonnet-4.6')).toBe(true);
-  });
-});

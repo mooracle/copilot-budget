@@ -1,0 +1,94 @@
+# Example: sum Copilot-AI-Credits trailers across all commits in a PR
+# and prefix the PR title with `[N AIC]`.
+#
+# Copy to .github/workflows/ in your repo and adjust as needed.
+#
+# What it does:
+#   - On PR open/synchronize/reopen/edit, walks every commit between
+#     the PR's base and head, extracts the `Copilot-AI-Credits:` trailer
+#     value from each commit message, sums them, and rewrites the PR
+#     title as `[<ceiled-sum> AIC] <original title>`.
+#   - Idempotent: if the title already starts with `[N AIC]`, that prefix
+#     is stripped before the new one is prepended, so re-runs replace
+#     rather than stack.
+#
+# Notes:
+#   - Ignores per-model trailers (`Copilot-AI-Credits-Models`); summing
+#     only the totals avoids double-counting.
+#   - `printf "%.0f"` does banker's rounding; we use awk's
+#     `(n > int(n) ? int(n) + 1 : int(n))` to ceil so the title never
+#     under-states (matches the extension's status-bar convention).
+#   - If the sum is zero, the title is left alone (no PR has `[0 AIC]`).
+#   - PRs with no `Copilot-AI-Credits:` trailers leave the title untouched
+#     (the `grep` step is allowed to find nothing without failing the job).
+
+name: PR title — Copilot AIC total
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  aic-total:
+    runs-on: ubuntu-latest
+    # Avoid an infinite loop: when this job edits the title, it fires another
+    # `edited` event. Skip when the title already carries the prefix and the
+    # sum hasn't changed. (Cheap version: skip on `edited` if the title still
+    # starts with `[N AIC]`.)
+    if: >-
+      github.event.action != 'edited' ||
+      !startsWith(github.event.pull_request.title, '[')
+    steps:
+      - name: Check out PR with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Needed so `git log base..head` resolves both ends.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Sum Copilot-AI-Credits trailer values
+        id: sum
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Extract trailer values from every commit between base and head.
+          # The `|| true` keeps the pipeline from failing under `pipefail` when
+          # grep finds no matches (e.g. PRs without the trailer).
+          RAW_SUM=$(git log --format=%B "$BASE_SHA..$HEAD_SHA" \
+            | { grep -E '^Copilot-AI-Credits: [0-9]+(\.[0-9]+)?$' || true; } \
+            | sed -E 's/^Copilot-AI-Credits: //' \
+            | awk '{ s += $1 + 0 } END { printf "%.4f", s + 0 }')
+
+          # Ceil to integer for the title prefix.
+          CEILED=$(awk -v n="$RAW_SUM" 'BEGIN { i = int(n); printf "%d", (n > i ? i + 1 : i) }')
+
+          echo "raw=$RAW_SUM" >> "$GITHUB_OUTPUT"
+          echo "ceiled=$CEILED" >> "$GITHUB_OUTPUT"
+          echo "Found AIC total: raw=$RAW_SUM ceiled=$CEILED"
+
+      - name: Update PR title with [N AIC] prefix
+        if: steps.sum.outputs.ceiled != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          AIC: ${{ steps.sum.outputs.ceiled }}
+        run: |
+          set -euo pipefail
+          # Strip an existing `[<digits> AIC] ` prefix if present.
+          STRIPPED=$(printf '%s' "$PR_TITLE" | sed -E 's/^\[[0-9]+ AIC\] *//')
+          NEW_TITLE="[$AIC AIC] $STRIPPED"
+
+          if [ "$NEW_TITLE" = "$PR_TITLE" ]; then
+            echo "Title already current, no change needed."
+            exit 0
+          fi
+
+          gh pr edit "$PR_NUMBER" --title "$NEW_TITLE"
+          echo "Updated title to: $NEW_TITLE"
