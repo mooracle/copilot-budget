@@ -260,8 +260,8 @@ This is the coordinated cut: `TrackingStats.mode`, the `'telemetry'` literal pin
 - [x] no e2e UI test suite — manual smoke is a Post-Completion step (skipped - not automatable)
 
 ### Task 13: [Final] Move plan to completed
-- [ ] `mkdir -p docs/plans/completed`
-- [ ] `git mv docs/plans/20260522-otel-only-migration.md docs/plans/completed/`
+- [x] `mkdir -p docs/plans/completed`
+- [x] `git mv docs/plans/20260522-otel-only-migration.md docs/plans/completed/`
 
 ## Technical Details
 
