@@ -253,11 +253,11 @@ This is the coordinated cut: `TrackingStats.mode`, the `'telemetry'` literal pin
 - [x] run `npm test` and `npm run compile` — must pass before Task 12 (375/375 tests passing, build green)
 
 ### Task 12: Verify acceptance criteria
-- [ ] verify all items from Overview are implemented: auto-enable works on first run; status-bar nudge appears+clears correctly; budget panel has no OTel toggle row; cost figures are tilde-free; cache_creation_tokens is populated for Claude models
-- [ ] run full test suite: `npm test`
-- [ ] run linter: `npm run lint`
-- [ ] run build: `npm run compile`
-- [ ] no e2e UI test suite — manual smoke is a Post-Completion step
+- [x] verify all items from Overview are implemented: auto-enable works on first run; status-bar nudge appears+clears correctly; budget panel has no OTel toggle row; cost figures are tilde-free; cache_creation_tokens is populated for Claude models
+- [x] run full test suite: `npm test` (375/375 passing)
+- [x] run linter: `npm run lint` (clean)
+- [x] run build: `npm run compile` (green)
+- [x] no e2e UI test suite — manual smoke is a Post-Completion step (skipped - not automatable)
 
 ### Task 13: [Final] Move plan to completed
 - [ ] `mkdir -p docs/plans/completed`

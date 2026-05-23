@@ -98,9 +98,9 @@ function buildItems(
 
 async function handleCurrencyToggle(current: 'aic' | 'usd'): Promise<void> {
   const next = current === 'aic' ? 'usd' : 'aic';
-  // Same rationale as handleOTelEnable: warn the user when the settings write
-  // fails rather than letting the rejection bubble up silently. The render
-  // loop will continue regardless so the panel doesn't strand on a stale view.
+  // Warn the user when the settings write fails rather than letting the
+  // rejection bubble up silently. The render loop will continue regardless so
+  // the panel doesn't strand on a stale view.
   try {
     await vscode.workspace
       .getConfiguration('copilot-budget')
