@@ -200,6 +200,67 @@ describe('createOTelReader — DB missing', () => {
   });
 });
 
+describe('createOTelReader — DB file present but unqueryable', () => {
+  let fx: Fixture;
+  afterEach(() => rmFixture(fx));
+
+  it('isAvailable() returns false when the file is zero bytes (no schema)', () => {
+    fx = makeFixture('zerobyte');
+    fs.writeFileSync(fx.dbPath, '');
+    const reader = createOTelReader(fx.ourGlobalStorageUri);
+    expect(reader.isAvailable()).toBe(false);
+    reader.close();
+  });
+
+  it('isAvailable() returns false when the file is non-SQLite garbage', () => {
+    fx = makeFixture('garbage');
+    fs.writeFileSync(fx.dbPath, 'not a sqlite database at all');
+    const reader = createOTelReader(fx.ourGlobalStorageUri);
+    expect(reader.isAvailable()).toBe(false);
+    reader.close();
+  });
+
+  it('isAvailable() returns false when the spans table is missing', () => {
+    fx = makeFixture('noschema');
+    // Real SQLite DB with a different schema — file is openable but the
+    // spans-table probe must reject it.
+    const db = new DatabaseSync(fx.dbPath);
+    db.exec('CREATE TABLE unrelated (id INTEGER PRIMARY KEY)');
+    db.close();
+    const reader = createOTelReader(fx.ourGlobalStorageUri);
+    expect(reader.isAvailable()).toBe(false);
+    reader.close();
+  });
+
+  it('isAvailable() returns false when span_attributes is missing', () => {
+    fx = makeFixture('nospanattrs');
+    // Half-built schema: `spans` exists but `span_attributes` does not.
+    // aggregateSince() would throw on the missing table, so isAvailable()
+    // must reject this state too — otherwise the nudge clears while scans
+    // continue to fail.
+    const db = new DatabaseSync(fx.dbPath);
+    db.exec(
+      'CREATE TABLE spans (span_id TEXT PRIMARY KEY, operation_name TEXT, end_time_ms INTEGER)',
+    );
+    db.close();
+    const reader = createOTelReader(fx.ourGlobalStorageUri);
+    expect(reader.isAvailable()).toBe(false);
+    reader.close();
+  });
+
+  it('isAvailable() recovers (returns true) once the schema is created', () => {
+    fx = makeFixture('latebloomer');
+    fs.writeFileSync(fx.dbPath, '');
+    const reader = createOTelReader(fx.ourGlobalStorageUri);
+    expect(reader.isAvailable()).toBe(false);
+    // Copilot Chat finishes initializing the DB.
+    fs.rmSync(fx.dbPath);
+    seedSpans(fx.dbPath, []);
+    expect(reader.isAvailable()).toBe(true);
+    reader.close();
+  });
+});
+
 describe('createOTelReader — DB present but empty', () => {
   let fx: Fixture;
   let reader: OTelReader;

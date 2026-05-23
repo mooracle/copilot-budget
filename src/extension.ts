@@ -212,22 +212,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Status-bar nudge: when the upstream OTel setting is on but `agent-traces.db`
   // hasn't appeared yet (typical right after auto-enable, before reload), show
   // a clickable "reload to start tracking" status bar item until the DB shows
-  // up. Re-check on each stats event; clear the nudge exactly once when the
-  // DB becomes available so we don't redundantly call setNudge(false) forever.
+  // up. Clearing is driven by the 5s poll below rather than by onStatsChanged:
+  // the DB can appear without producing any spans for our session ids (no chat
+  // yet, or spans belong to other windows), which would mean no stats event
+  // ever fires and the nudge would persist indefinitely.
   let nudgeCleared = false;
   if (isOTelDbExporterEnabled() && !reader.isAvailable()) {
     statusBar.setNudge(true);
   } else {
     nudgeCleared = true;
   }
-  const nudgeSub = tracker.onStatsChanged(() => {
-    if (nudgeCleared) return;
-    if (reader.isAvailable()) {
-      statusBar?.setNudge(false);
-      nudgeCleared = true;
-    }
-  });
-  context.subscriptions.push(nudgeSub);
 
   // Write tracking file whenever stats change. Check for hook truncation
   // first: if the hook just consumed accumulated trailers, the tracker must
@@ -247,8 +241,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // session-file change, leaving the in-memory tracker out of sync with the
   // on-disk "consumed" signal. When no truncation is detected we still re-
   // write current stats so external readers (status bar consumers, manual
-  // file inspection) see a fresh snapshot.
+  // file inspection) see a fresh snapshot. The same tick also checks for the
+  // OTel DB appearing so the nudge clears even when no stats event fires.
   const trackingFileRefresh = setInterval(() => {
+    if (!nudgeCleared && reader.isAvailable()) {
+      statusBar?.setNudge(false);
+      nudgeCleared = true;
+    }
     if (!tracker) return;
     checkCommitReset().then((wasReset) => {
       if (tracker && !wasReset) writeTrackingFile(tracker.getStats()).catch(() => {});

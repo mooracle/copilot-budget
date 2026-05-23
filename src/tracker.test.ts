@@ -104,6 +104,28 @@ describe('Tracker — construction and initial state', () => {
     expect(reader.getLatestTimestamp).toHaveBeenCalledTimes(1);
   });
 
+  it('does not throw and falls back to Date.now() when getLatestTimestamp throws at construction', async () => {
+    // Activation must survive a DB that exists on disk but is not yet
+    // queryable (empty file, half-initialized schema, transient lock). With a
+    // Date.now() fallback the next scan does not re-attribute pre-activation
+    // history; once the DB becomes readable the poll picks up new spans.
+    const reader = makeMockReader({});
+    (reader.getLatestTimestamp as jest.Mock).mockImplementation(() => {
+      throw new Error('SQLITE_ERROR: no such table: spans');
+    });
+    const before = Date.now();
+    expect(() => new Tracker(reader, () => ['session-A'])).not.toThrow();
+    const after = Date.now();
+    const tracker = new Tracker(reader, () => ['session-A']);
+    // Drive a scan and confirm the baseline passed to aggregateSince is in
+    // [before, after] — i.e. Date.now() at construction, not 0.
+    await tracker.initialize();
+    const [baselineArg] = (reader.aggregateSince as jest.Mock).mock.calls[0];
+    expect(baselineArg).toBeGreaterThanOrEqual(before);
+    expect(baselineArg).toBeLessThanOrEqual(after);
+    tracker.dispose();
+  });
+
   it('returns zero stats before initialize', () => {
     const reader = makeMockReader({});
     const tracker = new Tracker(reader, () => []);

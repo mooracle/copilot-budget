@@ -139,7 +139,21 @@ export class Tracker {
     this.since = new Date().toISOString();
     this.reader = reader;
     this.sessionIdsFn = sessionIdsFn;
-    this.baselineMs = reader.getLatestTimestamp();
+    // Construction must not throw even if the DB exists but isn't queryable
+    // yet (empty file, schema half-initialized, transient lock). Falling back
+    // to Date.now() over-cuts in-flight spans by a few seconds but never
+    // silently re-attributes pre-activation history. The 30s poll will pick
+    // up new spans once the DB becomes readable.
+    let baseline: number;
+    try {
+      baseline = reader.getLatestTimestamp();
+    } catch (err) {
+      log(
+        `Tracker: getLatestTimestamp threw at construction, falling back to Date.now(): ${String(err)}`,
+      );
+      baseline = Date.now();
+    }
+    this.baselineMs = baseline;
   }
 
   setPreviousStats(restored: RestoredStats): void {

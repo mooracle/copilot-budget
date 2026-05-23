@@ -71,7 +71,28 @@ class OTelReaderImpl implements OTelReader {
   }
 
   isAvailable(): boolean {
-    return fs.existsSync(this.dbPath);
+    if (!fs.existsSync(this.dbPath)) {
+      return false;
+    }
+    // File existence alone is not proof of usability: Copilot Chat can leave
+    // the file in a half-initialized state (zero-byte placeholder before any
+    // schema is written, or schema present but indexed tables not yet
+    // created). Probe BOTH tables that aggregateSince() depends on (`spans`
+    // and `span_attributes`) so isAvailable() reflects full queryability —
+    // probing only `spans` would let a half-built schema pass the readiness
+    // check while the actual scan throws on the missing `span_attributes`.
+    // On failure, drop the cached handle so the next call retries with a
+    // fresh open once Copilot Chat finishes initializing the DB.
+    try {
+      const db = this.ensureDb();
+      if (!db) return false;
+      db.prepare('SELECT 1 FROM spans LIMIT 1').get();
+      db.prepare('SELECT 1 FROM span_attributes LIMIT 1').get();
+      return true;
+    } catch {
+      this.close();
+      return false;
+    }
   }
 
   private ensureDb(): DatabaseSync | null {

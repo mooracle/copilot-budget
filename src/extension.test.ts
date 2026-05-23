@@ -700,6 +700,10 @@ describe('extension', () => {
     });
 
     it('clears the nudge exactly once when the DB becomes available', async () => {
+      // The clear path is driven by the 5s poll, not by onStatsChanged: the DB
+      // can appear without any spans landing for our session ids, in which case
+      // no stats event would ever fire and the nudge would persist forever.
+      jest.useFakeTimers();
       mockIsOTelDbExporterEnabled.mockReturnValue(true);
       mockOTelReader.isAvailable.mockReturnValue(false);
       const setNudge = jest.fn();
@@ -715,29 +719,27 @@ describe('extension', () => {
       expect(setNudge).toHaveBeenCalledWith(true);
       setNudge.mockClear();
 
-      // extension.ts registers the nudge listener BEFORE the stats-writer
-      // listener, so the nudge callback is the first onStatsChanged invocation.
-      // statsChangedListeners[0] is the writer (last-registered) because the
-      // test mock keeps only the latest registration — pull the nudge listener
-      // directly from the mock-call record instead.
-      const onStatsCalls = (trackerInstance.onStatsChanged as jest.Mock).mock.calls;
-      const nudgeListener = onStatsCalls[0][0] as (s: any) => void;
-
-      // First stats event: DB still missing — no clear.
-      nudgeListener(SAMPLE_STATS);
+      // 5s tick with DB still missing — no clear.
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
       expect(setNudge).not.toHaveBeenCalled();
 
-      // DB now appears.
+      // DB now appears — next tick clears the nudge.
       mockOTelReader.isAvailable.mockReturnValue(true);
-      nudgeListener(SAMPLE_STATS);
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
       expect(setNudge).toHaveBeenCalledWith(false);
       expect(setNudge).toHaveBeenCalledTimes(1);
 
-      // Subsequent stats events do not redundantly re-clear.
+      // Subsequent ticks do not redundantly re-clear.
       setNudge.mockClear();
-      nudgeListener(SAMPLE_STATS);
-      nudgeListener(SAMPLE_STATS);
+      jest.advanceTimersByTime(5_000);
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
       expect(setNudge).not.toHaveBeenCalled();
+
+      for (const sub of ctx.subscriptions) sub.dispose();
+      jest.useRealTimers();
     });
   });
 
