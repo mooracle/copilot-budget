@@ -62,7 +62,6 @@ const sampleStats: TrackingStats = {
   totalTokens: 4600,
   interactions: 15,
   totalAiCredits: 42.31,
-  mode: 'files',
 };
 
 beforeEach(() => {
@@ -89,7 +88,7 @@ describe('trackingFile', () => {
       // Format is newline-terminated key=value pairs.
       expect(content.endsWith('\n')).toBe(true);
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
-      expect(content).toContain('MODE=files');
+      expect(content).not.toContain('MODE=');
     });
 
     it('omits all TR_ lines when totalAiCredits is zero', () => {
@@ -100,7 +99,6 @@ describe('trackingFile', () => {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
-        mode: 'files',
       };
 
       const content = formatTrackingFile(zeroStats);
@@ -137,7 +135,7 @@ describe('trackingFile', () => {
       expect(content).toContain('SINCE=2024-01-15T10:30:00Z');
       expect(content).toContain('INTERACTIONS=15');
       expect(content).toContain('TOTAL_AI_CREDITS=42.31');
-      expect(content).toContain('MODE=files');
+      expect(content).not.toContain('MODE=');
       expect(content).not.toContain('TOTAL_COST_USD');
 
       expect(content).toContain('MODEL_gpt-4.1_INPUT_TOKENS=1500');
@@ -216,7 +214,6 @@ describe('trackingFile', () => {
         totalTokens: 450,
         interactions: 2,
         totalAiCredits: 3.0,
-        mode: 'files',
       };
 
       await writeTrackingFile(unsafeStats);
@@ -252,7 +249,7 @@ describe('trackingFile', () => {
       expect(line).toBe('TR_Copilot-Est-Cost=0.42');
     });
 
-    it('aiCredits TR_ value is a bare 2-decimal number in files mode', async () => {
+    it('aiCredits TR_ value is a bare 2-decimal number', async () => {
       setupWorkspace('/project');
       await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
@@ -261,16 +258,7 @@ describe('trackingFile', () => {
       expect(line).toBe('TR_Copilot-AI-Credits=42.31');
     });
 
-    it('aiCredits TR_ value is a bare 2-decimal number in telemetry mode (same as files mode)', async () => {
-      setupWorkspace('/project');
-      await writeTrackingFile({ ...sampleStats, mode: 'telemetry' });
-      const content = mockWriteTextFile.mock.calls[0][1];
-
-      const line = content.split('\n').find((l) => l.startsWith('TR_Copilot-AI-Credits='));
-      expect(line).toBe('TR_Copilot-AI-Credits=42.31');
-    });
-
-    it('writes aiCreditsPerModel TR_ line using display names, sorted descending, bare numbers in files mode', async () => {
+    it('writes aiCreditsPerModel TR_ line using display names, sorted descending, bare numbers', async () => {
       setupWorkspace('/project');
       mockGetTrailerConfig.mockReturnValue({
         estimatedCost: 'Copilot-Est-Cost',
@@ -283,23 +271,6 @@ describe('trackingFile', () => {
 
       // Claude Sonnet 4.6 has 34.97 credits, GPT-4.1 has 7.34. Sorted descending.
       // Bare numeric values, no ~ on either side of =.
-      expect(content).toContain(
-        'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
-      );
-      expect(content).not.toContain('=~');
-    });
-
-    it('writes aiCreditsPerModel TR_ line as bare numbers in telemetry mode (same as files mode)', async () => {
-      setupWorkspace('/project');
-      mockGetTrailerConfig.mockReturnValue({
-        estimatedCost: 'Copilot-Est-Cost',
-        aiCredits: 'Copilot-AI-Credits',
-        aiCreditsPerModel: 'Copilot-AI-Credits-Models',
-      });
-
-      await writeTrackingFile({ ...sampleStats, mode: 'telemetry' });
-      const content = mockWriteTextFile.mock.calls[0][1];
-
       expect(content).toContain(
         'TR_Copilot-AI-Credits-Models=Claude Sonnet 4.6=34.97,GPT-4.1=7.34',
       );
@@ -321,7 +292,6 @@ describe('trackingFile', () => {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
-        mode: 'files',
       };
 
       await writeTrackingFile(emptyStats);
@@ -365,13 +335,13 @@ describe('trackingFile', () => {
       expect(content).not.toContain('=~');
     });
 
-    it('writes MODE=telemetry when stats.mode is telemetry', async () => {
+    it('does not write a MODE= line (field removed in 3.0)', async () => {
       setupWorkspace('/project');
-      await writeTrackingFile({ ...sampleStats, mode: 'telemetry' });
+      await writeTrackingFile(sampleStats);
       const content = mockWriteTextFile.mock.calls[0][1];
 
-      expect(content).toContain('MODE=telemetry');
-      expect(content).not.toContain('MODE=files');
+      expect(content).not.toContain('MODE=');
+      expect(content).not.toMatch(/^MODE=/m);
     });
 
     it('handles stats with no models', async () => {
@@ -384,7 +354,6 @@ describe('trackingFile', () => {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
-        mode: 'files',
       };
 
       await writeTrackingFile(emptyStats);
@@ -412,7 +381,6 @@ describe('trackingFile', () => {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
-        mode: 'files',
       };
 
       await writeTrackingFile(zeroStats);
@@ -721,7 +689,6 @@ describe('trackingFile', () => {
         totalTokens: 15,
         interactions: 1,
         totalAiCredits: 0.002,
-        mode: 'files',
       };
 
       await writeTrackingFile(tinyStats);

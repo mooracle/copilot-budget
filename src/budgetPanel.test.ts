@@ -56,7 +56,6 @@ function makeStats(overrides: Partial<TrackingStats> = {}): TrackingStats {
     totalTokens: 4300,
     interactions: 15,
     totalAiCredits: 1.726,
-    mode: 'telemetry',
     ...overrides,
   };
 }

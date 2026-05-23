@@ -187,7 +187,6 @@ describe('Tracker — baseline computation', () => {
     expect(stats.totalAiCredits).toBe(0);
     expect(stats.interactions).toBe(0);
     expect(stats.models).toEqual({});
-    expect(stats.mode).toBe('telemetry');
     tracker.dispose();
   });
 

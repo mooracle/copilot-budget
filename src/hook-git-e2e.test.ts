@@ -132,7 +132,6 @@ function makeStats(totalAiCredits: number): TrackingStats {
     totalTokens: 0,
     interactions: 1,
     totalAiCredits,
-    mode: 'files',
   };
 }
 

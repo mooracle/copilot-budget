@@ -17,10 +17,6 @@ export interface TrackingStats {
   totalTokens: number;
   interactions: number;
   totalAiCredits: number;
-  // Transitional: pinned to 'telemetry' until Task 10 removes the field
-  // entirely. Kept on the type so downstream consumers (statusBar, trailer
-  // writer, panel) keep compiling during the migration window.
-  mode: 'files' | 'telemetry';
 }
 
 export interface RestoredStats {
@@ -240,7 +236,6 @@ export class Tracker {
       totalTokens,
       interactions,
       totalAiCredits,
-      mode: 'telemetry',
     };
   }
 
@@ -356,7 +351,6 @@ export class Tracker {
         totalTokens: 0,
         interactions: 0,
         totalAiCredits: 0,
-        mode: 'telemetry',
       };
     }
     return this.lastStats;

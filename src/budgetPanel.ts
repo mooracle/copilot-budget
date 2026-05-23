@@ -40,7 +40,6 @@ function buildItems(
   hookInstalled: boolean,
 ): PanelItem[] {
   const items: PanelItem[] = [];
-  const mode = stats.mode;
 
   items.push({
     label:
@@ -60,7 +59,7 @@ function buildItems(
   items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
 
   items.push({
-    label: `$(credit-card) Total: ${formatAmount(stats.totalAiCredits, { mode, currency, precision: 'full' })}`,
+    label: `$(credit-card) Total: ${formatAmount(stats.totalAiCredits, { currency, precision: 'full' })}`,
     __action: ACTION.Stat,
   });
   items.push({
@@ -76,7 +75,7 @@ function buildItems(
       const totalTokens = totalModelTokens(usage);
       items.push({
         label: `$(hubot) ${getDisplayName(model)}`,
-        description: formatAmount(usage.costAic, { mode, currency, precision: 'full' }),
+        description: formatAmount(usage.costAic, { currency, precision: 'full' }),
         detail:
           `Tokens: ${formatNumber(totalTokens)} ` +
           `(in: ${formatNumber(usage.inputTokens)} / ` +

@@ -13,7 +13,6 @@ import {
   onConfigChanged,
   getDisplayCurrency,
   isOTelDbExporterEnabled,
-  getEstimationMode,
   onDidChangeOTelSetting,
   autoEnableOTel,
 } from './config';
@@ -179,36 +178,6 @@ describe('config', () => {
     it('returns true when the upstream setting is enabled', () => {
       __configStore['github.copilot.chat.otel.dbSpanExporter.enabled'] = true;
       expect(isOTelDbExporterEnabled()).toBe(true);
-    });
-  });
-
-  describe('getEstimationMode', () => {
-    it('returns "files" when otelReader is null', () => {
-      expect(getEstimationMode(null, true)).toBe('files');
-    });
-
-    it('returns "files" when upstream setting is disabled, even if DB exists', () => {
-      const reader = { isAvailable: () => true };
-      expect(getEstimationMode(reader, false)).toBe('files');
-    });
-
-    it('returns "files" when upstream is enabled but DB is unavailable (remote-host mismatch)', () => {
-      const reader = { isAvailable: () => false };
-      expect(getEstimationMode(reader, true)).toBe('files');
-    });
-
-    it('returns "telemetry" only when upstream enabled AND DB available', () => {
-      const reader = { isAvailable: () => true };
-      expect(getEstimationMode(reader, true)).toBe('telemetry');
-    });
-
-    it('defaults upstreamEnabled to the current setting when omitted', () => {
-      const reader = { isAvailable: () => true };
-      // Setting off → mode is files
-      expect(getEstimationMode(reader)).toBe('files');
-      // Setting on → mode is telemetry
-      __configStore['github.copilot.chat.otel.dbSpanExporter.enabled'] = true;
-      expect(getEstimationMode(reader)).toBe('telemetry');
     });
   });
 

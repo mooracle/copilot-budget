@@ -1,9 +1,7 @@
-export type EstimationMode = 'files' | 'telemetry';
 export type DisplayCurrency = 'aic' | 'usd';
 export type AmountPrecision = 'short' | 'full';
 
 export interface FormatAmountOpts {
-  mode: EstimationMode;
   currency: DisplayCurrency;
   precision?: AmountPrecision;
 }

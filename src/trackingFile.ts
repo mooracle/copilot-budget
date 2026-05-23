@@ -31,9 +31,6 @@ export function formatTrackingFile(stats: TrackingStats): string {
     `SINCE=${stats.since}`,
     `INTERACTIONS=${stats.interactions}`,
     `TOTAL_AI_CREDITS=${stats.totalAiCredits.toFixed(2)}`,
-    // MODE is machine-readable only; the hook ignores it. parseTrackingFileContent
-    // silently drops unknown keys, so adding this is a no-op for restore.
-    `MODE=${stats.mode}`,
   ];
 
   for (const [model, usage] of Object.entries(stats.models)) {

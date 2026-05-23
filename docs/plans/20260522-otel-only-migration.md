@@ -226,13 +226,13 @@ No passive footer — that would duplicate the status-bar nudge from Task 7. Whe
 
 This is the coordinated cut: `TrackingStats.mode`, the `'telemetry'` literal pinned in Task 4, and the now-ignored `mode` parameter on `formatAmount` all go together. After this task, no module in `src/` mentions `'files' | 'telemetry'`.
 
-- [ ] remove `mode: 'files' | 'telemetry'` from `TrackingStats` interface in `src/tracker.ts`; remove the `mode: 'telemetry'` literal pinned in Task 4
-- [ ] in `src/amountFormatter.ts` drop the `mode` field from the formatter's options type (kept around since Task 6 only as a transitional no-op); update all call sites (`statusBar.ts`, `budgetPanel.ts`, `trackingFile.ts` if any) to stop passing it
-- [ ] in `src/trackingFile.ts` stop writing the `MODE=` line in `formatTrackingFile`; keep `parseTrackingFileContent` tolerant of legacy `MODE=` keys (silently ignored — already the case for unknown keys)
-- [ ] grep `src/` for remaining `\.mode` references on `TrackingStats` (e.g. `stats\.mode`, `\bmode:\s*['"]\w+['"]`) and clean up
-- [ ] update tests in `src/trackingFile.test.ts`: written file no longer contains `MODE`; **add explicit assertion: parsing a legacy v2.0.x file with `MODE=files` succeeds**; **add explicit assertion: parsing a legacy v2.0.x file with `MODE=telemetry` succeeds** (both round-trip the same valid `TrackingStats` minus the field)
-- [ ] update tests in `src/amountFormatter.test.ts`: drop the `mode` argument from every test invocation
-- [ ] run `npm test` (full suite) — must pass before Task 11
+- [x] remove `mode: 'files' | 'telemetry'` from `TrackingStats` interface in `src/tracker.ts`; remove the `mode: 'telemetry'` literal pinned in Task 4
+- [x] in `src/amountFormatter.ts` drop the `mode` field from the formatter's options type (kept around since Task 6 only as a transitional no-op); update all call sites (`statusBar.ts`, `budgetPanel.ts`, `trackingFile.ts` if any) to stop passing it
+- [x] in `src/trackingFile.ts` stop writing the `MODE=` line in `formatTrackingFile`; keep `parseTrackingFileContent` tolerant of legacy `MODE=` keys (silently ignored — already the case for unknown keys)
+- [x] grep `src/` for remaining `\.mode` references on `TrackingStats` (e.g. `stats\.mode`, `\bmode:\s*['"]\w+['"]`) and clean up (also dropped `getEstimationMode` from `config.ts` + tests to satisfy "no module mentions 'files' | 'telemetry'")
+- [x] update tests in `src/trackingFile.test.ts`: written file no longer contains `MODE`; **add explicit assertion: parsing a legacy v2.0.x file with `MODE=files` succeeds**; **add explicit assertion: parsing a legacy v2.0.x file with `MODE=telemetry` succeeds** (both round-trip the same valid `TrackingStats` minus the field)
+- [x] update tests in `src/amountFormatter.test.ts`: drop the `mode` argument from every test invocation
+- [x] run `npm test` (full suite) — must pass before Task 11
 
 ### Task 11: Documentation, changelog, version bump
 

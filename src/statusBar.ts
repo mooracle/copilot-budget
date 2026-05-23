@@ -8,16 +8,15 @@ function buildTooltip(stats: TrackingStats): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = false;
   const currency = getDisplayCurrency();
-  const mode = stats.mode;
   md.appendMarkdown(
-    `**Total:** ${formatAmount(stats.totalAiCredits, { mode, currency, precision: 'full' })}\n\n`,
+    `**Total:** ${formatAmount(stats.totalAiCredits, { currency, precision: 'full' })}\n\n`,
   );
 
   const entries = Object.entries(stats.models);
   if (entries.length > 0) {
     for (const [model, usage] of entries) {
       md.appendMarkdown(
-        `- ${getDisplayName(model)}: ${formatAmount(usage.costAic, { mode, currency, precision: 'full' })}\n`,
+        `- ${getDisplayName(model)}: ${formatAmount(usage.costAic, { currency, precision: 'full' })}\n`,
       );
     }
   }
@@ -50,7 +49,7 @@ export function createStatusBar(tracker: Tracker): StatusBarHandle {
       return;
     }
     const currency = getDisplayCurrency();
-    item.text = `$(credit-card) ${formatAmount(stats.totalAiCredits, { mode: stats.mode, currency, precision: 'short' })}`;
+    item.text = `$(credit-card) ${formatAmount(stats.totalAiCredits, { currency, precision: 'short' })}`;
     item.command = 'copilot-budget.showStats';
     item.tooltip = buildTooltip(stats);
   }

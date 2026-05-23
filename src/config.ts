@@ -73,20 +73,6 @@ export function isOTelDbExporterEnabled(): boolean {
     .get<boolean>(OTEL_KEY, false);
 }
 
-// Telemetry mode requires BOTH the upstream exporter setting AND a readable
-// `agent-traces.db` next to Copilot Chat's globalStorage. Either missing →
-// fall back to Files mode. The `upstreamEnabled` arg is injectable so callers
-// can probe without re-reading the setting (and so tests stay deterministic).
-export function getEstimationMode(
-  otelReader: { isAvailable(): boolean } | null,
-  upstreamEnabled: boolean = isOTelDbExporterEnabled(),
-): 'files' | 'telemetry' {
-  if (!otelReader) return 'files';
-  if (!upstreamEnabled) return 'files';
-  if (!otelReader.isAvailable()) return 'files';
-  return 'telemetry';
-}
-
 export function onDidChangeOTelSetting(
   callback: () => void,
 ): vscode.Disposable {

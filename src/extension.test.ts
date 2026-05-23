@@ -115,7 +115,6 @@ const SAMPLE_STATS = {
   totalTokens: 300,
   interactions: 5,
   totalAiCredits: 1.0,
-  mode: 'telemetry' as const,
 };
 
 beforeEach(async () => {
