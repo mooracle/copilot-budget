@@ -88,7 +88,9 @@ describe('commitHook', () => {
       const result = await installHook();
 
       expect(result).toBe(true);
-      expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
+      // Two hooks are installed: prepare-commit-msg (written first) and
+      // post-commit.
+      expect(mockWriteTextFile).toHaveBeenCalledTimes(2);
       const [hookUri, content] = mockWriteTextFile.mock.calls[0];
       expect(hookUri.path).toMatch(/\.git\/hooks\/prepare-commit-msg$/);
       expect(content).toContain(MARKER);
@@ -96,6 +98,15 @@ describe('commitHook', () => {
       expect(content).toContain('TRACKING_FILE=');
       expect(content).toContain("grep '^TR_'");
       expect(content).toContain("sed 's/^TR_");
+      const [postUri, postContent] = mockWriteTextFile.mock.calls[1];
+      expect(postUri.path).toMatch(/\.git\/hooks\/post-commit$/);
+      // The post-commit script carries the shared recognition marker (the
+      // substring that install/uninstall match on), not the prepare-specific
+      // comment line.
+      expect(postContent).toContain('# Copilot Budget');
+      expect(postContent).toContain('#!/bin/sh');
+      // Only one "installed" toast even though two files were written.
+      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
         'Copilot Budget: Commit hook installed.',
       );
@@ -140,7 +151,7 @@ describe('commitHook', () => {
       const result = await installHook();
 
       expect(result).toBe(true);
-      expect(mockWriteTextFile).toHaveBeenCalledTimes(1);
+      expect(mockWriteTextFile).toHaveBeenCalledTimes(2);
       expect(mockVscode.window.showInformationMessage).not.toHaveBeenCalled();
     });
 
@@ -245,9 +256,14 @@ describe('commitHook', () => {
       const result = await uninstallHook();
 
       expect(result).toBe(true);
-      expect(mockVscode.workspace.fs.delete).toHaveBeenCalledTimes(1);
+      // Both hooks are removed: prepare-commit-msg (first) and post-commit.
+      expect(mockVscode.workspace.fs.delete).toHaveBeenCalledTimes(2);
       const deleteUri = mockVscode.workspace.fs.delete.mock.calls[0][0];
       expect(deleteUri.path).toMatch(/\.git\/hooks\/prepare-commit-msg$/);
+      const deleteUri2 = mockVscode.workspace.fs.delete.mock.calls[1][0];
+      expect(deleteUri2.path).toMatch(/\.git\/hooks\/post-commit$/);
+      // One "removed" toast for the pair.
+      expect(mockVscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
       expect(mockVscode.window.showInformationMessage).toHaveBeenCalledWith(
         'Copilot Budget: Commit hook removed.',
       );
@@ -344,76 +360,104 @@ describe('commitHook', () => {
   });
 
   describe('hook script content', () => {
-    let writtenContent: string;
+    let prepareContent: string;
+    let postCommitContent: string;
 
     beforeEach(async () => {
       setupWorkspace('/project');
       mockVscodeStat.mockRejectedValue(FILE_NOT_FOUND_ERROR);
       mockReadTextFile.mockResolvedValue(null);
       mockVscode.workspace.fs.createDirectory.mockResolvedValue(undefined);
-      writtenContent = '';
-      mockWriteTextFile.mockImplementation(async (_uri: any, data: string) => {
-        writtenContent = data;
+      prepareContent = '';
+      postCommitContent = '';
+      mockWriteTextFile.mockImplementation(async (uri: any, data: string) => {
+        if (uri.path.endsWith('prepare-commit-msg')) prepareContent = data;
+        else if (uri.path.endsWith('post-commit')) postCommitContent = data;
       });
       await installHook();
     });
 
     it('includes essential shell logic', () => {
-      expect(writtenContent).toContain('case "$COMMIT_SOURCE"');
-      expect(writtenContent).toContain('merge|commit) exit 0');
-      expect(writtenContent).toContain('squash_sum_trailers');
-      expect(writtenContent).toContain('rebase-merge');
-      expect(writtenContent).toContain('rebase-apply');
-      expect(writtenContent).toContain('git rev-parse --git-dir');
-      expect(writtenContent).not.toContain('git rev-parse --show-toplevel');
-      expect(writtenContent).toContain('$GIT_DIR/copilot-budget');
-      expect(writtenContent).toContain('>> "$COMMIT_MSG_FILE"');
-      expect(writtenContent).toContain(': > "$TRACKING_FILE"');
+      expect(prepareContent).toContain('case "$COMMIT_SOURCE"');
+      expect(prepareContent).toContain('merge|commit)');
+      expect(prepareContent).toContain('squash_sum_trailers');
+      expect(prepareContent).toContain('rebase-merge');
+      expect(prepareContent).toContain('rebase-apply');
+      expect(prepareContent).toContain('git rev-parse --git-dir');
+      expect(prepareContent).not.toContain('git rev-parse --show-toplevel');
+      expect(prepareContent).toContain('$GIT_DIR/copilot-budget');
+      expect(prepareContent).toContain('>> "$COMMIT_MSG_FILE"');
     });
 
     it('uses generic TR_ grep pattern for trailers', () => {
-      expect(writtenContent).toContain("grep '^TR_'");
-      expect(writtenContent).toContain("sed 's/^TR_");
-      expect(writtenContent).not.toContain('AI-Premium-Requests:');
-      expect(writtenContent).not.toContain('AI-Est-Cost:');
-      expect(writtenContent).not.toContain('AI-Total-Tokens:');
-      expect(writtenContent).not.toContain('AI-Commit-Tokens:');
+      expect(prepareContent).toContain("grep '^TR_'");
+      expect(prepareContent).toContain("sed 's/^TR_");
+      expect(prepareContent).not.toContain('AI-Premium-Requests:');
+      expect(prepareContent).not.toContain('AI-Est-Cost:');
+      expect(prepareContent).not.toContain('AI-Total-Tokens:');
+      expect(prepareContent).not.toContain('AI-Commit-Tokens:');
     });
 
     it('is a dumb pipe with no accumulation logic', () => {
-      expect(writtenContent).not.toContain('git log -1');
-      expect(writtenContent).not.toContain('trailers:key=');
-      expect(writtenContent).not.toContain('validate_num');
-      expect(writtenContent).not.toContain('PREV_');
-      expect(writtenContent).not.toContain('TOTAL_');
-      expect(writtenContent).not.toContain('CURRENT_');
+      expect(prepareContent).not.toContain('git log -1');
+      expect(prepareContent).not.toContain('trailers:key=');
+      expect(prepareContent).not.toContain('validate_num');
+      expect(prepareContent).not.toContain('PREV_');
+      expect(prepareContent).not.toContain('TOTAL_');
+      expect(prepareContent).not.toContain('CURRENT_');
     });
 
     it('reads TR_ lines for trailer output', () => {
-      expect(writtenContent).toContain("grep '^TR_' \"$TRACKING_FILE\"");
-      expect(writtenContent).not.toContain("grep '^MODEL ' \"$TRACKING_FILE\"");
-      expect(writtenContent).not.toContain('PREMIUM_REQUESTS');
+      expect(prepareContent).toContain("grep '^TR_' \"$TRACKING_FILE\"");
+      expect(prepareContent).not.toContain("grep '^MODEL ' \"$TRACKING_FILE\"");
+      expect(prepareContent).not.toContain('PREMIUM_REQUESTS');
     });
 
     it('skips appending when no TR_ lines exist', () => {
-      expect(writtenContent).toContain("TR_LINES=$(grep '^TR_' \"$TRACKING_FILE\") || true");
-      expect(writtenContent).toContain("case \"$TR_LINES\" in '') exit 0");
+      expect(prepareContent).toContain("TR_LINES=$(grep '^TR_' \"$TRACKING_FILE\") || true");
+      expect(prepareContent).toContain("case \"$TR_LINES\" in '') rm -f \"$PENDING\"; exit 0");
     });
 
     it('gates entirely on TR_ presence (no PREMIUM_REQUESTS gate)', () => {
-      expect(writtenContent).not.toContain('PREMIUM_REQUESTS=');
-      expect(writtenContent).not.toContain("case \"$PREMIUM\"");
+      expect(prepareContent).not.toContain('PREMIUM_REQUESTS=');
+      expect(prepareContent).not.toContain("case \"$PREMIUM\"");
     });
 
     it('appends a properly formatted git trailer block', () => {
       // sed converts each `TR_<name>=<value>` line to `<name>: <value>`
-      expect(writtenContent).toContain("sed 's/^TR_\\([^=]*\\)=/\\1: /'");
+      expect(prepareContent).toContain("sed 's/^TR_\\([^=]*\\)=/\\1: /'");
       // blank-line separator before trailers
-      expect(writtenContent).toContain("printf '\\n\\n'");
+      expect(prepareContent).toContain("printf '\\n\\n'");
     });
 
-    it('truncates the tracking file after appending trailers', () => {
-      expect(writtenContent).toContain(': > "$TRACKING_FILE"');
+    it('defers truncation: writes the pending marker, does NOT truncate the tracking file', () => {
+      // prepare-commit-msg drops a marker instead of truncating, so a cancelled
+      // commit can't reset the counter (issue #10). Truncation now lives in
+      // the post-commit hook.
+      expect(prepareContent).toContain(': > "$PENDING"');
+      expect(prepareContent).not.toContain(': > "$TRACKING_FILE"');
+      expect(prepareContent).toContain('copilot-budget.pending');
+    });
+
+    it('clears a stale pending marker on every non-trailer path', () => {
+      // merge/commit, rebase, squash, and the no-tracking / no-TR_ exits must
+      // all rm the marker so post-commit never consumes usage that was never
+      // attributed to a commit.
+      expect(prepareContent).toContain('merge|commit) rm -f "$PENDING"; exit 0');
+      expect(prepareContent).toContain("case \"$TR_LINES\" in '') rm -f \"$PENDING\"; exit 0");
+    });
+
+    it('post-commit hook truncates the tracking file on the marker, rebase-guarded', () => {
+      expect(postCommitContent).toContain('#!/bin/sh');
+      expect(postCommitContent).toContain('# Copilot Budget');
+      expect(postCommitContent).toContain('git rev-parse --git-dir');
+      // Rebase guard: replayed commits must not reset the counter.
+      expect(postCommitContent).toContain('rebase-merge');
+      expect(postCommitContent).toContain('rebase-apply');
+      // Acts only on the marker, then truncates the tracking file.
+      expect(postCommitContent).toContain('[ -f "$PENDING" ] || exit 0');
+      expect(postCommitContent).toContain('rm -f "$PENDING"');
+      expect(postCommitContent).toContain(': > "$GIT_DIR/copilot-budget"');
     });
   });
 });

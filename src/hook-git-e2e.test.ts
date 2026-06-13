@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { HOOK_SCRIPT } from './commitHook';
+import { HOOK_SCRIPT, POST_COMMIT_SCRIPT } from './commitHook';
 import { formatTrackingFile } from './trackingFile';
 import { TrackingStats, ModelStats } from './tracker';
 import { __configStore } from './__mocks__/vscode';
@@ -75,11 +75,19 @@ function setupRepo(): Repo {
   return { dir, gitDir, env };
 }
 
+// Installs both hooks Copilot Budget ships: prepare-commit-msg appends the
+// trailer and drops the pending marker; post-commit performs the deferred
+// truncation. Both are required for per-commit attribution after the issue #10
+// fix moved truncation out of prepare-commit-msg.
 function installHook(gitDir: string): void {
-  const hookPath = path.join(gitDir, 'hooks', 'prepare-commit-msg');
-  fs.mkdirSync(path.dirname(hookPath), { recursive: true });
-  fs.writeFileSync(hookPath, HOOK_SCRIPT);
-  fs.chmodSync(hookPath, 0o755);
+  const hooksDir = path.join(gitDir, 'hooks');
+  fs.mkdirSync(hooksDir, { recursive: true });
+  const prepare = path.join(hooksDir, 'prepare-commit-msg');
+  fs.writeFileSync(prepare, HOOK_SCRIPT);
+  fs.chmodSync(prepare, 0o755);
+  const postCommit = path.join(hooksDir, 'post-commit');
+  fs.writeFileSync(postCommit, POST_COMMIT_SCRIPT);
+  fs.chmodSync(postCommit, 0o755);
 }
 
 function writeStats(gitDir: string, stats: TrackingStats): void {
@@ -114,6 +122,13 @@ function lastCommitMessage(repo: Repo): string {
     env: repo.env,
     encoding: 'utf8',
   });
+}
+
+function revParse(repo: Repo, ref: string): string {
+  return execFileSync('git', ['-C', repo.dir, 'rev-parse', ref], {
+    env: repo.env,
+    encoding: 'utf8',
+  }).trim();
 }
 
 function trackingFilePath(repo: Repo): string {
@@ -320,6 +335,53 @@ describeE2E('hook E2E (real git)', () => {
     writeStats(repo.gitDir, makeStats(5.0));
     commit(repo, 'feat: x');
 
+    const msg = lastCommitMessage(repo);
+    expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
+    expect(countAiCreditsTrailers(msg)).toBe(1);
+    expect(fs.statSync(trackingFilePath(repo)).size).toBe(0);
+  });
+
+  // Issue #10: prepare-commit-msg runs before the commit is finalized, so a
+  // cancelled commit must NOT reset the counter. We force an abort by making
+  // the editor exit non-zero (git gui's Cancel, an empty message, or a
+  // rejected commit-msg hook all land here). The trailer was appended to the
+  // throwaway message buffer and the pending marker was dropped, but post-commit
+  // never fires, so the tracking file survives — and a later real commit
+  // consumes it exactly once.
+  it('cancelled commit does not truncate the tracking file; a later commit consumes it once', () => {
+    repo = setupRepo();
+    installHook(repo.gitDir);
+    commit(repo, 'chore: init');
+    const headBefore = revParse(repo, 'HEAD');
+
+    writeStats(repo.gitDir, makeStats(5.0));
+    const filename = `cancel-${dummyCounter++}.txt`;
+    fs.writeFileSync(path.join(repo.dir, filename), 'x');
+    execFileSync('git', ['-C', repo.dir, 'add', filename], {
+      env: repo.env,
+      stdio: 'pipe',
+    });
+
+    // GIT_EDITOR=false → editor exits non-zero → git aborts the commit.
+    let aborted = false;
+    try {
+      execFileSync('git', ['-C', repo.dir, 'commit'], {
+        env: { ...repo.env, GIT_EDITOR: 'false' },
+        stdio: 'pipe',
+      });
+    } catch {
+      aborted = true;
+    }
+    expect(aborted).toBe(true);
+    // No new commit was created.
+    expect(revParse(repo, 'HEAD')).toBe(headBefore);
+    // Counter survived the cancellation — the whole point of issue #10.
+    const afterCancel = fs.readFileSync(trackingFilePath(repo), 'utf8');
+    expect(afterCancel).toContain('TR_Copilot-AI-Credits=5.00');
+    expect(fs.statSync(trackingFilePath(repo)).size).toBeGreaterThan(0);
+
+    // A subsequent real commit consumes the still-pending usage exactly once.
+    commit(repo, 'feat: real');
     const msg = lastCommitMessage(repo);
     expect(msg).toMatch(/^Copilot-AI-Credits: 5\.00$/m);
     expect(countAiCreditsTrailers(msg)).toBe(1);
