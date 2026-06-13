@@ -2,27 +2,31 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { HOOK_SCRIPT } from './commitHook';
+import { HOOK_SCRIPT, POST_COMMIT_SCRIPT } from './commitHook';
 
 describe('hook script (runtime behaviour)', () => {
   let tmpDir: string;
   let hookPath: string;
+  let postHookPath: string;
   let gitDir: string;
   let msgFile: string;
   let trackingFilePath: string;
+  let pendingPath: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-hook-'));
     hookPath = path.join(tmpDir, 'prepare-commit-msg');
+    postHookPath = path.join(tmpDir, 'post-commit');
     gitDir = path.join(tmpDir, '.git');
     msgFile = path.join(tmpDir, 'COMMIT_EDITMSG');
     trackingFilePath = path.join(gitDir, 'copilot-budget');
+    pendingPath = path.join(gitDir, 'copilot-budget.pending');
     fs.writeFileSync(hookPath, HOOK_SCRIPT);
     fs.chmodSync(hookPath, 0o755);
-    // Minimum scaffolding so `git rev-parse --git-dir` (used by the
-    // non-squash path) accepts $GIT_DIR and echoes it back. The squash
-    // path never calls git, so this is only load-bearing for the
-    // non-squash regression tests.
+    fs.writeFileSync(postHookPath, POST_COMMIT_SCRIPT);
+    fs.chmodSync(postHookPath, 0o755);
+    // Minimum scaffolding so `git rev-parse --git-dir` accepts $GIT_DIR and
+    // echoes it back. Both hooks now resolve $GIT_DIR up front.
     fs.mkdirSync(path.join(gitDir, 'objects'), { recursive: true });
     fs.mkdirSync(path.join(gitDir, 'refs'), { recursive: true });
     fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main\n');
@@ -36,7 +40,7 @@ describe('hook script (runtime behaviour)', () => {
     msgContent: string,
     source: string,
     opts: { trackingFile?: string } = {},
-  ): { message: string; tracking: string | null } {
+  ): { message: string; tracking: string | null; pending: boolean } {
     fs.writeFileSync(msgFile, msgContent);
     if (opts.trackingFile !== undefined) {
       fs.writeFileSync(trackingFilePath, opts.trackingFile);
@@ -53,7 +57,25 @@ describe('hook script (runtime behaviour)', () => {
     const tracking = fs.existsSync(trackingFilePath)
       ? fs.readFileSync(trackingFilePath, 'utf8')
       : null;
-    return { message, tracking };
+    return { message, tracking, pending: fs.existsSync(pendingPath) };
+  }
+
+  // Runs the post-commit hook (the deferred-truncation step). Optionally
+  // creates the pending marker first to simulate prepare-commit-msg having run
+  // its trailer-append path.
+  function runPostCommit(opts: { marker?: boolean } = {}): {
+    tracking: string | null;
+    pending: boolean;
+  } {
+    if (opts.marker) fs.writeFileSync(pendingPath, '');
+    execFileSync('sh', [postHookPath], {
+      env: { ...process.env, GIT_DIR: gitDir },
+      stdio: 'pipe',
+    });
+    const tracking = fs.existsSync(trackingFilePath)
+      ? fs.readFileSync(trackingFilePath, 'utf8')
+      : null;
+    return { tracking, pending: fs.existsSync(pendingPath) };
   }
 
   describe('squash source: sums duplicate trailers', () => {
@@ -267,15 +289,45 @@ describe('hook script (runtime behaviour)', () => {
   });
 
   describe('non-squash source: tracking-file path', () => {
-    it('appends trailers and truncates the tracking file on a normal commit', () => {
+    it('appends trailers and writes the pending marker WITHOUT truncating (deferred to post-commit)', () => {
       const tracking =
         'SINCE=1\nTOTAL_AI_CREDITS=12.50\nTR_Copilot-AI-Credits=12.50\n';
-      const { message, tracking: postTracking } = runHook(
+      const { message, tracking: postTracking, pending } = runHook(
         'subject\n',
         '',
         { trackingFile: tracking },
       );
       expect(message).toContain('Copilot-AI-Credits: 12.50');
+      // Tracking file is left intact — issue #10: a cancelled commit must not
+      // reset the counter. The marker signals post-commit to truncate later.
+      expect(postTracking).toBe(tracking);
+      expect(pending).toBe(true);
+    });
+
+    it('post-commit truncates the tracking file once the commit lands', () => {
+      const tracking =
+        'SINCE=1\nTOTAL_AI_CREDITS=12.50\nTR_Copilot-AI-Credits=12.50\n';
+      runHook('subject\n', '', { trackingFile: tracking });
+      // prepare-commit-msg left the marker; the real commit now runs post-commit.
+      const { tracking: postTracking, pending } = runPostCommit();
+      expect(postTracking).toBe('');
+      expect(pending).toBe(false);
+    });
+
+    it('a cancelled commit (no post-commit) leaves the counter intact', () => {
+      const tracking =
+        'SINCE=1\nTOTAL_AI_CREDITS=12.50\nTR_Copilot-AI-Credits=12.50\n';
+      // First attempt: prepare runs, user cancels — post-commit never fires.
+      const first = runHook('subject\n', '', { trackingFile: tracking });
+      expect(first.tracking).toBe(tracking);
+      expect(first.pending).toBe(true);
+      // Second attempt against the same intact tracking file behaves identically.
+      const second = runHook('subject\n', '', { trackingFile: tracking });
+      expect(second.message).toContain('Copilot-AI-Credits: 12.50');
+      expect(second.tracking).toBe(tracking);
+      expect(second.pending).toBe(true);
+      // Only when a commit actually lands does post-commit reset it.
+      const { tracking: postTracking } = runPostCommit();
       expect(postTracking).toBe('');
     });
 
@@ -306,6 +358,84 @@ describe('hook script (runtime behaviour)', () => {
       const { message, tracking } = runHook(msg, '');
       expect(message).toBe(msg);
       expect(tracking).toBe(null);
+    });
+  });
+
+  describe('stale pending marker is cleared on non-trailer paths', () => {
+    // A normal-commit attempt left a marker; the user cancelled, then did a
+    // merge/commit/squash/rebase instead. Those paths must clear the stale
+    // marker so the following post-commit doesn't truncate usage that the new
+    // commit never carried as a trailer.
+    const tracking =
+      'SINCE=1\nTOTAL_AI_CREDITS=9.99\nTR_Copilot-AI-Credits=9.99\n';
+
+    function seedMarker(): void {
+      fs.writeFileSync(trackingFilePath, tracking);
+      fs.writeFileSync(pendingPath, '');
+    }
+
+    it('clears the marker on $2 == merge', () => {
+      seedMarker();
+      const { pending, tracking: postTracking } = runHook('m\n', 'merge');
+      expect(pending).toBe(false);
+      expect(postTracking).toBe(tracking);
+    });
+
+    it('clears the marker on $2 == commit (amend)', () => {
+      seedMarker();
+      const { pending } = runHook('m\n', 'commit');
+      expect(pending).toBe(false);
+    });
+
+    it('clears the marker on $2 == squash', () => {
+      seedMarker();
+      const { pending } = runHook('m\n', 'squash');
+      expect(pending).toBe(false);
+    });
+
+    it('clears the marker during a rebase', () => {
+      fs.mkdirSync(path.join(gitDir, 'rebase-merge'));
+      seedMarker();
+      const { pending } = runHook('m\n', 'message');
+      expect(pending).toBe(false);
+    });
+  });
+
+  describe('post-commit hook (deferred truncation)', () => {
+    const tracking =
+      'SINCE=1\nTOTAL_AI_CREDITS=12.50\nTR_Copilot-AI-Credits=12.50\n';
+
+    it('truncates the tracking file and removes the marker when the marker is present', () => {
+      fs.writeFileSync(trackingFilePath, tracking);
+      const { tracking: postTracking, pending } = runPostCommit({ marker: true });
+      expect(postTracking).toBe('');
+      expect(pending).toBe(false);
+    });
+
+    it('leaves the tracking file untouched when there is no marker', () => {
+      fs.writeFileSync(trackingFilePath, tracking);
+      const { tracking: postTracking } = runPostCommit();
+      expect(postTracking).toBe(tracking);
+    });
+
+    it('does NOT truncate during a rebase even if a marker is present', () => {
+      // Plain `pick` rebase steps fire post-commit but not prepare-commit-msg,
+      // so a stale marker could survive into the rebase. The rebase guard must
+      // prevent truncation of usage destined for the next real commit.
+      fs.mkdirSync(path.join(gitDir, 'rebase-merge'));
+      fs.writeFileSync(trackingFilePath, tracking);
+      const { tracking: postTracking, pending } = runPostCommit({ marker: true });
+      expect(postTracking).toBe(tracking);
+      // Marker is preserved (not consumed) so the next real commit can use it.
+      expect(pending).toBe(true);
+    });
+
+    it('does NOT truncate during an am-style rebase (rebase-apply)', () => {
+      fs.mkdirSync(path.join(gitDir, 'rebase-apply'));
+      fs.writeFileSync(trackingFilePath, tracking);
+      const { tracking: postTracking, pending } = runPostCommit({ marker: true });
+      expect(postTracking).toBe(tracking);
+      expect(pending).toBe(true);
     });
   });
 });

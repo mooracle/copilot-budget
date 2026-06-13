@@ -5,6 +5,18 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-06-13
+
+Fixes [#10](https://github.com/mooracle/copilot-budget/issues/10): the counter no longer resets when a commit is cancelled. `prepare-commit-msg` runs before the commit is finalized, so truncating the tracking file there reset usage even when the commit never happened — git gui's Commit dialog, a rejected `commit-msg` hook, or quitting the editor on an empty message. Truncation now lives in a new `post-commit` hook that only fires once a commit actually lands. Cancelled attempts (and any number of them) leave the counter intact, and accumulated usage flushes to the next real commit exactly once.
+
+### Changed
+
+- **`prepare-commit-msg` defers truncation** — on the normal-commit path it appends the trailers and drops an empty `$GIT_DIR/copilot-budget.pending` marker instead of truncating. Every non-trailer path (`$2 == merge`/`commit`, rebase, `$2 == squash`, no tracking file, no `TR_` lines) clears a stale marker so a later commit can't consume usage it never carried.
+
+### Added
+
+- **`post-commit` hook (`POST_COMMIT_SCRIPT`)** — truncates `$GIT_DIR/copilot-budget` and removes the pending marker iff the marker exists and no rebase is in progress (`$GIT_DIR/rebase-merge` / `rebase-apply`). The extension still detects the (now post-commit) truncation via `isTrackingFileTruncated()` and rebases through `tracker.consume()`, unchanged. `installHook`/`uninstallHook` now manage both hooks (validating every hook before writing any, with a single toast); upgrading from a single-hook install auto-refreshes via the shared `# Copilot Budget` recognition marker.
+
 ## [2.0.3] - 2026-05-22
 
 Accurate cost tracking via Copilot Chat's OTel database. On first activation in a workspace where `github.copilot.chat.otel.dbSpanExporter.enabled` is unset at both Global and Workspace scope, the extension writes `true` at Workspace scope so Copilot Chat starts emitting spans. An explicit user choice in either scope is respected — the write is strictly asymmetric (only unset → `true`, never any other transition). After auto-enable Copilot Chat typically needs a reload before spans start landing; the status bar renders a clickable `$(refresh) Copilot Budget — reload to start tracking` nudge until the database appears. Per-span `input_tokens` / `output_tokens` / `cached_tokens` / `cache_creation_tokens` are read from the OTel SQLite store at `<globalStorage>/github.copilot-chat/agent-traces.db` via `node:sqlite`.

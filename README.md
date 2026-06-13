@@ -28,8 +28,8 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 |---|---|
 | `Copilot Budget: Open Panel` | Open the QuickPick panel with toggles (currency, commit hook) and per-model breakdown |
 | `Copilot Budget: Reset Tracking` | Reset the counter to zero (re-baselines from current session files) |
-| `Copilot Budget: Install Commit Hook` | Install the `prepare-commit-msg` hook that appends AI budget info to commits |
-| `Copilot Budget: Uninstall Commit Hook` | Remove the Copilot Budget commit hook |
+| `Copilot Budget: Install Commit Hook` | Install the `prepare-commit-msg` + `post-commit` hooks that append AI budget info to commits |
+| `Copilot Budget: Uninstall Commit Hook` | Remove the Copilot Budget commit hooks |
 | `Copilot Budget: Toggle Commit Hook` | Flip `copilot-budget.commitHook.enabled` and install/uninstall the hook in one step |
 | `Copilot Budget: Show Diagnostics` | Show diagnostic info (scanned paths, discovered files, current stats) in the Output panel |
 
@@ -100,15 +100,15 @@ The commit hook is the mechanism that appends AI budget information as git trail
 
 ### Default Behavior
 
-By default (`copilot-budget.commitHook.enabled: false`), the hook is **not** installed automatically. Enable the setting to have the extension install/refresh a `prepare-commit-msg` hook into `.git/hooks/` on activation.
+By default (`copilot-budget.commitHook.enabled: false`), the hooks are **not** installed automatically. Enable the setting to have the extension install/refresh a `prepare-commit-msg` hook **and** a `post-commit` hook into `.git/hooks/` on activation.
 
 ### Data Flow
 
 1. **Extension tracks usage** — as you use GitHub Copilot, the extension detects new activity every 30 seconds and updates an internal stats object with per-model token counts and cost.
 2. **Tracking file is written** — on every stats update and on a 5-second refresh interval, the extension writes current stats to `.git/copilot-budget` in a key=value format. This file contains both raw stats and `TR_`-prefixed lines that encode the trailer data.
 3. **You commit** — when you run `git commit`, Git triggers the `prepare-commit-msg` hook.
-4. **Hook appends trailers** — the hook reads `.git/copilot-budget`, extracts all `TR_` lines, converts them to git trailers (e.g. `TR_Copilot-AI-Credits=42.31` becomes `Copilot-AI-Credits: 42.31`), and appends them to the commit message.
-5. **Hook resets the tracking file** — after appending, the hook truncates `.git/copilot-budget` to zero bytes so the next commit only includes usage since the last commit.
+4. **Hook appends trailers** — the hook reads `.git/copilot-budget`, extracts all `TR_` lines, converts them to git trailers (e.g. `TR_Copilot-AI-Credits=42.31` becomes `Copilot-AI-Credits: 42.31`), appends them to the commit message, and drops a `.git/copilot-budget.pending` marker. It does **not** truncate the tracking file yet.
+5. **Commit lands → `post-commit` resets the tracking file** — only once the commit is actually created does the `post-commit` hook truncate `.git/copilot-budget` to zero bytes (and remove the marker) so the next commit only includes usage since the last commit. If the commit is **cancelled** (e.g. you close the Commit dialog in git gui, quit the editor on an empty message, or a `commit-msg` hook rejects it), `post-commit` never runs — the tracking file is left intact and nothing is lost ([#10](https://github.com/mooracle/copilot-budget/issues/10)).
 6. **Stats persist** — within 5 seconds the extension detects the truncation, rebases the tracker so future writes only include usage after the commit, and re-writes the tracking file with any new activity already captured by the in-memory tracker.
 
 ### What Gets Appended
@@ -159,7 +159,7 @@ If the hook was not auto-installed (e.g. `commitHook.enabled` is `false`), insta
 - **Command Palette** → `Copilot Budget: Install Commit Hook`
 - **Command Palette** → `Copilot Budget: Uninstall Commit Hook`
 
-> **Note:** If a `prepare-commit-msg` hook already exists that was not installed by Copilot Budget, the install command will not overwrite it. Remove the existing hook first or integrate manually.
+> **Note:** Both the `prepare-commit-msg` and `post-commit` hooks are installed (and removed) together. If a hook of either name already exists that was not installed by Copilot Budget, the install command will not overwrite it. Remove the existing hook first or integrate manually.
 
 ### Worktree Support
 
