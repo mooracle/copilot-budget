@@ -102,7 +102,7 @@
             "boolean"
           ],
           "default": "Copilot-AI-Credits",
-          "markdownDescription": "Git trailer key for total AI Credits (1 AIC = $0.01, plan-invariant). Set to `false` to disable."
+          "markdownDescription": "Git trailer key for total AI Credits (1 AIC = $0.01). Set to `false` to disable."
         },
         "copilot-budget.commitHook.trailers.aiCreditsPerModel": {
           "type": [
@@ -120,7 +120,7 @@
           ],
           "default": "aic",
           "scope": "application",
-          "markdownDescription": "Unit used for status bar, tooltip, and panel. `aic` shows AI Credits (1 AIC = $0.01, plan-invariant). `usd` converts to dollars at the same rate. Commit trailer values are always bare numbers (AIC for `Copilot-AI-Credits`, USD for the opt-in `Copilot-Est-Cost`) regardless of this setting. Stored at user (application) scope so the choice persists across windows."
+          "markdownDescription": "Unit used for status bar, tooltip, and panel. `aic` shows AI Credits (1 AIC = $0.01). `usd` converts to dollars at the same rate. Commit trailer values are always bare numbers (AIC for `Copilot-AI-Credits`, USD for the opt-in `Copilot-Est-Cost`) regardless of this setting. Stored at user (application) scope so the choice persists across windows."
         }
       }
     }
