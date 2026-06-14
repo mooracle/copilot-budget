@@ -7,7 +7,7 @@ Track GitHub Copilot token usage and estimated cost, and optionally append AI bu
 ## Features
 
 - **Measured cost tracking** — reads per-span token counts (input, output, cache_read, cache_creation) from Copilot Chat's OTel SQLite store (`agent-traces.db`) and computes cost in AI Credits against the published per-million-token rate card. The upstream OTel exporter is auto-enabled at Workspace scope on first activation; a one-time reload may be required before Copilot Chat starts emitting spans.
-- **AI Credits** — cost is reported in AI Credits (1 AIC = $0.01). AIC is the plan-invariant metric — accurate across individual, Pro, Business, and Enterprise users regardless of negotiated USD discounts.
+- **AI Credits** — cost is reported in AI Credits (1 AIC = $0.01), the unit GitHub Copilot now bills in. The per-token AIC cost is the same for everyone — plans differ only in how many AI Credits are included, an allowance this extension doesn't track.
 - **Per-model breakdown** — see AIC cost and input / cache_read / cache_creation / output tokens grouped by model (GPT, Claude, Gemini, etc.) in the status bar tooltip and quick pick panel.
 - **Upstream rate card** — per-model rates are a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml), shipped with the extension.
 - **Commit hook integration** — automatically appends configurable git trailers (`Copilot-AI-Credits` on by default; `Copilot-Est-Cost` USD trailer and per-model breakdown are opt-in) to commit messages. Trailer keys can be renamed or individually disabled via settings.
@@ -59,7 +59,7 @@ After auto-enable, Copilot Chat typically needs a window reload before it begins
 
 AIC cost is `(input × rate.input + cache_read × rate.cached_input + cache_creation × (rate.cache_creation ?? rate.input) + output × rate.output) / 1,000,000` per model, summed across models. The upstream rate card publishes USD per million tokens; the extension converts those rates to AIC (× 100) once at load time, so all in-extension cost values are AIC. If the opt-in `Copilot-Est-Cost` trailer is enabled, the USD equivalent is computed from AIC ÷ 100 at trailer-write time.
 
-AIC is plan-invariant — accurate across individual, Pro, Business, and Enterprise plans. GitHub Copilot's post-2026-06-01 billing is denominated in AIC directly, so AIC matches what Copilot bills regardless of any negotiated USD pricing.
+GitHub Copilot's post-2026-06-01 billing is denominated in AI Credits directly, so the measured AIC matches what Copilot bills. The per-token AIC rate is identical on every plan — plans differ only in the amount of AI Credits included (an allowance this extension does not track).
 
 ### Example `settings.json`
 
@@ -139,7 +139,7 @@ The per-model trailer value is a comma-separated list of `<model>=<aic>` entries
 
 The hook silently does nothing when:
 
-- The commit source is `merge` or `commit` (amend / reword) — to avoid polluting non-standard commits.
+- The commit source is `merge` (merge commits) or `commit` (`git commit --amend`, `-c`, `-C`) — to avoid appending trailers to non-standard commits.
 - The tracking file (`.git/copilot-budget`) does not exist.
 - The tracking file contains no `TR_` lines — no enabled trailers or no Copilot usage to report.
 
@@ -175,10 +175,10 @@ The [`examples/`](examples/) directory contains sample integrations that consume
 
 1. **Auto-enable** — On activation, the extension calls `inspect(github.copilot.chat.otel.dbSpanExporter.enabled)` and writes `true` at Workspace scope only if both `globalValue` and `workspaceValue` are `undefined`. Explicit user choices are preserved.
 2. **Discovery** — The extension scans the current window's `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/` directory (primary) and `workspaceStorage/<hash>/chatSessions/` (legacy fallback) for session-id stems, deduped by stem. These ids are used as the SQL session-id filter on every read. Each open window tracks its own workspace's usage independently. When VS Code is opened with no folder, no scanning is performed and the status bar shows a visible "no workspace" indicator instead. All discovery activity is logged to the "Copilot Budget" Output channel.
-3. **Reading spans** — The extension opens `<globalStorage>/github.copilot-chat/agent-traces.db` read-only via Node 22's `node:sqlite` and runs a single grouped query: `SELECT request_model, COUNT(*), SUM(input_tokens), SUM(output_tokens), SUM(cached_tokens), SUM(cache_creation_tokens) FROM spans WHERE operation_name = 'chat' AND end_time_ms > ? AND (chat_session_id IN (?, …) OR EXISTS (parent_chat_session_id IN (?, …)))`. The OR-on-parent clause attributes background "title" subagent spans (gpt-4o-mini) to the session that spawned them.
+3. **Reading spans** — The extension opens `<globalStorage>/github.copilot-chat/agent-traces.db` read-only via Node 22's `node:sqlite` and runs a single grouped query over `spans`: `SELECT request_model, COUNT(*), SUM(input_tokens), SUM(output_tokens), SUM(cached_tokens) … WHERE operation_name = 'chat' AND end_time_ms > ? AND (chat_session_id IN (?, …) OR EXISTS (parent_chat_session_id IN (?, …)))`. Cache-creation tokens are summed from a `LEFT JOIN span_attributes` on `gen_ai.usage.cache_creation.input_tokens` (there is no `cache_creation_tokens` column on `spans`). The OR-on-parent clause attributes background "title" subagent spans (gpt-4o-mini) to the session that spawned them.
 4. **Baseline & Restore** — A `MAX(end_time_ms)` snapshot is taken at startup as the high-water mark so only new activity is counted. If a tracking file from a previous session exists, those stats are restored and merged for continuity across VS Code restarts.
 5. **Polling** — Every 30 seconds the extension re-queries the database since the fixed construction-time baseline and computes the per-scan delta in-memory.
-6. **Cost computation** — Per-model rates are loaded from the bundled `models-and-pricing.yml` (mirror of `github/docs` upstream). The rate card publishes USD per million tokens; rates are converted to AIC (× 100) once at load time, so all in-extension cost values are AIC. `request_model` values with no rate-card entry (`NULL` or unknown ids) contribute zero cost.
+6. **Cost computation** — Per-model rates are loaded at runtime from the bundled `models-and-pricing.json`, generated at build time from `data/models-and-pricing.yml` (a byte-identical mirror of `github/docs` upstream), so the runtime bundle has no `js-yaml` dependency. The rate card publishes USD per million tokens; rates are converted to AIC (× 100) once at load time, so all in-extension cost values are AIC. `request_model` values with no rate-card entry (`NULL` or unknown ids) contribute zero cost.
 7. **Commit hook** — See [Commit Hook Workflow](#commit-hook-workflow) above for the full details.
 
 ## Supported Editors
