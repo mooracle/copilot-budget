@@ -5,6 +5,23 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-27
+
+Refreshes the rate card from `github/docs` upstream. Twelve models that previously cost nothing now price correctly — Claude Opus 5, Sonnet 5, Opus 4.8, Opus 4.8 (fast mode), Fable 5, the GPT-5.6 family (Luna, Sol, Terra), Gemini 3.5 / 3.6 Flash, MAI-Code-1-Flash, and Kimi K2.7 Code. Upstream also restructured the table with per-tier pricing rows, which needed a loader fix: without it six models would have been billed at their long-context rate — roughly **2× the correct input price on every request, short prompts included**.
+
+### Fixed
+
+- **Tiered pricing no longer overwrites the default rate.** Upstream now lists OpenAI and Google models once per pricing tier — a `Default` row plus a pricier `Long context` row above a prompt-size `threshold`. `buildRateMap` wrote every row into the same key, so the long-context row (listed second) won: GPT-5.4, GPT-5.5, GPT-5.6 Luna/Sol/Terra, and Gemini 3.1 Pro would each have priced at ~2× input and ~1.5× output. Non-default tiers are now skipped and any residual duplicate key keeps the first entry, both with a log line. Cost is reported at the Default tier because OTel gives per-model token *sums*, not per-request prompt sizes, so a prompt-size threshold cannot be attributed after the fact — the long-context surcharge is under-reported for prompts past the threshold rather than over-applied to all of them.
+
+### Changed
+
+- **Rate card refreshed** — `data/models-and-pricing.yml` re-mirrored from upstream (22 → 29 priced models). No surviving model changed price.
+- **Retired upstream: GPT-4.1, GPT-5.2, GPT-5.2-Codex, Grok Code Fast 1 (the whole xAI provider), and Goldeneye.** GitHub dropped these from the published pricing table, so they now resolve to zero cost rather than a stale rate. Tokens are still counted; only costing is skipped.
+
+### Added
+
+- **Shipped-rate-card test coverage** — `tokenRates.test.ts` now asserts against `data/models-and-pricing.yml` itself, not just the frozen fixture: every tiered model resolves to its Default-tier rate (and explicitly *not* the long-context rate), `Default` rows never collide on a key, and no entry carries a zero rate or an unstripped footnote marker. An upstream schema change that would silently misprice now fails the suite instead of shipping.
+
 ## [2.0.4] - 2026-06-13
 
 Fixes [#10](https://github.com/mooracle/copilot-budget/issues/10): the counter no longer resets when a commit is cancelled. `prepare-commit-msg` runs before the commit is finalized, so truncating the tracking file there reset usage even when the commit never happened — git gui's Commit dialog, a rejected `commit-msg` hook, or quitting the editor on an empty message. Truncation now lives in a new `post-commit` hook that only fires once a commit actually lands. Cancelled attempts (and any number of them) leave the counter intact, and accumulated usage flushes to the next real commit exactly once.

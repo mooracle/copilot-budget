@@ -79,6 +79,148 @@ describe('loadRateCard schema robustness', () => {
   });
 });
 
+describe('tiered pricing (OpenAI/Google long-context rows)', () => {
+  // Upstream lists tiered models twice: a Default row and a pricier
+  // "Long context" row above a prompt-size threshold. We can only price the
+  // Default tier (OTel gives per-model token sums, not per-request prompt
+  // sizes), so the long-context row must never win the key.
+  function loadTiered(): ReturnType<typeof loadRateCard> {
+    const tmp = path.join(os.tmpdir(), `rate-card-tier-${process.pid}.json`);
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify([
+        {
+          model: 'Tiered Model',
+          provider: 'openai',
+          threshold: '≤ 272K',
+          tier: 'Default',
+          input: '$2.50',
+          cached_input: '$0.25',
+          output: '$15.00',
+        },
+        {
+          model: 'Tiered Model',
+          provider: 'openai',
+          threshold: '> 272K',
+          tier: 'Long context',
+          input: '$5.00',
+          cached_input: '$0.50',
+          output: '$22.50',
+        },
+      ]),
+    );
+    resetRateCardForTesting();
+    const map = loadRateCard(tmp, true);
+    fs.unlinkSync(tmp);
+    return map;
+  }
+
+  it('keeps the Default tier and drops the Long context row', () => {
+    const map = loadTiered();
+    const card = map.get('tiered-model');
+    expect(card).toBeDefined();
+    expect(card?.input).toBeCloseTo(250.0, 9);
+    expect(card?.cachedInput).toBeCloseTo(25.0, 9);
+    expect(card?.output).toBeCloseTo(1500.0, 9);
+  });
+
+  it('collapses the tier rows into a single entry', () => {
+    expect(loadTiered().size).toBe(1);
+  });
+
+  it('keeps the first entry when a duplicate carries no tier field', () => {
+    const tmp = path.join(os.tmpdir(), `rate-card-dupe-${process.pid}.json`);
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify([
+        { model: 'Dupe', provider: 'anthropic', input: '$1.00', cached_input: '$0.10', output: '$5.00' },
+        { model: 'Dupe', provider: 'anthropic', input: '$9.00', cached_input: '$0.90', output: '$45.00' },
+      ]),
+    );
+    resetRateCardForTesting();
+    const map = loadRateCard(tmp, true);
+    fs.unlinkSync(tmp);
+    expect(map.size).toBe(1);
+    expect(map.get('dupe')?.input).toBeCloseTo(100.0, 9);
+  });
+
+  it('keeps untiered providers untouched', () => {
+    const tmp = path.join(os.tmpdir(), `rate-card-untiered-${process.pid}.json`);
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify([
+        { model: 'No Tier', provider: 'anthropic', input: '$5.00', cached_input: '$0.50', output: '$25.00', cache_write: '$6.25' },
+      ]),
+    );
+    resetRateCardForTesting();
+    const map = loadRateCard(tmp, true);
+    fs.unlinkSync(tmp);
+    expect(map.get('no-tier')?.input).toBeCloseTo(500.0, 9);
+    expect(map.get('no-tier')?.cacheCreation).toBeCloseTo(625.0, 9);
+  });
+});
+
+describe('shipped rate card (data/models-and-pricing.yml)', () => {
+  // The fixture above is frozen so downstream suites stay stable; this block
+  // exercises the card we actually ship, so an upstream schema change that
+  // would silently misprice models fails here instead of in the field.
+  const yaml = require('js-yaml');
+  const YAML_PATH = path.join(__dirname, '..', 'data', 'models-and-pricing.yml');
+  const entries: Array<Record<string, unknown>> = yaml.load(fs.readFileSync(YAML_PATH, 'utf-8'));
+
+  const isDefault = (e: Record<string, unknown>): boolean =>
+    typeof e.tier !== 'string' || ['', 'default'].includes(String(e.tier).trim().toLowerCase());
+
+  let shipped: ReturnType<typeof loadRateCard>;
+
+  beforeEach(() => {
+    const tmp = path.join(os.tmpdir(), `rate-card-shipped-${process.pid}.json`);
+    fs.writeFileSync(tmp, JSON.stringify(entries));
+    resetRateCardForTesting();
+    shipped = loadRateCard(tmp, true);
+    fs.unlinkSync(tmp);
+  });
+
+  it('parses every entry it does not deliberately skip', () => {
+    const defaultRows = entries.filter(isDefault);
+    const uniqueDefaultKeys = new Set(defaultRows.map((e) => normalizeModelId(String(e.model))));
+    // No two Default rows may collide on a key — if upstream ever adds one,
+    // this fails loudly rather than silently dropping a price.
+    expect(defaultRows.length).toBe(uniqueDefaultKeys.size);
+    expect(shipped.size).toBe(uniqueDefaultKeys.size);
+  });
+
+  it('prices every tiered model at its Default-tier rate', () => {
+    const tiered = entries.filter((e) => String(e.tier ?? '').trim().toLowerCase() === 'long context');
+    expect(tiered.length).toBeGreaterThan(0);
+    for (const longRow of tiered) {
+      const key = normalizeModelId(String(longRow.model));
+      const defaultRow = entries.find(
+        (e) =>
+          normalizeModelId(String(e.model)) === key &&
+          String(e.tier ?? '').trim().toLowerCase() === 'default',
+      );
+      expect(defaultRow).toBeDefined();
+      const card = getRateCard(key);
+      expect(card).not.toBeNull();
+      const expected = parseFloat(String(defaultRow!.input).replace('$', '')) * 100;
+      expect(card?.input).toBeCloseTo(expected, 9);
+      // and specifically NOT the long-context rate
+      const longRate = parseFloat(String(longRow.input).replace('$', '')) * 100;
+      expect(card?.input).not.toBeCloseTo(longRate, 9);
+    }
+  });
+
+  it('exposes no duplicate keys and no zero-rate entries', () => {
+    for (const [key, card] of shipped) {
+      expect(card.input).toBeGreaterThan(0);
+      expect(card.output).toBeGreaterThan(0);
+      expect(card.displayName).not.toMatch(/\[\^/);
+      expect(key).toBe(normalizeModelId(key));
+    }
+  });
+});
+
 describe('getRateCard', () => {
   it('returns the rate card for an exact normalized id (AIC per 1M tokens)', () => {
     const card = getRateCard('claude-sonnet-4.6');

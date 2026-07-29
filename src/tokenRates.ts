@@ -34,6 +34,8 @@ interface RawRateEntry {
   cached_input?: unknown;
   output?: unknown;
   cache_write?: unknown;
+  tier?: unknown;
+  threshold?: unknown;
 }
 
 const KNOWN_PREFIXES = ['copilot/', 'copilotcli/', 'claude-code/'];
@@ -47,6 +49,27 @@ function stripFootnotes(name: string): string {
 
 export function normalizeModelId(rawName: string): string {
   return stripFootnotes(rawName).trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+/**
+ * Upstream lists OpenAI and Google models once per pricing tier — a `Default`
+ * row plus a `Long context` row that roughly doubles the rate above a prompt-size
+ * `threshold` (e.g. GPT-5.4 at ≤272K vs >272K input tokens). Providers without
+ * tiered pricing (Anthropic, Microsoft, GitHub, open-weight) omit the field.
+ *
+ * We price everything at the Default tier: OTel gives us per-model token *sums*
+ * across many requests, so a per-request prompt-size threshold cannot be
+ * attributed after the fact. That under-reports the surcharge for prompts past
+ * the threshold, which is strictly better than the alternative — letting the
+ * long-context row overwrite the default one and over-report every short prompt
+ * by ~2x.
+ */
+function isDefaultTier(tier: unknown): boolean {
+  if (typeof tier !== 'string') {
+    return true;
+  }
+  const normalized = tier.trim().toLowerCase();
+  return normalized === '' || normalized === 'default';
 }
 
 function parsePrice(value: unknown): number | null {
@@ -82,9 +105,17 @@ function buildRateMap(entries: RawRateEntry[]): Map<string, RateCard> {
       log(`tokenRates: skipping entry missing required keys: ${JSON.stringify(entry)}`);
       continue;
     }
+    const key = normalizeModelId(rawModel);
+    if (!isDefaultTier(entry.tier)) {
+      log(`tokenRates: skipping non-default pricing tier for ${key} (tier=${String(entry.tier)}, threshold=${String(entry.threshold)})`);
+      continue;
+    }
+    if (map.has(key)) {
+      log(`tokenRates: duplicate rate entry for ${key}; keeping the first and ignoring the rest`);
+      continue;
+    }
     const cacheCreation = parsePrice(entry.cache_write);
     const displayName = stripFootnotes(rawModel).trim();
-    const key = normalizeModelId(rawModel);
     const card: RateCard = {
       input: input * USD_TO_AIC,
       cachedInput: cachedInput * USD_TO_AIC,
