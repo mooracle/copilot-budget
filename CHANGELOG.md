@@ -5,6 +5,23 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-07-29
+
+Dev-dependency maintenance. **No user-facing or runtime change** — the extension ships zero runtime dependencies, so none of these advisories were ever reachable from installed code. Clears the two high-severity Dependabot alerts that were actually fixable: 3 distinct root advisories → 1.
+
+### Changed
+
+- **`js-yaml` `^4.1.1` → `^4.3.0`** (build/test only, via `esbuild.js`, `jest.globalSetup.js`, and `tokenRates.test.ts`). Fixes GHSA-h67p-54hq-rp68 / GHSA-52cp-r559-cp3m (quadratic-complexity DoS via YAML merge-key alias chains). Note the open Dependabot PR targeted 4.2.0, which is *itself* inside the advisory's `4.0.0 - 4.2.0` vulnerable range — 4.3.0 is the first fixed 4.x.
+- **`@babel/core` → 7.29.7** (transitive, under jest). Fixes GHSA-4x5r-pxfx-6jf8 (arbitrary file read via `sourceMappingURL`).
+- **`js-yaml` 3.15.0** (transitive, under `@istanbuljs/load-nyc-config`) — picks up the 3.x backport, above the advisory's `<=3.14.2` range.
+- **Routine minor bumps**: `eslint` `^10.4.0` → `^10.8.0`, `ts-jest` `^29.4.9` → `^29.4.12`, `typescript-eslint` `^8.59.3` → `^8.65.0`.
+
+### Known issue
+
+- **`brace-expansion` (GHSA-3jxr-9vmj-r5cp / GHSA-mh99-v99m-4gvg, high) is intentionally not force-patched.** The fix exists only in 5.0.8; there is no patched 1.x or 2.x release. The two vulnerable copies are pinned by `minimatch@3` (`^1.1.7`, via `test-exclude` → `babel-plugin-istanbul` → ts-jest coverage) and `minimatch@9` (`^2.0.2`, via `glob@10` → `@jest/reporters`). Forcing 5.0.8 through an `overrides` entry makes `npm audit` report zero vulnerabilities **while silently breaking the toolchain**: 5.x changed the CommonJS shape from `module.exports = expand` to `{ expand, EXPANSION_MAX, EXPANSION_MAX_LENGTH }`, so both `minimatch@3` (`expand is not a function`) and `minimatch@9` (`brace_expansion_1.default is not a function`) throw on any brace pattern. Verified empirically, then reverted. The residual risk is a dev-only DoS in glob expansion, reachable only through attacker-controlled glob patterns — ours come from committed jest/eslint config. `npm audit` still reports 20 highs; all 20 are chain propagation from this single root. Revisit when `minimatch` ships a release depending on `brace-expansion@^5.0.8`.
+
+- Deliberately **not** bumped: `typescript` (`^6.0.3`; 7.0.2 is a major), `@types/node` (`^25.8.0`; 26.x is a major), and `@types/vscode` (`^1.103.0` — pinned to `engines.vscode` on purpose, so the compiler cannot accept APIs missing from the oldest supported VS Code).
+
 ## [2.1.0] - 2026-07-27
 
 Refreshes the rate card from `github/docs` upstream. Twelve models that previously cost nothing now price correctly — Claude Opus 5, Sonnet 5, Opus 4.8, Opus 4.8 (fast mode), Fable 5, the GPT-5.6 family (Luna, Sol, Terra), Gemini 3.5 / 3.6 Flash, MAI-Code-1-Flash, and Kimi K2.7 Code. Upstream also restructured the table with per-tier pricing rows, which needed a loader fix: without it six models would have been billed at their long-context rate — roughly **2× the correct input price on every request, short prompts included**.
