@@ -5,6 +5,13 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Scheduled rate-card sync** (`.github/workflows/rate-card-sync.yml`). Every 48h the workflow re-mirrors `data/models-and-pricing.yml` from `github/docs`; if it changed it runs lint/test/compile, bumps the patch version, writes the CHANGELOG entry (`scripts/rate-card-changelog.mjs`: models added, repriced, retired), commits, and dispatches CI so the existing Release workflow publishes. New GitHub prices now reach the Marketplace within two days with no hand-cut release. `workflow_dispatch` with `dry_run` exercises everything up to the commit.
+- CI accepts `workflow_dispatch` so the sync can start it — pushes made with `GITHUB_TOKEN` never fire `on: push`.
+
 ## [2.1.3] - 2026-09-12
 
 Refreshes the rate card from `github/docs` upstream. Eight models that previously cost nothing now price correctly — Claude Fable 5.1, GPT-6 Astra, Gemini 3.7 / 3.8 Flash, Grok 4.5 / 4.6 (xAI is back), MAI-Code-1.1-Flash, and Kimi K3. Four existing models got cheaper: the GPT-5.6 family (Luna −80%, Sol −20% input / −33% output, Terra −20%) and Gemini 3.6 Flash (−50%). Also a routine dev-dependency refresh that clears every open `npm audit` advisory. (2.1.2 was tagged but never reached the Marketplace — the publish request timed out — so this release carries its content; there is no 2.1.2 on the Marketplace or in GitHub Releases.)

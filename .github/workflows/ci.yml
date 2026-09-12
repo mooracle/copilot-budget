@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Started by rate-card-sync.yml after it pushes a card refresh: pushes made
+  # with GITHUB_TOKEN fire no `on: push`, so CI (and Release, via workflow_run)
+  # would otherwise never see the bump.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1,0 +1,140 @@
+name: rate-card sync
+
+# Every 48h: re-mirror data/models-and-pricing.yml from github/docs, and if it
+# changed, cut a patch release so the new prices reach users. The rate card is
+# bundled into the .vsix at build time, so a price change is invisible until a
+# release ships it.
+#
+#   update-rates -> diff -> lint/test/compile -> bump patch + CHANGELOG -> commit
+#   -> dispatch CI -> (workflow_run) Release publishes to the Marketplace
+#
+# Upstream retires models routinely (the table is GitHub's, not ours), so a
+# removed model is not a failure here — it is listed in the CHANGELOG entry and
+# in the job summary, and prices at zero from then on, same as when a human
+# runs `npm run update-rates`. The shipped-rate-card tests in tokenRates.test.ts
+# are what guard against a schema change that would misprice.
+#
+# Every step runs on the default GITHUB_TOKEN; no extra secrets. A push made
+# with that token never fires another workflow's `on: push`, so CI is started
+# explicitly with `gh workflow run` — workflow_dispatch is the documented
+# exception. Release then chains off CI's `workflow_run` as it does for a
+# hand-pushed bump. The Marketplace PAT stays in release.yml only.
+on:
+  schedule:
+    # Every 48h at 07:00 UTC — odd days of the month, so a month boundary can
+    # put two runs on consecutive days. Harmless: an unchanged card commits
+    # nothing and cuts no release.
+    - cron: '0 7 */2 * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run everything but stop before commit/push (prints the would-be CHANGELOG entry)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # push the refreshed card and version bump
+  actions: write  # start ci.yml
+
+concurrency:
+  group: rate-card-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: refresh rate card and release if it changed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Keep the current card for the diff
+        run: cp data/models-and-pricing.yml "$RUNNER_TEMP/models-and-pricing.old.yml"
+
+      - name: Fetch upstream rate card
+        run: npm run update-rates
+
+      - name: Did the card change?
+        id: card
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- data/models-and-pricing.yml; then
+            echo "rate card unchanged"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git --no-pager diff --stat -- data/models-and-pricing.yml
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The shipped-rate-card block in tokenRates.test.ts reads the YAML on
+      # disk: tiered rows resolve to their Default rate, no zero rates, no
+      # unstripped footnotes, no key collisions. An upstream schema change that
+      # would misprice fails here instead of shipping.
+      - name: Lint, test, compile against the new card
+        if: steps.card.outputs.changed == 'true'
+        run: |
+          npm run lint
+          npm test
+          npm run compile
+
+      - name: Bump patch version and write the CHANGELOG entry
+        if: steps.card.outputs.changed == 'true'
+        id: bump
+        run: |
+          set -euo pipefail
+          cur=$(node -p "require('./package.json').version")
+          new=$(npm version patch --no-git-tag-version)
+          new="${new#v}"
+          echo "version: ${cur} -> ${new}"
+
+          # Ask the remote, not the clone: a shallow checkout carries no tags.
+          if git ls-remote --exit-code --tags origin "refs/tags/v${new}" >/dev/null; then
+            echo "::error::tag v${new} already exists — bump package.json by hand"
+            exit 1
+          fi
+
+          node scripts/rate-card-changelog.mjs \
+            "$RUNNER_TEMP/models-and-pricing.old.yml" data/models-and-pricing.yml "${new}" --write
+
+          {
+            echo "## Rate card changed — releasing v${new}"
+            echo
+            node scripts/rate-card-changelog.mjs \
+              "$RUNNER_TEMP/models-and-pricing.old.yml" data/models-and-pricing.yml "${new}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "version=${new}" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run — stop here
+        if: steps.card.outputs.changed == 'true' && inputs.dry_run
+        run: |
+          echo "::notice::dry_run — would release v${{ steps.bump.outputs.version }}; not committing"
+          git --no-pager diff --stat
+
+      - name: Commit and push
+        if: steps.card.outputs.changed == 'true' && !inputs.dry_run
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/models-and-pricing.yml package.json package-lock.json CHANGELOG.md
+          git commit -m "chore: refresh rate card, release ${{ steps.bump.outputs.version }}
+
+          Re-mirrored data/models-and-pricing.yml from github/docs. Released
+          automatically by .github/workflows/rate-card-sync.yml."
+          # Push to the ref this run is on: main on the schedule; a
+          # workflow_dispatch from a branch stays on that branch.
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # GITHUB_TOKEN pushes fire no `on: push`, so start CI by hand. Release
+      # chains off CI's workflow_run exactly as for a human bump.
+      - name: Start CI (Release chains off it)
+        if: steps.card.outputs.changed == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run ci.yml --ref "$GITHUB_REF_NAME"

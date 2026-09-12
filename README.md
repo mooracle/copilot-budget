@@ -198,7 +198,7 @@ Also works in remote environments (Codespaces, WSL, SSH Remote). The extension d
 
 ## Contributing
 
-The per-model rate card lives at `data/models-and-pricing.yml` and is a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml). When GitHub publishes new pricing, refresh the local copy with:
+The per-model rate card lives at `data/models-and-pricing.yml` and is a byte-identical mirror of [`github/docs:data/tables/copilot/models-and-pricing.yml`](https://github.com/github/docs/blob/main/data/tables/copilot/models-and-pricing.yml). A scheduled workflow (`rate-card-sync.yml`) re-mirrors it every 48 hours and, when prices change, cuts a patch release automatically so the new rates reach the Marketplace without a hand-cut release. To refresh by hand:
 
 ```bash
 npm run update-rates

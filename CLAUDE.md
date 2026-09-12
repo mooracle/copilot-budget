@@ -21,7 +21,7 @@ npm run package          # Create .vsix via @vscode/vsce
 npm run update-rates     # Refresh data/models-and-pricing.yml from github/docs upstream
 ```
 
-The rate card (`data/models-and-pricing.yml`) is a byte-identical mirror of `github/docs:data/tables/copilot/models-and-pricing.yml`. When GitHub publishes new pricing, run `npm run update-rates` and commit the updated YAML alongside the diff so reviewers see the change directly.
+The rate card (`data/models-and-pricing.yml`) is a byte-identical mirror of `github/docs:data/tables/copilot/models-and-pricing.yml`. It is refreshed automatically: `.github/workflows/rate-card-sync.yml` runs every 48h (and on `workflow_dispatch`, with a `dry_run` input), re-mirrors the file, and if it changed runs lint/test/compile, bumps the patch version, writes the CHANGELOG entry via `scripts/rate-card-changelog.mjs` (folding any parked `## [Unreleased]` section into the new version), commits, and dispatches CI so Release publishes. A manual refresh is still `npm run update-rates`; use the changelog script to describe the diff. Notes for the next release that are not rate changes go under `## [Unreleased]` in `CHANGELOG.md` so the sync picks them up.
 
 Debug: Press F5 in VS Code to launch Extension Development Host.
 
