@@ -5,6 +5,21 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-09-12
+
+Refreshes the rate card from `github/docs` upstream. Eight models that previously cost nothing now price correctly — Claude Fable 5.1, GPT-6 Astra, Gemini 3.7 / 3.8 Flash, Grok 4.5 / 4.6 (xAI is back), MAI-Code-1.1-Flash, and Kimi K3. Four existing models got cheaper: the GPT-5.6 family (Luna −80%, Sol −20% input / −33% output, Terra −20%) and Gemini 3.6 Flash (−50%). Also a routine dev-dependency refresh that clears every open `npm audit` advisory.
+
+### Changed
+
+- **Rate card refreshed** — `data/models-and-pricing.yml` re-mirrored from upstream (29 → 29 priced models; 37 rows including long-context tiers).
+  - Added: GPT-6 Astra, Claude Fable 5.1, Gemini 3.7 Flash, Gemini 3.8 Flash, Grok 4.5, Grok 4.6, MAI-Code-1.1-Flash, Kimi K3.
+  - Repriced: GPT-5.6 Luna `$1.00 / $0.10 / $6.00` → `$0.20 / $0.02 / $1.20`; GPT-5.6 Sol `$5.00 / $0.50 / $30.00` → `$4.00 / $0.40 / $20.00`; GPT-5.6 Terra `$2.50 / $0.25 / $15.00` → `$2.00 / $0.20 / $12.00`; Gemini 3.6 Flash `$1.50 / $0.15 / $7.50` → `$0.75 / $0.075 / $3.75` (input / cached input / output per 1M tokens, USD).
+  - **Retired upstream: Claude Sonnet 4.5, Claude Opus 4.5, Claude Opus 4.6, Gemini 2.5 Pro, Gemini 3 Flash, Gemini 3.1 Pro, MAI-Code-1-Flash, Raptor mini.** GitHub dropped these from the published pricing table, so they now resolve to zero cost rather than a stale rate. Tokens are still counted; only costing is skipped.
+  - Upstream now publishes an explicit `cache_write` rate for GPT-5.6 and later OpenAI families (GPT-5.6 Luna/Sol/Terra, GPT-6 Astra). Cache-creation tokens on those models are priced at that rate instead of falling back to the input rate. Older OpenAI rows carry `cache_write: Not applicable`, which the loader treats exactly like an absent field — no code change needed.
+- **Dev-dependency refresh** (build/test only; the extension ships zero runtime dependencies): `@types/node` `^25.8.0` → `^25.9.6`, `esbuild` `^0.28.1` → `^0.28.2`, `eslint` `^10.8.0` → `^10.10.0`, `jest` `^30.4.2` → `^30.5.1`, `js-yaml` `^4.3.0` → `^4.3.2`, `typescript-eslint` `^8.65.0` → `^8.70.0`.
+- **`npm audit` is clean (was 3 advisories: 2 high, 1 moderate).** `js-yaml` 4.3.2 / 3.15.2 fix GHSA-2883-xcg3-v3hh; `brace-expansion` now has patched 2.1.4 / 5.0.9 releases so the 2.1.1 known issue is resolved without an `overrides` hack — `minimatch` loads them fine, verified by the full lint/test/compile/package run; `@humanfs/node` 0.16.8 (under eslint) fixes GHSA-p498-v437-472g.
+- Deliberately **not** bumped: `typescript` (`^6.0.3`; 7.x is a major), `@types/node` 26.x (major), `js-yaml` 5.x (major), and `@types/vscode` (`^1.103.0` — pinned to `engines.vscode` on purpose).
+
 ## [2.1.1] - 2026-07-29
 
 Dev-dependency maintenance. **No user-facing or runtime change** — the extension ships zero runtime dependencies, so none of these advisories were ever reachable from installed code. Clears the two high-severity Dependabot alerts that were actually fixable: 3 distinct root advisories → 1.
