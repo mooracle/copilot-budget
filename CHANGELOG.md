@@ -5,9 +5,9 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.2] - 2026-09-12
+## [2.1.3] - 2026-09-12
 
-Refreshes the rate card from `github/docs` upstream. Eight models that previously cost nothing now price correctly — Claude Fable 5.1, GPT-6 Astra, Gemini 3.7 / 3.8 Flash, Grok 4.5 / 4.6 (xAI is back), MAI-Code-1.1-Flash, and Kimi K3. Four existing models got cheaper: the GPT-5.6 family (Luna −80%, Sol −20% input / −33% output, Terra −20%) and Gemini 3.6 Flash (−50%). Also a routine dev-dependency refresh that clears every open `npm audit` advisory.
+Refreshes the rate card from `github/docs` upstream. Eight models that previously cost nothing now price correctly — Claude Fable 5.1, GPT-6 Astra, Gemini 3.7 / 3.8 Flash, Grok 4.5 / 4.6 (xAI is back), MAI-Code-1.1-Flash, and Kimi K3. Four existing models got cheaper: the GPT-5.6 family (Luna −80%, Sol −20% input / −33% output, Terra −20%) and Gemini 3.6 Flash (−50%). Also a routine dev-dependency refresh that clears every open `npm audit` advisory. (2.1.2 was tagged but never reached the Marketplace — the publish request timed out — so this release carries its content; there is no 2.1.2 on the Marketplace or in GitHub Releases.)
 
 ### Changed
 
@@ -19,6 +19,7 @@ Refreshes the rate card from `github/docs` upstream. Eight models that previousl
 - **Dev-dependency refresh** (build/test only; the extension ships zero runtime dependencies): `@types/node` `^25.8.0` → `^25.9.6`, `esbuild` `^0.28.1` → `^0.28.2`, `eslint` `^10.8.0` → `^10.10.0`, `jest` `^30.4.2` → `^30.5.1`, `js-yaml` `^4.3.0` → `^4.3.2`, `typescript-eslint` `^8.65.0` → `^8.70.0`.
 - **`npm audit` is clean (was 3 advisories: 2 high, 1 moderate).** `js-yaml` 4.3.2 / 3.15.2 fix GHSA-2883-xcg3-v3hh; `brace-expansion` now has patched 2.1.4 / 5.0.9 releases so the 2.1.1 known issue is resolved without an `overrides` hack — `minimatch` loads them fine, verified by the full lint/test/compile/package run; `@humanfs/node` 0.16.8 (under eslint) fixes GHSA-p498-v437-472g.
 - Deliberately **not** bumped: `typescript` (`^6.0.3`; 7.x is a major), `@types/node` 26.x (major), `js-yaml` 5.x (major), and `@types/vscode` (`^1.103.0` — pinned to `engines.vscode` on purpose).
+- **Release workflow no longer pushes the git tag itself.** `softprops/action-gh-release` already creates the tag when it creates the GitHub Release, and it runs *after* the Marketplace publish. Previously the tag was pushed before publishing, so a transient Marketplace timeout (which is exactly what sank 2.1.2) left an orphan tag that made every re-run skip with "tag already exists". Now a failed publish leaves nothing behind and a plain re-run retries the whole release.
 
 ## [2.1.1] - 2026-07-29
 

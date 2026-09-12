@@ -53,19 +53,16 @@ jobs:
         if: steps.check.outputs.should_release == 'true'
         run: npx @vscode/vsce package --no-dependencies
 
-      - name: Create git tag
-        if: steps.check.outputs.should_release == 'true'
-        run: |
-          git tag "v${{ steps.check.outputs.version }}"
-          git push origin "v${{ steps.check.outputs.version }}"
-
       - name: Publish to VS Code Marketplace
         if: steps.check.outputs.should_release == 'true'
         run: npx @vscode/vsce publish --no-dependencies --packagePath *.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
-      - name: Upload VSIX to GitHub Release
+      # Creates the v<version> tag as a side effect (tag_name does not exist yet),
+      # so a failed Marketplace publish leaves nothing behind and a plain re-run
+      # retries the whole release.
+      - name: Create GitHub Release (tags the commit)
         if: steps.check.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
