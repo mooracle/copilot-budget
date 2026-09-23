@@ -5,12 +5,20 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.4] - 2026-09-23
 
 ### Added
 
 - **Scheduled rate-card sync** (`.github/workflows/rate-card-sync.yml`). Every 48h the workflow re-mirrors `data/models-and-pricing.yml` from `github/docs`; if it changed it runs lint/test/compile, bumps the patch version, writes the CHANGELOG entry (`scripts/rate-card-changelog.mjs`: models added, repriced, retired), commits, and dispatches CI so the existing Release workflow publishes. New GitHub prices now reach the Marketplace within two days with no hand-cut release. `workflow_dispatch` with `dry_run` exercises everything up to the commit.
 - CI accepts `workflow_dispatch` so the sync can start it — pushes made with `GITHUB_TOKEN` never fire `on: push`.
+
+Rate card refreshed from `github/docs` upstream (4 newly priced; 29 → 33 priced models). Released automatically by `rate-card-sync.yml`.
+
+### Changed
+
+- **Rate card refreshed** — `data/models-and-pricing.yml` re-mirrored from upstream.
+  - Added: GPT-6 Luna, GPT-6 Sol, Claude Opus 5.5, Grok 4.7.
+
 
 ## [2.1.3] - 2026-09-12
 
