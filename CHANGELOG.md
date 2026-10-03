@@ -5,6 +5,15 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.7] - 2026-10-03
+
+Rate card refreshed from `github/docs` upstream (4 retired; 35 → 31 priced models). Released automatically by `rate-card-sync.yml`.
+
+### Changed
+
+- **Rate card refreshed** — `data/models-and-pricing.yml` re-mirrored from upstream.
+  - **Retired upstream: Claude Opus 4.7, Gemini 3.5 Flash, Gemini 3.6 Flash, Kimi K2.7 Code.** GitHub dropped these from the published pricing table, so they now resolve to zero cost rather than a stale rate. Tokens are still counted; only costing is skipped.
+
 ## [2.1.6] - 2026-10-01
 
 Rate card refreshed from `github/docs` upstream (1 newly priced; 34 → 35 priced models). Released automatically by `rate-card-sync.yml`.
