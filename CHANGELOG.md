@@ -5,6 +5,16 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.8] - 2026-10-09
+
+Rate card refreshed from `github/docs` upstream (1 newly priced, 1 repriced; 31 → 32 priced models). Released automatically by `rate-card-sync.yml`.
+
+### Changed
+
+- **Rate card refreshed** — `data/models-and-pricing.yml` re-mirrored from upstream.
+  - Added: Claude Haiku 5.5.
+  - Repriced: Claude Sonnet 5.5 `$2.00 / $0.20 / $10.00 / cache write $2.5` → `$2.00 / $0.10 / $10.00 / cache write $2.5` (input / cached input / output per 1M tokens, USD).
+
 ## [2.1.7] - 2026-10-03
 
 Rate card refreshed from `github/docs` upstream (4 retired; 35 → 31 priced models). Released automatically by `rate-card-sync.yml`.
