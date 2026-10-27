@@ -5,6 +5,15 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.11] - 2026-10-27
+
+Rate card refreshed from `github/docs` upstream (1 newly priced; 28 → 29 priced models). Released automatically by `rate-card-sync.yml`.
+
+### Changed
+
+- **Rate card refreshed** — `data/models-and-pricing.yml` re-mirrored from upstream.
+  - Added: GPT-6.1 Terra.
+
 ## [2.1.10] - 2026-10-21
 
 Rate card refreshed from `github/docs` upstream (5 retired; 33 → 28 priced models). Released automatically by `rate-card-sync.yml`.
