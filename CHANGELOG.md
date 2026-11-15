@@ -5,6 +5,15 @@ All notable changes to Copilot Budget will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.13] - 2026-11-15
+
+Rate card refreshed from `github/docs` upstream (1 newly priced; 31 → 32 priced models). Released automatically by `rate-card-sync.yml`.
+
+### Changed
+
+- **Rate card refreshed** — `data/models-and-pricing.yml` re-mirrored from upstream.
+  - Added: Gemini 4 Hydrogen.
+
 ## [2.1.12] - 2026-11-11
 
 Rate card refreshed from `github/docs` upstream (2 newly priced; 29 → 31 priced models). Released automatically by `rate-card-sync.yml`.
